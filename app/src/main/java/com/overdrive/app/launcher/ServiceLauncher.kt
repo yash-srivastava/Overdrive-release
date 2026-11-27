@@ -150,26 +150,6 @@ class ServiceLauncher(
     }
     
     /**
-     * Send wake-up broadcasts to keep system active.
-     */
-    fun sendWakeUpBroadcasts(callback: LaunchCallback? = null) {
-        logManager.debug(TAG, "Sending wake-up broadcasts...")
-        
-        val commands = listOf(
-            "am broadcast -a com.byd.action.KEEP_ALIVE 2>/dev/null",
-            "input keyevent 224 2>/dev/null" // KEYCODE_WAKEUP
-        )
-        
-        executeCommandSequence(commands, 0, callback ?: object : LaunchCallback {
-            override fun onLog(message: String) {}
-            override fun onLaunched() {}
-            override fun onError(error: String) {}
-        }) {
-            callback?.onLaunched()
-        }
-    }
-    
-    /**
      * Turn screen off to reduce power consumption.
      */
     fun turnScreenOff(callback: LaunchCallback? = null) {
@@ -303,49 +283,6 @@ class ServiceLauncher(
                 override fun onError(error: String) {
                     logManager.error(TAG, "LocationSidecarService start failed: $error")
                     callback.onError("Service start failed: $error")
-                }
-            }
-        )
-    }
-    
-    /**
-     * Stop the LocationSidecarService via ADB shell.
-     */
-    fun stopLocationSidecarService(callback: LaunchCallback) {
-        logManager.info(TAG, "Stopping LocationSidecarService via shell...")
-        callback.onLog("Stopping LocationSidecarService via shell...")
-        
-        val cmd = "am stopservice -n $PACKAGE_NAME/.services.LocationSidecarService 2>&1"
-        
-        adbShellExecutor.execute(
-            command = cmd,
-            callback = object : AdbShellExecutor.ShellCallback {
-                override fun onSuccess(output: String) {
-                    logManager.info(TAG, "LocationSidecarService stop result: ${output.trim()}")
-                    callback.onLog("Service stop result: ${output.trim()}")
-                    callback.onLaunched()
-                }
-                
-                override fun onError(error: String) {
-                    logManager.error(TAG, "LocationSidecarService stop failed: $error")
-                    callback.onError("Service stop failed: $error")
-                }
-            }
-        )
-    }
-    
-    /**
-     * Check if LocationSidecarService is running.
-     */
-    fun isLocationSidecarRunning(callback: (Boolean) -> Unit) {
-        adbShellExecutor.execute(
-            command = "dumpsys activity services $PACKAGE_NAME/.services.LocationSidecarService | grep -i 'ServiceRecord'",
-            callback = object : AdbShellExecutor.ShellCallback {
-                override fun onSuccess(output: String) {
-                    callback(output.trim().isNotEmpty() && !output.contains("app=null"))
-                }
-                override fun onError(error: String) {
-                    callback(false)
                 }
             }
         )

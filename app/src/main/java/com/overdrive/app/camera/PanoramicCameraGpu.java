@@ -45,48 +45,6 @@ public class PanoramicCameraGpu {
     private static final int PHYSICAL_CAMERA_ID = 1;
     private static final int MAX_CAMERA_ID = 5;     // Probe camera IDs 0-5
 
-    /** Sentry-restart straddle token. The CameraDaemon dilink4 ACC-OFF
-     *  handler acquires this BEFORE calling gpuPipeline.stop(), so the
-     *  BydApaViewpointHelper observer set never goes empty during the
-     *  close+gate+reopen window. Releases automatically on ACC ON or after
-     *  the new pipeline registers its own per-instance token (whichever
-     *  comes first). Mirrors oem's behaviour where the FlameoutService
-     *  keeps no observer of its own but the new C5319i registers its
-     *  fresh C5920a into C6498a.observerSet during the reopen, BEFORE the
-     *  caller's own MainService-side C5320a was released — so the set
-     *  stays non-empty across the whole flow.
-     *
-     *  We approximate that by acquiring the bridge token explicitly at
-     *  ACC-OFF (before stop) and releasing it explicitly after start
-     *  completes. Use a static singleton — there's only ever one ACC-OFF
-     *  in flight per process. */
-    private static final Object SENTRY_BRIDGE_TOKEN = new Object() {
-        @Override public String toString() { return "sentry-bridge"; }
-    };
-    private static volatile boolean sentryBridgeHeld = false;
-
-    /** Called by CameraDaemon at ACC-OFF, BEFORE gpuPipeline.stop().
-     *  Idempotent. */
-    public static void acquireSentryBridgeViewpoint() {
-        if (sentryBridgeHeld) {
-            logger.info("sentry-bridge token already held");
-            return;
-        }
-        BydApaViewpointHelper.acquire(SENTRY_BRIDGE_TOKEN);
-        sentryBridgeHeld = true;
-        logger.info("sentry-bridge viewpoint token acquired (straddling stop+reopen)");
-    }
-
-    /** Called by CameraDaemon AFTER gpuPipeline.start() returns successfully
-     *  (the new pipeline instance has acquired its own per-instance token).
-     *  Also called on ACC ON as a safety net. Idempotent. */
-    public static void releaseSentryBridgeViewpoint() {
-        if (!sentryBridgeHeld) return;
-        BydApaViewpointHelper.release(SENTRY_BRIDGE_TOKEN);
-        sentryBridgeHeld = false;
-        logger.info("sentry-bridge viewpoint token released");
-    }
-
     // AVMCamera surface mode — 0 works on Seal, Atto 1 may need different value
     // Set via setCameraSurfaceMode() before start() for per-model override.
     // On the oem SurfaceTexture path this same value is the previewIndex
@@ -918,7 +876,6 @@ public class PanoramicCameraGpu {
                     cameraObj = null;
                     if (cameraCoordinator != null) {
                         cameraCoordinator.resetEventCallbackState();
-                        cameraCoordinator.notifyPosCloseCamera();
                     }
                 }
                 attemptReacquireOnGlThread();
@@ -988,7 +945,6 @@ public class PanoramicCameraGpu {
                 cameraObj = null;
                 if (cameraCoordinator != null) {
                     cameraCoordinator.resetEventCallbackState();
-                    cameraCoordinator.notifyPosCloseCamera();
                 }
                 lastRealFrameTimeSt = 0L;
                 lastFrameTime = 0L;
@@ -1361,6 +1317,17 @@ public class PanoramicCameraGpu {
     // compareAndSet(false,true)==false and returns; only the winner runs the
     // close/open sequence and is responsible for clearing the flag.
     private final AtomicBoolean restartInProgress = new AtomicBoolean(false);
+    // Bumped each time a restart claims restartInProgress, so the recording manager can tell one
+    // restart episode from the next (#1001).
+    private final java.util.concurrent.atomic.AtomicLong restartEpisode =
+        new java.util.concurrent.atomic.AtomicLong();
+
+    /** Claims restartInProgress and starts a new restart episode; false if one already runs. */
+    private boolean claimRestart() {
+        if (!restartInProgress.compareAndSet(false, true)) return false;
+        restartEpisode.incrementAndGet();
+        return true;
+    }
     // Exact ownership fences for legacy startup/open work. AVMCamera.open() is
     // an uninterruptible vendor Binder call and publishes cameraObj before all
     // attach/start steps finish. stop() must not close that partial object or
@@ -1840,6 +1807,11 @@ public class PanoramicCameraGpu {
                 }
 
                 @Override
+                public void onCarViewTookStream() {
+                    noteCarViewTookStream();
+                }
+
+                @Override
                 public void onCameraError(int eventType) {
                     // Camera HAL error — but only restart if frames have actually stopped.
                     // On DiLink5.0, event 8 fires immediately after camera open (after event 1004)
@@ -2060,9 +2032,6 @@ public class PanoramicCameraGpu {
                             Object toClose = cameraObj;
                             cameraObj = null;
                             closeCameraForPath(toClose);
-                            if (cameraCoordinator != null) {
-                                cameraCoordinator.notifyPosCloseCamera();
-                            }
                         }
                     } catch (Throwable t) {
                         logger.warn("start: late camera close errored: " + t.getMessage());
@@ -2457,6 +2426,7 @@ public class PanoramicCameraGpu {
                 logger.debug("Downscaler initialized (probe path on its own thread)");
             }
         }
+        publishRoadFrameSource();
 
         if (USE_PASSIVE_APA_MODE) {
             // Port 0 is an opaque full-frame layout on these variants. Do not
@@ -2585,29 +2555,6 @@ public class PanoramicCameraGpu {
     }
     
     /**
-     * Initializes the stream scaler on the GL thread.
-     * 
-     * @param streamScaler GPU stream scaler to initialize
-     * @param streamEncoder Hardware encoder for streaming
-     */
-    public void initStreamScalerOnGlThread(com.overdrive.app.streaming.GpuStreamScaler streamScaler,
-                                          HardwareEventRecorderGpu streamEncoder) {
-        if (glHandler == null) {
-            logger.error("GL thread not started");
-            return;
-        }
-        
-        glHandler.post(() -> {
-            try {
-                streamScaler.init(eglCore, streamEncoder);
-                logger.info("Stream scaler initialized on GL thread");
-            } catch (Exception e) {
-                logger.error("Failed to initialize stream scaler on GL thread", e);
-            }
-        });
-    }
-    
-    /**
      * Gets the EGL core for initializing GPU components.
      * 
      * @return EGLCore instance (only valid after start() is called)
@@ -2634,6 +2581,7 @@ public class PanoramicCameraGpu {
         } else {
             createCameraImageReader();
         }
+        publishRoadFrameSource();
         logger.info("Camera consumer recreated for camera switch");
     }
 
@@ -4242,7 +4190,7 @@ public class PanoramicCameraGpu {
             logger.info("DiLink 4 " + why + ": frames still arriving — keeping the camera");
             return;
         }
-        if (!restartInProgress.compareAndSet(false, true)) {
+        if (!claimRestart()) {
             logger.info("DiLink 4 " + why + ": a restart already owns the close/reopen");
             return;
         }
@@ -4275,7 +4223,6 @@ public class PanoramicCameraGpu {
             cameraObj = null;
             if (cameraCoordinator != null) {
                 cameraCoordinator.resetEventCallbackState();
-                cameraCoordinator.notifyPosCloseCamera();
             }
             dilink4SoftRecoveryEpoch.incrementAndGet();
             dilink4SoftRecoveryInFlight.set(false);
@@ -4599,8 +4546,6 @@ public class PanoramicCameraGpu {
      *  the geometry mismatch can be surfaced rather than silently assumed. */
     private volatile int halBytePathWidth = -1;
     private volatile int halBytePathHeight = -1;
-    public int getHalBytePathWidth() { return halBytePathWidth; }
-    public int getHalBytePathHeight() { return halBytePathHeight; }
 
     /** Dump the four AVM-related SystemProperties. INFORMATIONAL ONLY — see the
      *  call site in {@link #attachSurfaceTextureToCamera} for why the old
@@ -5751,13 +5696,10 @@ public class PanoramicCameraGpu {
             // whether THIS open ever delivered a frame (zero-frame-reopen escalation).
             frameCounterAtOpen = frameCounter;
             cameraOpenSeq++;
+            // The DiLink 100 open can resolve a different id than requested (cameraIdOverride).
             logger.info("Camera started (" + width + "x" + height +
-                ", id=" + cameraId + ", surfaceMode=" + cameraSurfaceMode + ")");
-
-            // Update coordinator with actual camera ID
-            if (cameraCoordinator != null) {
-                cameraCoordinator.setActiveCameraId(cameraId);
-            }
+                ", id=" + (cameraIdOverride >= 0 ? cameraIdOverride : cameraId)
+                + ", surfaceMode=" + cameraSurfaceMode + ")");
         } finally {
             if (legacyOpen) {
                 legacyCameraOpenInFlight.set(false);
@@ -5845,18 +5787,12 @@ public class PanoramicCameraGpu {
      * See CAMERA_FPS_INVESTIGATION.md for the full rationale.
      *
      * After either path succeeds, addPreviewSurface + startPreview are called.
-     *
-     * Calls the coordinator's pre-open hook before acquisition.
      */
     private void startCameraViaAvmReflection(int cameraId) throws Exception {
         requireCurrentStartEpoch(activeStartEpoch, "AVM acquisition");
         // The cold-open warmup gate is centralized in startCamera(), before
         // any caller can reach this reflection boundary.
 
-        // Notify camera service we're about to open
-        if (cameraCoordinator != null) {
-            cameraCoordinator.notifyPreOpenCamera();
-        }
         requireCurrentStartEpoch(activeStartEpoch, "AVM pre-open");
 
         // oem-parity: tell the BYDAutoManager Panorama device (1031) to switch
@@ -5871,18 +5807,7 @@ public class PanoramicCameraGpu {
         // anyway (no panorama device exposed), but skipping the call also
         // skips a binder round-trip per camera open.
         if (USE_DILINK4_AVM_PATH) {
-            // Acquire our viewpoint token. Mirrors oem C5920a.mo26750v
-            // (gl/C5920a.java:387 — C6498a.f26622a.m28930h(this)). If
-            // we're the only holder this writes viewpoint=2012 and registers
-            // the listener; if a sentry-restart caller is already holding a
-            // token, this just re-issues the viewpoint write idempotently
-            // (matches oem's "size>1 already, no enableDevice/listener" branch).
             BydApaViewpointHelper.acquire(viewpointToken);
-
-            // Release the static sentry-bridge token NOW (set transitions
-            // bridge+pano → pano on the same lock acquire as our add — no
-            // empty-set window). Idempotent + harmless if no bridge was held.
-            releaseSentryBridgeViewpoint();
         }
 
         // DiLink 5.0 (Snapdragon SA8155P): uses fast_cam_capture DMA-FD IPC.
@@ -6094,7 +6019,8 @@ public class PanoramicCameraGpu {
             Method mStart = avmClass.getDeclaredMethod("startPreview");
             mStart.setAccessible(true);
             mStart.invoke(cameraObj);
-            logger.info("Camera started (id=" + cameraId + ", targetFps=" + targetFps + ")");
+            logger.info("Camera started (id=" + (cameraIdOverride >= 0 ? cameraIdOverride : cameraId)
+                + ", targetFps=" + targetFps + ")");
         }
     }
 
@@ -6843,15 +6769,6 @@ public class PanoramicCameraGpu {
      *  the scale will be < 1.0 on one or both axes and that surfaces here
      *  before we waste cycles wondering why the recorded mosaic looks
      *  squashed. Cheap — one float[16] read per cold attach. */
-    /** Effective HAL-emit dims derived from the SurfaceTexture transform
-     *  matrix on the first frame after each (re)attach. {@code -1} until
-     *  the first frame arrives. Volatile because the GL thread writes and
-     *  HTTP / pipeline threads can read for diagnostics. */
-    private volatile int halEffectiveWidth = -1;
-    private volatile int halEffectiveHeight = -1;
-    public int getHalEffectiveWidth() { return halEffectiveWidth; }
-    public int getHalEffectiveHeight() { return halEffectiveHeight; }
-
     private void logFirstFrameDims(SurfaceTexture st) {
         try {
             float[] m = new float[16];
@@ -6867,8 +6784,6 @@ public class PanoramicCameraGpu {
             // the surface, offset by (tx, ty). Scale 1.0 = full surface.
             float effW = Math.abs(sx) * (float) width;
             float effH = Math.abs(sy) * (float) height;
-            halEffectiveWidth = Math.round(effW);
-            halEffectiveHeight = Math.round(effH);
             logger.info(String.format(java.util.Locale.US,
                 "First frame transform: sx=%.4f sy=%.4f tx=%.4f ty=%.4f → "
                 + "crop covers %.0f%%x%.0f%% of the producer buffer"
@@ -7117,6 +7032,19 @@ public class PanoramicCameraGpu {
             currentBoundCpuSource = new com.overdrive.app.surveillance.CpuFrameSource(currentBoundImage);
         }
         return currentBoundCpuSource;
+    }
+
+    /**
+     * Custom Layouts road model: tells it once per camera consumer whether a front frame can reach it, so it
+     * never loads a model on a camera that cannot feed one (same rules as offerRoadFrame and postRoadFrame).
+     */
+    private void publishRoadFrameSource() {
+        boolean strip = CAMERA_LAYOUT_MODE == 0 && !USE_DILINK5_QCARCAM_PATH;
+        GpuDownscaler ds = downscaler;
+        // A SurfaceTexture consumer always carries a non-identity matrix, which the road view refuses.
+        boolean gpuView = strip && !USE_SURFACE_TEXTURE_CONSUMER && ds != null && ds.isInitialized();
+        com.overdrive.app.customlayouts.daemon.road.RoadFrameTap.noteSource(
+            strip, cpuFrameReaderActive, gpuView, width / 4, height);
     }
 
     /**
@@ -7628,6 +7556,7 @@ public class PanoramicCameraGpu {
             long stageAfterAcquireNs = System.nanoTime();
             frameCounter++;
             if (byd100fRecovery) Byd100fCameraRecovery.PROCESS_BUDGET.onGenuineFrame();
+            if (carViewStream.pendingWithoutFrames()) noteFrameAfterCarView();
             lastFrameTime = System.currentTimeMillis();
             if (USE_AVM_SURFACE_TEXTURE_PATH && !firstFrameReceived) {
                 logger.info("SurfaceTexture: first genuine preview frame consumed"
@@ -7978,7 +7907,7 @@ public class PanoramicCameraGpu {
                     // P1 #11: CAS so a concurrent reopenCamera (daemon thread)
                     // can't race; if another restart is already in flight,
                     // skip — it'll re-fire on the next frame.
-                    if (!restartInProgress.compareAndSet(false, true)) {
+                    if (!claimRestart()) {
                         return;
                     }
                     try {
@@ -9162,7 +9091,7 @@ public class PanoramicCameraGpu {
             }
             // Same gate as the restart it replaces: 10 s watchdog budget, no overlapping reopen.
             deadSlotResumeInFlight = true;
-            if (!restartInProgress.compareAndSet(false, true)) {
+            if (!claimRestart()) {
                 deadSlotResumeInFlight = false;
                 deadSlotResumePending = true;   // the next frame re-posts it
                 return;
@@ -9192,7 +9121,7 @@ public class PanoramicCameraGpu {
                 return false;
             }
         }
-        return !deadSlotResumeInFlight && restartInProgress.compareAndSet(false, true);
+        return !deadSlotResumeInFlight && claimRestart();
     }
 
     /** Live query (the coordinator's flag is a cache that can be stale while never-streamed). */
@@ -9243,7 +9172,7 @@ public class PanoramicCameraGpu {
      * then does a clean camera close.
      * 
      * The GL render loop continues running but skips frame processing while yielded.
-     * Camera is re-acquired when onCloseCamera fires from IBYDCameraService.
+     * Camera is re-acquired when the polling coordinator detects release.
      */
     private void yieldCameraInternal() {
         yieldCameraInternal(false);
@@ -9337,9 +9266,8 @@ public class PanoramicCameraGpu {
             cameraObj = null;
             if (cameraCoordinator != null) {
                 cameraCoordinator.resetEventCallbackState();
-                cameraCoordinator.notifyPosCloseCamera();
             }
-            logger.info("Camera yielded — GL pipeline idle, waiting for onCloseCamera");
+            logger.info("Camera yielded — GL pipeline idle, waiting for native camera release");
         }
         if (!cameraClosed) return false;
         
@@ -9990,7 +9918,7 @@ public class PanoramicCameraGpu {
      */
     private void restartCamera2Source(String reason) {
         if (!running || sCamera2DisabledReason != null) return;
-        if (!restartInProgress.compareAndSet(false, true)) {
+        if (!claimRestart()) {
             logger.info("camera2: restart already in progress (" + reason + ")");
             return;
         }
@@ -10063,9 +9991,69 @@ public class PanoramicCameraGpu {
     private final ReverseViewCameraGate.Hold reverseStallHold =
         new ReverseViewCameraGate.Hold(ReverseViewCameraGate.appliesHere());
 
+    // BYD100F only (#1001): AVMCamera event 1008 marks the car's own camera view taking the
+    // stream. Written by the event callback (and the GL thread when frames come back), read by
+    // the watchdog. 0 = no event pending.
+    private final CarViewStreamState carViewStream = new CarViewStreamState();
+    private boolean carViewHoldLogged;
+    private long carViewErrorHoldLoggedOpenSeq = -1L;
+
+    private void noteCarViewTookStream() {
+        if (!byd100fRecovery) return;
+        carViewStream.publishEvent(android.os.SystemClock.elapsedRealtime());
+        logger.info("Car camera view took the stream (event "
+            + CarViewStreamHold.EVENT_CAR_VIEW_TOOK_STREAM
+            + "): a frame stall restart will wait for it (up to "
+            + CarViewStreamHold.CAR_VIEW_MAX_MS + "ms, "
+            + CarViewStreamHold.CAR_VIEW_R_MAX_MS + "ms in R)");
+    }
+
+    /** GL thread, only while an event is pending: a real frame ends the car-view hold. */
+    private void noteFrameAfterCarView() {
+        carViewStream.onFrame(android.os.SystemClock.elapsedRealtime());
+    }
+
+    private static final int CAR_VIEW_NONE = 0;
+    private static final int CAR_VIEW_HOLD = 1;
+    private static final int CAR_VIEW_LAPSED = 2;
+
+    /**
+     * Watchdog thread. {@link #CAR_VIEW_HOLD} to skip this stall restart while the car's own
+     * view has the stream, {@link #CAR_VIEW_LAPSED} when that hold just ran out (restart now,
+     * without the reverse hold on top), {@link #CAR_VIEW_NONE} when no event is pending or our
+     * frames came back after it.
+     */
+    private int carViewStallDecision(long now) {
+        long seen = carViewStream.read();
+        if (seen == 0L) return CAR_VIEW_NONE;
+        long eventMs = CarViewStreamState.eventMs(seen);
+        boolean resumed = CarViewStreamState.resumed(seen);
+        if (CarViewStreamHold.shouldHold(byd100fRecovery, eventMs, resumed,
+                ReverseViewCameraGate.freshGear(), now)) {
+            if (!carViewHoldLogged) {
+                carViewHoldLogged = true;
+                logger.info("Car camera view took the stream (event "
+                    + CarViewStreamHold.EVENT_CAR_VIEW_TOOK_STREAM + "): holding restart "
+                    + (now - eventMs) + "ms after the event so the car's view is not interrupted");
+            }
+            return CAR_VIEW_HOLD;
+        }
+        // Only the event decided on here; a newer event published meanwhile stays pending.
+        carViewStream.clear(seen);
+        if (carViewHoldLogged) {
+            carViewHoldLogged = false;
+            logger.info("Car camera view hold over after " + (now - eventMs)
+                + "ms (framesResumed=" + resumed + ")");
+        }
+        return resumed ? CAR_VIEW_NONE : CAR_VIEW_LAPSED;
+    }
+
     private boolean holdStallRestartForReverseView() {
         // Monotonic, like the gate's cap; the watchdog's own clock is wall time.
         long now = android.os.SystemClock.elapsedRealtime();
+        int carView = carViewStallDecision(now);
+        if (carView == CAR_VIEW_HOLD) return true;
+        if (carView == CAR_VIEW_LAPSED) return false;
         if (!reverseStallHold.holdNow(ReverseViewCameraGate.freshGear(), now)) return false;
         logger.info("Frame stall in R: restart held " + reverseStallHold.heldMs(now)
             + "ms (max " + ReverseViewCameraGate.MAX_HOLD_MS
@@ -10170,6 +10158,18 @@ public class PanoramicCameraGpu {
             logger.info("HAL event 8: frames still arriving — keeping the camera");
             return;
         }
+        if (CarViewStreamHold.errorRestartHeld(byd100fRecovery, carViewStream.read(),
+                ReverseViewCameraGate.freshGear(), android.os.SystemClock.elapsedRealtime())) {
+            // The car's own view has the stream: no reopen from here. The frame-stall watchdog
+            // owns recovery and restarts once the car-view hold is over.
+            if (carViewErrorHoldLoggedOpenSeq != openSeq) {
+                carViewErrorHoldLoggedOpenSeq = openSeq;
+                logger.info("HAL error while the car's camera view has the stream (event "
+                    + CarViewStreamHold.EVENT_CAR_VIEW_TOOK_STREAM
+                    + "): no restart; the frame-stall watchdog recovers after the hold");
+            }
+            return;
+        }
         long delay = holdReopenForReverseView("camera restart after HAL error")
             ? Byd100fCameraRecovery.REVERSE_RECHECK_MS
             : deferZeroFrameReopen("camera restart after HAL error");
@@ -10220,7 +10220,7 @@ public class PanoramicCameraGpu {
         // P1 #11: CAS — only one restart can be in flight. If reopenCamera
         // (daemon thread) is already restarting, return without touching the
         // flag so its finally{set(false)} doesn't get clobbered.
-        if (!restartInProgress.compareAndSet(false, true)) {
+        if (!claimRestart()) {
             logger.info("Restart already in progress — skipping restartCameraAfterError");
             return;
         }
@@ -10389,13 +10389,12 @@ public class PanoramicCameraGpu {
                 return;
             }
 
-            // Close with proper cleanup + notify service
+            // Close with proper cleanup
             if (cameraObj != null) {
                 closeCameraForPath(cameraObj);
                 cameraObj = null;
                 if (cameraCoordinator != null) {
                     cameraCoordinator.resetEventCallbackState();
-                    cameraCoordinator.notifyPosCloseCamera();
                 }
             }
 
@@ -10878,19 +10877,13 @@ public class PanoramicCameraGpu {
         
         boolean stopClean = true;
 
-        // Close camera with proper cleanup + notify service
+        // Close camera with proper cleanup
         if (cameraObj != null) {
             stopClean = closeCameraForPath(cameraObj);
             cameraObj = null;
-            if (cameraCoordinator != null) {
-                cameraCoordinator.notifyPosCloseCamera();
-            }
         }
         
-        // Unregister from IBYDCameraService AFTER notifying posCloseCamera.
-        // Must keep the service proxy alive until the close notification is sent,
-        // otherwise the native camera app never receives the "camera released" signal
-        // and hangs waiting for it.
+        // Clear the legacy polling coordinator after closing the camera.
         if (cameraCoordinator != null) {
             cameraCoordinator.unregister();
         }
@@ -11018,7 +11011,7 @@ public class PanoramicCameraGpu {
         // P1 #11: CAS — only one restart can be in flight. If
         // restartCameraAfterError (GL thread) already owns the flag, return
         // without clobbering its finally{set(false)}.
-        if (!restartInProgress.compareAndSet(false, true)
+        if (!claimRestart()
                 && !awaitDeadSlotResumeThenClaimGate()) {
             logger.warn("Restart already in progress — skipping reopenCamera");
             noteDeadSlotReopenSkipped();
@@ -11082,21 +11075,6 @@ public class PanoramicCameraGpu {
                 warmupThread.start();
                 logger.info("Started AVC HAL warmup alongside camera handoff");
             }
-
-            // registerCameraUser is DISABLED — the event-driven branch below is
-            // dead. Kept for reference; do NOT re-enable without re-validating
-            // the IBYDCameraUser yield/reacquire path end-to-end.
-            // if (cameraCoordinator != null && cameraCoordinator.isRegisteredAsUser()) {
-            //     logger.info("Registered as camera user — waiting for onCloseCamera callback");
-            //     Thread.sleep(3000);
-            //     if (!cameraCoordinator.isCameraYielded()) {
-            //         startCamera();
-            //         if (cameraCoordinator != null && cameraObj != null) {
-            //             cameraCoordinator.setupEventCallback(cameraObj);
-            //         }
-            //     }
-            //     return;
-            // }
 
             // Polling path — the only live path. Wait long enough for the BYD
             // native AVM app to claim the primary camera slot, then reopen as
@@ -11542,10 +11520,6 @@ public class PanoramicCameraGpu {
         }
     }
 
-    /** Whether PASS 1C is currently drawing the BS lane (the render gate). Used by
-     *  the pipeline to detect a gate/show desync and re-arm. */
-    public boolean isBsLayerVisible() { return bsLayerVisible; }
-
     /**
      * Enables/disables the optional direct windshield camera used by the
      * dashcam recording layout. The actual AVMCamera open/close happens on
@@ -11587,6 +11561,20 @@ public class PanoramicCameraGpu {
     }
     
     /**
+     * True while the camera is being closed and reopened after an error or frame stall. Recording
+     * is finalized for that window and resumes when the restart completes.
+     */
+    public boolean isCameraRestartInProgress() {
+        return restartInProgress.get();
+    }
+
+    /** The running restart's episode number, or 0 when no camera restart is in progress. */
+    public long cameraRestartEpisode() {
+        long episode = restartEpisode.get();
+        return restartInProgress.get() ? Math.max(1L, episode) : 0L;
+    }
+
+    /**
      * Checks if the camera is running.
      * 
      * @return true if running, false otherwise
@@ -11603,16 +11591,6 @@ public class PanoramicCameraGpu {
      */
     public boolean isFirstFrameReceived() {
         return firstFrameReceived;
-    }
-
-    /**
-     * Number of frames the GL thread has consumed from the HAL since
-     * {@code start()}. Combined with {@link #isFirstFrameReceived()} this
-     * lets callers wait for the BYD HAL warmup probe (frames 1–15 are
-     * cold/dim on most builds) before sampling.
-     */
-    public int getFrameCounter() {
-        return frameCounter;
     }
 
     /**
@@ -11762,13 +11740,6 @@ public class PanoramicCameraGpu {
     }
 
     /**
-     * Gets the current recorder draw stride (1 = every frame).
-     */
-    public int getRecorderFrameStride() {
-        return recorderFrameStride;
-    }
-
-    /**
      * Recompute the stream-lane draw stride from the current camera target fps
      * and the stream encoder's configured fps. Call after enabling streaming or
      * changing the stream quality preset. Stride 1 = every camera frame drawn to
@@ -11877,15 +11848,6 @@ public class PanoramicCameraGpu {
      */
     public void setCameraProbeCallback(CameraProbeCallback callback) {
         this.probeCallback = callback;
-    }
-    
-    /**
-     * Gets the timestamp of the last frame.
-     * 
-     * @return Timestamp in milliseconds
-     */
-    public long getLastFrameTime() {
-        return lastFrameTime;
     }
     
     /**

@@ -78,7 +78,7 @@ public final class LauncherApiHandler {
         String cleanPath = path.contains("?") ? path.substring(0, path.indexOf("?")) : path;
         try {
             if (cleanPath.equals("/api/launcher/v1/summary") && "GET".equals(method)) {
-                sendSummary(out);
+                sendSummary(out, summaryVersionParam(path));
                 return true;
             }
             if (cleanPath.equals("/api/launcher/v1/traffic") && "GET".equals(method)) {
@@ -125,9 +125,15 @@ public final class LauncherApiHandler {
 
     // ==================== §2.1 SUMMARY ====================
 
-    private static void sendSummary(OutputStream out) throws Exception {
+    /**
+     * {@code known} is the caller's {@code ?v=} (empty when it has none yet), or null for a caller that
+     * doesn't send one: that caller gets exactly the body it always did. A caller that sends one gets the
+     * body's version as {@code v}, and when its version is still current only {@code {"unchanged":true,"v"}}.
+     */
+    private static void sendSummary(OutputStream out, String known) throws Exception {
+        long ts = System.currentTimeMillis();
         JSONObject root = new JSONObject();
-        root.put("ts", System.currentTimeMillis());
+        if (known == null) root.put("ts", ts);
         root.put("vehicle",   buildVehicle());
         root.put("state",     buildState());
         root.put("range",     buildRange());
@@ -142,7 +148,45 @@ public final class LauncherApiHandler {
         root.put("media",     JSONObject.NULL);   // no daemon-side MediaSession source (see report)
         root.put("env",       buildEnv());
         root.put("terrain",   buildTerrain());
-        HttpResponse.sendJson(out, root.toString());
+        if (known == null) {
+            HttpResponse.sendJson(out, root.toString());
+            return;
+        }
+        // the version covers everything but ts
+        String body = root.toString();
+        String v = summaryVersion(body);
+        if (v.equals(known)) {
+            HttpResponse.sendJson(out, "{\"unchanged\":true,\"v\":\"" + v + "\"}");
+            return;
+        }
+        HttpResponse.sendJson(out, "{\"ts\":" + ts + ",\"v\":\"" + v + "\"," + body.substring(1));
+    }
+
+    /** The {@code v} query value, "" when present but empty; null when absent. */
+    static String summaryVersionParam(String path) {
+        int q = path.indexOf('?');
+        if (q < 0) return null;
+        for (String kv : path.substring(q + 1).split("&")) {
+            if (kv.equals("v")) return "";
+            if (kv.startsWith("v=")) {
+                String v = kv.substring(2);
+                // a version is 16 hex digits; anything else matches nothing
+                return v.length() <= 32 ? v : "";
+            }
+        }
+        return null;
+    }
+
+    static String summaryVersion(String body) {
+        try {
+            byte[] d = java.security.MessageDigest.getInstance("SHA-1").digest(body.getBytes("UTF-8"));
+            StringBuilder sb = new StringBuilder(16);
+            for (int i = 0; i < 8; i++) sb.append(String.format(java.util.Locale.ROOT, "%02x", d[i] & 0xff));
+            return sb.toString();
+        } catch (Exception e) {
+            // never "unchanged": a unique value forces a full body
+            return Long.toHexString(System.nanoTime()) + "x";
+        }
     }
 
     /** terrain: altitude, grade and the elevation profile behind the car while driving; null when parked a while. */
@@ -649,7 +693,7 @@ public final class LauncherApiHandler {
                 Object avg = JSONObject.NULL;
                 try {
                     if (db != null) {
-                        com.overdrive.app.trips.DnaScores s = db.getAverageDna(30);
+                        com.overdrive.app.trips.DnaScores s = db.getAverageDnaCached(30);
                         if (s != null) {
                             dna.put("overall", s.getOverall());
                             dna.put("anticipation", s.anticipation);
@@ -1308,9 +1352,34 @@ public final class LauncherApiHandler {
         return null;
     }
 
+    private static final ManifestCache BUNDLED_MANIFEST = new ManifestCache(MANIFEST_BUNDLED_PATH);
+    private static final ManifestCache REMOTE_MANIFEST = new ManifestCache(MANIFEST_REMOTE_CACHE);
+
+    /** One manifest file, re-read only when its mtime or length changes. Readers must not modify the result. */
+    private static final class ManifestCache {
+        private final String path;
+        private long mtime = Long.MIN_VALUE;
+        private long length = -1;
+        private JSONObject parsed;
+
+        ManifestCache(String path) { this.path = path; }
+
+        synchronized JSONObject get() {
+            File f = new File(path);
+            long m = f.lastModified();   // 0 when missing
+            long len = f.length();
+            if (m != 0L && m == mtime && len == length) return parsed;
+            JSONObject p = readManifestFile(f);
+            // a missing or unreadable file is read again next time
+            if (p != null) { mtime = m; length = len; } else { mtime = Long.MIN_VALUE; length = -1; }
+            parsed = p;
+            return p;
+        }
+    }
+
     private static JSONObject readBestManifest() {
-        JSONObject bundled = readManifestFile(new File(MANIFEST_BUNDLED_PATH));
-        JSONObject cached = readManifestFile(new File(MANIFEST_REMOTE_CACHE));
+        JSONObject bundled = BUNDLED_MANIFEST.get();
+        JSONObject cached = REMOTE_MANIFEST.get();
         if (bundled == null) return cached;
         if (cached == null) return bundled;
         return cached.optInt("version", 0) > bundled.optInt("version", 0) ? cached : bundled;

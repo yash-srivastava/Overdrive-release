@@ -16,6 +16,6 @@ public final class RecordingSizeFormatter {
         if (bytes >= 1_000_000_000L) return String.format(locale, "%.1f GB", bytes / 1_000_000_000.0);
         if (bytes >= 1_000_000L) return String.format(locale, "%.1f MB", bytes / 1_000_000.0);
         if (bytes >= 1_000L) return String.format(locale, "%.1f KB", bytes / 1_000.0);
-        return bytes + " B";
+        return String.format(locale, "%d B", bytes);
     }
 }

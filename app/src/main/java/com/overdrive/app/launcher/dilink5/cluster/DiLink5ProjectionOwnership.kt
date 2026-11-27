@@ -23,6 +23,7 @@ data class DiLink5ProjectionOwnership(
     val compositorOwned: Boolean,
     val uncertain: Boolean,
     val densityOwner: String = "",
+    val sealion7Hdmi: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("generation", generation)
@@ -43,6 +44,7 @@ data class DiLink5ProjectionOwnership(
         .put("compositorOwned", compositorOwned)
         .put("uncertain", uncertain)
         .put("densityOwner", densityOwner)
+        .apply { if (sealion7Hdmi) put("sealion7Hdmi", true) }
 
     fun stablePhysicalIdentityMatches(id: Int, name: String, uniqueId: String): Boolean {
         if (id != physicalDisplayId || name != physicalDisplayName) return false
@@ -129,6 +131,7 @@ data class DiLink5ProjectionOwnership(
                 source.optBoolean("compositorOwned", false),
                 source.optBoolean("uncertain", false),
                 source.optString("densityOwner", ""),
+                transport == "hosted" && source.opt("sealion7Hdmi") == true,
             )
         }
     }

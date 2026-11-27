@@ -22,9 +22,6 @@ public class Di4PanoramicCoexistenceContractTest {
         String coordinator = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/camera/"
                         + "BydCameraCoordinator.java");
-        String user = readRepositoryFile(
-                "app/src/main/java/com/overdrive/app/camera/"
-                        + "BydCameraUser.java");
 
         assertOrdered(gpu,
                 "if (!USE_DILINK4_AVM_PATH && !USE_DILINK5_QCARCAM_PATH) {",
@@ -42,8 +39,13 @@ public class Di4PanoramicCoexistenceContractTest {
         assertFalse(gpu.contains("diLink4NativeSourceOnlyYield"));
         assertFalse(gpu.contains("DILINK4_NATIVE_HANDOFF_TIMEOUT_MS"));
         assertFalse(coordinator.contains("registerUser("));
-        assertFalse(user.contains("proactiveYield"));
-        assertFalse(user.contains("requestProactiveYield"));
+        assertFalse(gpu.contains("registerUser("));
+        assertFalse(coordinator.contains("new BydCameraUser("));
+        assertFalse(gpu.contains("new BydCameraUser("));
+        assertFalse(coordinator.contains("proactiveYield"));
+        assertFalse(coordinator.contains("requestProactiveYield"));
+        assertFalse(gpu.contains("proactiveYield"));
+        assertFalse(gpu.contains("requestProactiveYield"));
     }
 
     @Test

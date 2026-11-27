@@ -40,8 +40,6 @@ import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.navigateUp
 import androidx.navigation.ui.setupActionBarWithNavController
-import com.overdrive.app.logging.LogLevel
-import com.overdrive.app.logging.LogManager
 // import com.overdrive.app.shell.PrivilegedShellSetup
 import com.overdrive.app.storage.StorageSetup
 import com.overdrive.app.ui.daemon.DaemonStartupManager
@@ -56,7 +54,6 @@ import com.overdrive.app.ui.util.PreferencesManager
 import com.overdrive.app.ui.widget.RailPlateDrawable
 import com.overdrive.app.ui.widget.SwipeExpandableRailScrollView
 import com.overdrive.app.ui.viewmodel.DaemonsViewModel
-import com.overdrive.app.ui.viewmodel.LogsViewModel
 import com.overdrive.app.ui.viewmodel.MainViewModel
 import com.overdrive.app.launcher.AdbDaemonLauncher
 import com.google.android.material.appbar.MaterialToolbar
@@ -82,7 +79,6 @@ open class MainActivity : AppCompatActivity() {
 
     private val mainViewModel: MainViewModel by viewModels()
     private val daemonsViewModel: DaemonsViewModel by viewModels()
-    private val logsViewModel: LogsViewModel by viewModels()
     private var appUpdater: com.overdrive.app.updater.AppUpdater? = null
     private var updateProgressHandle:
         com.overdrive.app.updater.UpdateDialog.ProgressHandle? = null
@@ -392,7 +388,6 @@ open class MainActivity : AppCompatActivity() {
         // A restore (even after process death) replays the original launch intent; only a fresh start obeys it.
         if (savedInstanceState == null) handleNavigateExtra(intent)
         setupCopyButton()
-        if (!remoteDevSession) setupLogListener()
         observeViewModels()
         
         // Initialize daemon startup manager
@@ -405,9 +400,6 @@ open class MainActivity : AppCompatActivity() {
         // Setup ADB auth callback to re-initialize when auth is granted
         if (!remoteDevSession) setupAdbAuthCallback()
         
-        // Log app start
-        logsViewModel.info("App", "OverDrive started")
-
         // Seed out-of-process revival watchdog so the process gets resurrected
         // if it ever gets force-stopped or OOM-killed without an external event.
         if (!remoteDevSession) try {
@@ -459,7 +451,6 @@ open class MainActivity : AppCompatActivity() {
                 val installError = com.overdrive.app.updater.AppUpdater.consumeFailedUpdateError(this)
                 if (installError != null) {
                     Toast.makeText(this, getString(R.string.toast_update_install_failed, installError), Toast.LENGTH_LONG).show()
-                    logsViewModel.warn("Update", "Install failed: $installError")
                 }
 
                 // Show post-update message if app was just updated.
@@ -478,7 +469,6 @@ open class MainActivity : AppCompatActivity() {
                     val shown = if (justUpdated.isNotEmpty()) justUpdated
                                 else com.overdrive.app.updater.AppUpdater.getDisplayVersion(this)
                     Toast.makeText(this, getString(R.string.toast_updated_to, shown), Toast.LENGTH_LONG).show()
-                    logsViewModel.info("Update", "App updated to $shown")
                 }
             }
 
@@ -502,11 +492,9 @@ open class MainActivity : AppCompatActivity() {
     private fun startStatusOverlay() {
         val hasPermission = com.overdrive.app.overlay.StatusOverlayService.hasOverlayPermission(this)
         android.util.Log.i("MainActivity", "Overlay permission: $hasPermission")
-        logsViewModel.info("Overlay", "Overlay permission: $hasPermission")
 
         if (hasPermission) {
             com.overdrive.app.overlay.StatusOverlayService.startIfPermitted(this)
-            logsViewModel.info("Overlay", "Status overlay service started")
         }
 
         // RoadSense floating overlay (D-024): start only when the feature is enabled.
@@ -713,8 +701,6 @@ open class MainActivity : AppCompatActivity() {
                     }
 
                     if (isPostUpdate) {
-                        logsViewModel.info("Update",
-                            "Post-update launch — hard-resetting daemons before startup")
                         // Watchdog: if hardResetDaemons silently drops its
                         // callback (synchronous throw inside the launcher,
                         // unexpected shell exec failure mode), the inFlight
@@ -817,7 +803,6 @@ open class MainActivity : AppCompatActivity() {
                 Toast.makeText(this,
                     getString(R.string.toast_update_install_failed, installError),
                     Toast.LENGTH_LONG).show()
-                logsViewModel.warn("Update", "Install failed: $installError")
             }
         }
         val justUpdated = com.overdrive.app.updater.AppUpdater
@@ -837,7 +822,6 @@ open class MainActivity : AppCompatActivity() {
                 Toast.makeText(this,
                     getString(R.string.toast_updated_to, shown),
                     Toast.LENGTH_LONG).show()
-                logsViewModel.info("Update", "App updated to $shown")
             }
             try {
                 // Reuse the shared adbLauncher; see comment at the rm site
@@ -873,6 +857,16 @@ open class MainActivity : AppCompatActivity() {
     }
 
     
+    override fun onStart() {
+        super.onStart()
+        com.overdrive.app.ui.fragment.WebViewTimers.activityStarted()
+    }
+
+    override fun onStop() {
+        com.overdrive.app.ui.fragment.WebViewTimers.activityStopped()
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         // PIN gate: if Settings → Security has the app lock enabled and the
@@ -883,6 +877,13 @@ open class MainActivity : AppCompatActivity() {
         // destination. Daemons / surveillance / DeterrentActivity are
         // never affected by this gate.
         maybeShowPinLock()
+
+        // BYD100F drive mode window (#1002): let the daemon float this screen before the car
+        // leaves P. Off the main thread; a no-op unless the user opted in.
+        if (!remoteDevSession && com.overdrive.app.camera.DiLink100Platform.isByd100f()) {
+            Thread({ com.overdrive.app.ui.util.DriveModeWindowClient.notifyResumed() },
+                "DriveModeWindowResume").start()
+        }
 
         // Try to start overlay if permission was just granted (user returned from settings)
         if (!remoteDevSession) {
@@ -1072,18 +1073,10 @@ open class MainActivity : AppCompatActivity() {
      */
     private fun setupAdbAuthCallback() {
         com.overdrive.app.launcher.AdbShellExecutor.setAuthCallback(object : com.overdrive.app.launcher.AdbShellExecutor.AdbAuthCallback {
-            override fun onAuthPending() {
-                runOnUiThread {
-                    logsViewModel.info("ADB", "⏳ Waiting for ADB authorization...")
-                    logsViewModel.info("ADB", "Please accept the USB debugging prompt")
-                }
-            }
+            override fun onAuthPending() = Unit
             
             override fun onAuthGranted() {
                 runOnUiThread {
-                    logsViewModel.info("ADB", "ADB authorization granted")
-                    logsViewModel.info("ADB", "Re-initializing daemons...")
-
                     // Advance the onboarding Step-0 (daemon auth) if it's waiting. This
                     // is the SINGLE process-wide auth callback slot, so we notify the
                     // host here rather than registering a second callback.
@@ -1113,11 +1106,7 @@ open class MainActivity : AppCompatActivity() {
                 }
             }
             
-            override fun onAuthFailed(error: String) {
-                runOnUiThread {
-                    logsViewModel.error("ADB", "ADB connection failed: $error")
-                }
-            }
+            override fun onAuthFailed(error: String) = Unit
         })
     }
     
@@ -1125,7 +1114,6 @@ open class MainActivity : AppCompatActivity() {
      * Check GitHub for app updates and show dialog if available.
      */
     private fun checkForAppUpdate() {
-        logsViewModel.info("Update", "Checking for updates (channel: ${com.overdrive.app.config.UnifiedConfigManager.getUpdateChannel()})...")
         val updater = com.overdrive.app.updater.AppUpdater(this)
         appUpdater = updater
         updater.checkForUpdate(object : com.overdrive.app.updater.AppUpdater.UpdateCallback {
@@ -1139,13 +1127,11 @@ open class MainActivity : AppCompatActivity() {
             }
 
             override fun onNoUpdate(currentVersion: String) {
-                logsViewModel.debug("Update", "App is up to date (v$currentVersion)")
                 // No further use — release per-instance executor.
                 updater.close()
             }
 
             override fun onError(error: String) {
-                logsViewModel.debug("Update", "Update check failed: $error")
                 updater.close()
             }
         })
@@ -1664,15 +1650,9 @@ open class MainActivity : AppCompatActivity() {
             // Android 11+ Settings result
             if (StorageSetup.checkStoragePermission(this)) {
                 android.util.Log.i("MainActivity", "Storage permission granted! Creating directories...")
-                val success = StorageSetup.setupDirectories()
-                if (success) {
-                    logsViewModel.info("Storage", "Storage directories created (App is owner)")
-                } else {
-                    logsViewModel.warn("Storage", "Some directories could not be created")
-                }
+                StorageSetup.setupDirectories()
             } else {
                 android.util.Log.e("MainActivity", "Storage permission denied by user")
-                logsViewModel.error("Storage", "Storage permission denied - recordings may not work")
                 Toast.makeText(this, getString(R.string.toast_storage_permission_required), Toast.LENGTH_LONG).show()
             }
         }
@@ -1688,15 +1668,9 @@ open class MainActivity : AppCompatActivity() {
             
             if (granted) {
                 android.util.Log.i("MainActivity", "Storage permission granted! Creating directories...")
-                val success = StorageSetup.setupDirectories()
-                if (success) {
-                    logsViewModel.info("Storage", "Storage directories created (App is owner)")
-                } else {
-                    logsViewModel.warn("Storage", "Some directories could not be created")
-                }
+                StorageSetup.setupDirectories()
             } else {
                 android.util.Log.e("MainActivity", "Storage permission denied by user")
-                logsViewModel.error("Storage", "Storage permission denied - recordings may not work")
                 Toast.makeText(this, getString(R.string.toast_storage_permission_required), Toast.LENGTH_LONG).show()
             }
         }
@@ -1708,20 +1682,12 @@ open class MainActivity : AppCompatActivity() {
      * This runs silently in the background and is monitored by SentryDaemon.
      */
     private fun startLocationSidecarService() {
-        logsViewModel.info("Location", "Auto-starting Location Sidecar service via ADB...")
-        
         daemonsViewModel.startLocationSidecarService(object : AdbDaemonLauncher.LaunchCallback {
-            override fun onLog(message: String) {
-                logsViewModel.debug("Location", message)
-            }
+            override fun onLog(message: String) = Unit
             
-            override fun onLaunched() {
-                logsViewModel.info("Location", "Location Sidecar service started successfully")
-            }
+            override fun onLaunched() = Unit
             
-            override fun onError(error: String) {
-                logsViewModel.error("Location", "Failed to start Location Sidecar: $error")
-            }
+            override fun onError(error: String) = Unit
         })
     }
     
@@ -2695,22 +2661,6 @@ open class MainActivity : AppCompatActivity() {
         }
     }
     
-    private fun setupLogListener() {
-        // Wire LogManager to LogsViewModel
-        LogManager.setLogListener(object : LogManager.LogListener {
-            override fun onLog(tag: String, message: String, level: LogLevel) {
-                // Convert LogManager.LogLevel to UI LogLevel
-                val uiLevel = when (level) {
-                    LogLevel.DEBUG -> com.overdrive.app.ui.model.LogLevel.DEBUG
-                    LogLevel.INFO -> com.overdrive.app.ui.model.LogLevel.INFO
-                    LogLevel.WARN -> com.overdrive.app.ui.model.LogLevel.WARN
-                    LogLevel.ERROR -> com.overdrive.app.ui.model.LogLevel.ERROR
-                }
-                logsViewModel.addLog(tag, message, uiLevel)
-            }
-        })
-    }
-    
     private fun observeViewModels() {
         // Observe tunnel URL from cloudflared controller
         daemonsViewModel.cloudflaredController.tunnelUrl.observe(this) { url ->
@@ -3059,7 +3009,6 @@ open class MainActivity : AppCompatActivity() {
                     .isFastAiFrameCopyEnabled()
             )
         } catch (e: Exception) {
-            logsViewModel.error("Camera", "Failed to load camera mapping state: ${e.message}")
             null
         } finally {
             try { conn?.disconnect() } catch (_: Exception) {}
@@ -3789,10 +3738,6 @@ open class MainActivity : AppCompatActivity() {
                     com.overdrive.app.camera.CameraConfigResolver
                         .saveDecoupledEncoderLane(checked)
                 } catch (e: Exception) {
-                    logsViewModel.error(
-                        "Camera",
-                        "Failed to save decoupledEncoderLane: ${e.message}"
-                    )
                     false
                 }
                 runOnUiThread {
@@ -3836,7 +3781,6 @@ open class MainActivity : AppCompatActivity() {
                 val ok = try {
                     com.overdrive.app.camera.CameraConfigResolver.saveRecordingEngine(checked)
                 } catch (e: Exception) {
-                    logsViewModel.error("Camera", "Failed to save recordingEngine: ${e.message}")
                     false
                 }
                 runOnUiThread {
@@ -3873,7 +3817,6 @@ open class MainActivity : AppCompatActivity() {
                 val ok = try {
                     com.overdrive.app.camera.CameraConfigResolver.saveFastAiFrameCopy(checked)
                 } catch (e: Exception) {
-                    logsViewModel.error("Camera", "Failed to save fastAiFrameCopy: ${e.message}")
                     false
                 }
                 runOnUiThread {
@@ -3958,10 +3901,6 @@ open class MainActivity : AppCompatActivity() {
                             probeOptIn
                         )
                 } catch (e: Exception) {
-                    logsViewModel.error(
-                        "Camera",
-                        "Failed to save OEM dashcam id: ${e.message}"
-                    )
                     false
                 }
                 // Invalidate the concurrent-AVM probe so the next daemon
@@ -3969,11 +3908,8 @@ open class MainActivity : AppCompatActivity() {
                 if (ok) {
                     try {
                         com.overdrive.app.camera.ConcurrentAvmProbe.invalidate()
-                    } catch (e: Exception) {
-                        logsViewModel.warn(
-                            "Camera",
-                            "ConcurrentAvmProbe.invalidate failed: ${e.message}"
-                        )
+                    } catch (_: Exception) {
+                        // Best effort; the daemon can re-probe on restart.
                     }
                     // If OEM dashcam is currently running, the new id is in
                     // UCM but the live pipeline captured the OLD id at
@@ -3998,12 +3934,10 @@ open class MainActivity : AppCompatActivity() {
                         daemon.outputStream.use { it.write("{\"restart\":true}".toByteArray()) }
                         daemon.responseCode  // force send
                         daemon.disconnect()
-                    } catch (e: Exception) {
+                    } catch (_: Exception) {
                         // Daemon may not be running, or the endpoint is
                         // unreachable on this build — non-fatal. The user
                         // can toggle off+on as a fallback.
-                        logsViewModel.warn("Camera",
-                            "OEM dashcam restart request failed: ${e.message}")
                     }
                 }
                 runOnUiThread {
@@ -4396,8 +4330,6 @@ open class MainActivity : AppCompatActivity() {
             getString(R.string.toast_camera_settings_saved_restarting),
             Toast.LENGTH_LONG
         ).show()
-        logsViewModel.info("Camera",
-            "Camera settings changed — restarting daemon to apply them immediately")
 
         Thread {
             // Phase 1: graceful flush. The daemon only returns 2xx after any
@@ -4433,8 +4365,6 @@ open class MainActivity : AppCompatActivity() {
                     }
                     conn.disconnect()
                     if (code in 200..299) {
-                        logsViewModel.debug("Camera",
-                            "prepare-restart returned HTTP $code")
                         true
                     } else {
                         // The daemon's own verdict decides whether waiting can
@@ -4447,16 +4377,11 @@ open class MainActivity : AppCompatActivity() {
                         } catch (_: Exception) {
                             true
                         }
-                        logsViewModel.warn("Camera",
-                            "prepare-restart rejected kill with HTTP $code" +
-                                if (detail.isNotBlank()) ": $detail" else "")
                         false
                     }
                 } catch (e: Exception) {
                     // A transport failure can mean the daemon prepared but the
                     // response was lost, so it is not retried blindly.
-                    logsViewModel.warn("Camera",
-                        "prepare-restart failed; daemon kill aborted: ${e.message}")
                     false
                 }
                 if (prepared || !retryable || attempt == 6) break
@@ -4496,15 +4421,11 @@ open class MainActivity : AppCompatActivity() {
                 }
                 // Reuse shared adbLauncher (avoids per-call leak).
                 daemonStartupManager.adbLauncher.killDaemon(object : com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback {
-                    override fun onLog(message: String) {
-                        logsViewModel.debug("Camera", message)
-                    }
+                    override fun onLog(message: String) = Unit
 
                     override fun onLaunched() {
                         runOnUiThread {
                             if (!activityAlive()) return@runOnUiThread
-                            logsViewModel.info("Camera",
-                                "Camera daemon stopped — relaunching with updated camera settings")
                             // 5 s delay: BYD camera HAL needs ~3-5 s to release
                             // the camera after process death; relaunching too
                             // early triggers event 1002 on the new daemon's open.
@@ -4542,8 +4463,6 @@ open class MainActivity : AppCompatActivity() {
                         }.start()
                         runOnUiThread {
                             if (!activityAlive()) return@runOnUiThread
-                            logsViewModel.error("Camera",
-                                "Failed to restart daemon after camera settings save: $error")
                             Toast.makeText(
                                 this@MainActivity,
                                 getString(R.string.toast_camera_settings_restart_failed),
@@ -4591,7 +4510,6 @@ open class MainActivity : AppCompatActivity() {
      */
     private fun performCameraReconfigure() {
         Toast.makeText(this, getString(R.string.toast_clearing_camera_config), Toast.LENGTH_SHORT).show()
-        logsViewModel.info("Camera", "Clearing saved camera probe config for re-probe")
         
         Thread {
             try {
@@ -4602,7 +4520,6 @@ open class MainActivity : AppCompatActivity() {
                 com.overdrive.app.config.UnifiedConfigManager.updateSection("camera", emptyCameraConfig)
                 
                 runOnUiThread {
-                    logsViewModel.info("Camera", "Camera config cleared — restarting daemon")
                     // Reuse the guarded settings flow: it checkpoints the open
                     // trip and aborts on any prepare-restart failure before the
                     // launcher is allowed to SIGKILL the daemon.
@@ -4610,7 +4527,6 @@ open class MainActivity : AppCompatActivity() {
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    logsViewModel.error("Camera", "Reconfigure failed: ${e.message}")
                     Toast.makeText(this, getString(R.string.toast_failed_with_message_x, e.message ?: ""), Toast.LENGTH_LONG).show()
                 }
             }
@@ -4916,8 +4832,6 @@ open class MainActivity : AppCompatActivity() {
                     Toast.makeText(this,
                         getString(R.string.toast_soh_observed_value_saved, observedKwh),
                         Toast.LENGTH_LONG).show()
-                    logsViewModel.info("SOH",
-                        "Pack capacity updated to ${"%.1f".format(observedKwh)} kWh from observed peak")
                 } else {
                     Toast.makeText(this,
                         getString(R.string.toast_soh_observed_value_failed, errMsg ?: ""),
@@ -4984,7 +4898,6 @@ open class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         if (isFinishing || isDestroyed) return@runOnUiThread
                         Toast.makeText(this, getString(R.string.toast_soh_reset_success), Toast.LENGTH_LONG).show()
-                        logsViewModel.info("SOH", "SOH estimation reset by user")
                     }
                 } else {
                     // Fallback: try direct file delete (works if app has permissions)
@@ -5136,7 +5049,6 @@ open class MainActivity : AppCompatActivity() {
                             .setMessage(lines.toString().trim())
                             .setPositiveButton(getString(R.string.dialog_ok), null)
                             .show()
-                        logsViewModel.info("Reset", "Categories: ${categories.joinToString(",")}")
                     } else {
                         val err = data?.optString("error") ?: "HTTP $code"
                         Toast.makeText(this, getString(R.string.toast_reset_failed_with_error, err), Toast.LENGTH_LONG).show()
@@ -5304,8 +5216,6 @@ open class MainActivity : AppCompatActivity() {
                             else -> null
                         }
                         trafficMonitorEnabled?.let { updateTrafficMonitorMenuItem(it) }
-                        logsViewModel.error("TrafficMonitor",
-                            "pm reported no change (wanted $expected, probe says $verified)")
                         Toast.makeText(this@MainActivity,
                             getString(R.string.toast_failed_with_message_x, verified),
                             Toast.LENGTH_LONG).show()
@@ -5322,12 +5232,8 @@ open class MainActivity : AppCompatActivity() {
                         trafficMonitorEnabled = enable
                         updateTrafficMonitorMenuItem(enable)
 
-                        val state = if (enable) "enabled" else "disabled"
-                        logsViewModel.info("TrafficMonitor", "BYD Traffic Monitor $state")
                         if (!persisted) {
                             // Live now, but nothing will re-apply it after an OTA.
-                            logsViewModel.warn("TrafficMonitor",
-                                "Could not persist the traffic-monitor preference — it will not survive a firmware update")
                             Toast.makeText(this@MainActivity,
                                 getString(R.string.toast_traffic_monitor_persist_failed),
                                 Toast.LENGTH_LONG).show()
@@ -5348,7 +5254,6 @@ open class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     Toast.makeText(this@MainActivity, getString(R.string.toast_failed_with_message_x, error), Toast.LENGTH_LONG).show()
-                    logsViewModel.error("TrafficMonitor", "Failed to ${if (enable) "enable" else "disable"}: $error")
                 }
             }
         })
@@ -5479,8 +5384,6 @@ open class MainActivity : AppCompatActivity() {
         }
         remotePopover = null
         removeThemeSnapshot()
-        // Remove log listener
-        if (!remoteDevSession) LogManager.setLogListener(null)
         actionIoExecutor.shutdownNow()
         // Tear down the onboarding overlay + its ACC receiver (mirrors the auth-callback
         // teardown below — any guard cleared only in a callback needs a destroy path).

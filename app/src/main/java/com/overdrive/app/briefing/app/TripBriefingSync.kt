@@ -151,8 +151,9 @@ object TripBriefingSync {
         return JSONObject().put("saved", saved).put("recent", recent)
     }
 
-    private fun place(label: String, lat: Double, lng: Double): JSONObject? {
-        if (label.isBlank() || lat.isNaN() || lng.isNaN()) return null
+    internal fun place(label: String, lat: Double, lng: Double): JSONObject? {
+        // Skip malformed entries before they can invalidate the entire sync payload.
+        if (label.isBlank() || lat !in -90.0..90.0 || lng !in -180.0..180.0) return null
         return JSONObject().put("label", label.trim()).put("lat", lat).put("lng", lng)
     }
 }

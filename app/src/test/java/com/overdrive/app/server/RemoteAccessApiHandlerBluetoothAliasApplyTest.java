@@ -448,6 +448,7 @@ public class RemoteAccessApiHandlerBluetoothAliasApplyTest {
         String handler = readRepositoryFile(HANDLER);
         String clear = method(handler, "    public static void noteBluetoothExplicitlyEnabled() {");
         for (String field : new String[] {"parkedBluetoothLockConfirmed = false",
+                "parkedBluetoothDepartureOnly = false",
                 "parkedBluetoothLockConfirmedAtElapsedMs = -1",
                 "parkedBluetoothSafeZoneDisableDirective = false",
                 "parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1",
@@ -459,6 +460,126 @@ public class RemoteAccessApiHandlerBluetoothAliasApplyTest {
         int clearCall = radio.indexOf("RemoteAccessApiHandler.noteBluetoothExplicitlyEnabled()", explicitOn);
         int dispatch = radio.indexOf("String cmd =", clearCall);
         assertTrue(save > 0 && explicitOn > save && clearCall > explicitOn && dispatch > clearCall);
+    }
+
+    /** Every latch clear also clears the departure-only flavour; the normal lock path resets it to a full lock. */
+    @Test
+    public void departureOnlyFlagIsClearedWithEveryLatchClear() throws Exception {
+        String handler = readRepositoryFile(HANDLER);
+        int clears = count(handler, "parkedBluetoothLockConfirmed = false;");
+        assertTrue(clears >= 8);
+        for (int at = handler.indexOf("parkedBluetoothLockConfirmed = false;"); at >= 0;
+                at = handler.indexOf("parkedBluetoothLockConfirmed = false;", at + 1)) {
+            String next = handler.substring(at, handler.indexOf(";", handler.indexOf("\n", at) + 1) + 1);
+            assertTrue(next, next.contains("parkedBluetoothDepartureOnly = false;"));
+        }
+        int performStart = handler.indexOf("    private static void perform(ProximityEvaluator.Snapshot reading, JSONObject settings, long observed,\n"
+                + "                                String instance, long serial, String generation)");
+        String satisfied = handler.substring(handler.indexOf("@Override void satisfied() throws Exception {", performStart),
+                handler.indexOf("@Override void lockBlockedInsideSafeZone(", performStart));
+        int set = satisfied.indexOf("parkedBluetoothLockConfirmed = true;");
+        assertTrue(set > 0 && satisfied.indexOf("parkedBluetoothDepartureOnly = false;", set) > set);
+        assertFalse(satisfied.contains("parkedBluetoothDepartureOnly = true"));
+        // Exactly one place arms the departure-only flavour.
+        assertEquals(1, count(handler, "parkedBluetoothDepartureOnly = true;"));
+    }
+
+    /** Only a confident Inside fix that blocks a lock, with the Bluetooth option on, can reach the hook. */
+    @Test
+    public void departureOnlyHookRunsOnlyForALockBlockedInsideASafeZone() throws Exception {
+        String handler = readRepositoryFile(HANDLER);
+        String bind = method(handler, "        final boolean bindSafeZones(JSONObject settings) {");
+        assertTrue(bind.contains("safeZoneLockBlockedInside = safeZoneLease == null && \"lock\".equals(action)\n"
+                + "                    && \"inside_safe_zone\".equals(result.actionReason(action)) && result.shouldDisableBluetooth();"));
+        String decision = handler.substring(handler.indexOf("    private static void performDecision(ActionDecision decision, JSONObject settings)"));
+        int lockEnabled = decision.indexOf("if (!settings.optBoolean(\"unlock\".equals(action) ? \"unlockEnabled\" : \"lockEnabled\")) {");
+        int bound = decision.indexOf("if (!decision.bindSafeZones(live)) {");
+        int hook = decision.indexOf("if (decision.safeZoneLockBlockedInside) decision.lockBlockedInsideSafeZone(live);");
+        int blocked = decision.indexOf("recordAction(action, \"blocked\", decision.blockedReason(\"Safe-zone restriction paused this action\"));");
+        assertTrue(lockEnabled > 0 && bound > lockEnabled && hook > bound && blocked > hook);
+        assertEquals(1, count(handler, "decision.lockBlockedInsideSafeZone("));
+        // Key-fob decisions keep the no-op default: they never arm the phone walk-away latch.
+        int fobStart = handler.indexOf("    private static void performKeyFob(");
+        int fobEnd = handler.indexOf("    /** Both sources share the same final command guards and outcome delivery. */", fobStart);
+        assertTrue(fobStart > 0 && fobEnd > fobStart);
+        assertFalse(handler.substring(fobStart, fobEnd).contains("lockBlockedInsideSafeZone"));
+    }
+
+    /** The phone hook re-validates like a dispatched lock before arming, and arms once per episode. */
+    @Test
+    public void departureOnlyLatchNeedsAValidFreshWalkAwayAndIsIdempotent() throws Exception {
+        String handler = readRepositoryFile(HANDLER);
+        String hook = method(handler, "            @Override void lockBlockedInsideSafeZone(JSONObject live) throws Exception {");
+        int sourceValid = hook.indexOf("!sourceValid()");
+        int fresh = hook.indexOf("!BluetoothProximityDecisionGuard.fresh(observed, SystemClock.elapsedRealtime(), freshnessMs)");
+        int power = hook.indexOf("readVehiclePowerNow() != 0 || UnifiedConfigManager.isVehicleOnOnlyMode()");
+        int keepAlive = hook.indexOf("!UnifiedConfigManager.isBluetoothKeepAliveEnabled()) return;");
+        int arm = hook.indexOf("parkedBluetoothLockConfirmed = true;");
+        assertTrue(sourceValid > 0 && fresh > sourceValid && power > fresh && keepAlive > power && arm > keepAlive);
+        assertTrue(hook.indexOf("live.optBoolean(\"dryRun\", true)") < sourceValid);
+        assertTrue(hook.indexOf("settings.optBoolean(\"dryRun\", true)") < sourceValid);
+        for (String gate : new String[] {"refreshSettings();", "!capturedEpisodeCurrent(current)",
+                "current.satisfiedEpisodeId == reading.episodeId", "!config.optBoolean(\"lockEnabled\")",
+                "!config.optBoolean(\"restrictLockToOutsideSafeZones\")",
+                "!config.optBoolean(\"parkedBluetoothSafeZoneEnabled\")",
+                "parkedBluetoothExplicitOnOverride || lastObservedPower != 0",
+                "episode.equals(parkedBluetoothDepartureOnlyEpisode)) return;"}) {
+            assertTrue(gate, hook.contains(gate));
+            assertTrue(gate, hook.indexOf(gate) < arm);
+        }
+        // Idempotent: the episode is remembered before the live-latch check, and a live latch keeps its time.
+        int remember = hook.indexOf("parkedBluetoothDepartureOnlyEpisode = episode;");
+        int liveLatch = hook.indexOf("&& scope.equals(parkedBluetoothLockConfirmedScope)) return;");
+        assertTrue(remember > 0 && liveLatch > remember && arm > liveLatch);
+        assertTrue(hook.contains("&& lastDoorOpenedElapsed < parkedBluetoothLockConfirmedAtElapsedMs"));
+        assertTrue(hook.indexOf("parkedBluetoothDepartureOnly = true;") > arm);
+        assertTrue(hook.contains("parkedBluetoothLockConfirmedScope = scope;"));
+    }
+
+    /** A departure-only latch swaps "still locked" for "closures shut" and always needs door edges. */
+    @Test
+    public void departureOnlyDisableNeedsShutClosuresAndDoorEdgesOnEveryPlatform() throws Exception {
+        String handler = readRepositoryFile(HANDLER);
+        String compute = method(handler, "    private static boolean computeParkedBluetoothSafeZoneDisable(int power) {");
+        // Existing gates stay: key inside (#715), vehicle-on-only, explicit ON, power, scope, door edge.
+        for (String gate : new String[] {"RemoteAccessSettings.lockWithKeyInside(config) && KEY_INSIDE.latched()",
+                "UnifiedConfigManager.isVehicleOnOnlyMode()", "parkedBluetoothExplicitOnOverride",
+                "!(config + \"|\" + presenceModeGeneration).equals(parkedBluetoothLockConfirmedScope)",
+                "if (lastDoorOpenedElapsed >= lockConfirmedAt) {",
+                "config.optLong(\"revision\") != settingsSnapshot.optLong(\"revision\")"})
+            assertTrue(gate, compute.contains(gate));
+        int captured = compute.indexOf("departureOnly = parkedBluetoothDepartureOnly;");
+        int edges = compute.indexOf("if ((departureOnly || !DiLink5Platform.isSelected()) && !doorOpenObserverRegistered) return false;");
+        int vehicle = compute.indexOf("if (departureOnly ? !parkedClosuresShut() : !parkedVehicleStillLocked()) {");
+        int zones = compute.indexOf("ProximitySafeZonePolicy.Result safeZones = safeZoneSnapshot(settingsSnapshot);");
+        assertTrue(captured > 0 && edges > captured && vehicle > edges && zones > vehicle);
+        assertTrue(compute.indexOf("|| parkedBluetoothDepartureOnly != departureOnly", zones) > zones);
+        String closures = method(handler, "    private static boolean parkedClosuresShut() {");
+        assertTrue(closures.contains("readAllDoorOpenStates()"));
+        assertTrue(closures.contains("DiLink5GateActuationPolicy.doorBlockReason(doors) == null"));
+        assertFalse(closures.contains("readDoorLockState"));
+        assertFalse(closures.contains("readDiLink5GateDoorLockEvidence"));
+        String locked = method(handler, "    private static boolean parkedVehicleStillLocked() {");
+        assertTrue(locked.indexOf("if (lockState != BydDataCollector.DOOR_STATE_LOCK) return false;")
+                < locked.indexOf("return parkedClosuresShut();"));
+    }
+
+    /** Status exposes the flavour, and the page names the walk-away (not a lock) when it applies. */
+    @Test
+    public void departureOnlyIsReportedAndExplainedOnThePage() throws Exception {
+        String handler = readRepositoryFile(HANDLER);
+        assertTrue(handler.contains("departureOnly = walkAwayLockConfirmed && parkedBluetoothDepartureOnly;"));
+        assertTrue(handler.contains(".put(\"departureOnly\", departureOnly)"));
+        String js = readRepositoryFile("app/src/main/assets/web/shared/remote-access.js");
+        int walkAway = js.indexOf("&& parkedBluetooth.departureOnly === true) {");
+        int walkAwayText = js.indexOf("tr('safe_zones_bluetooth_disabled_walk_away_detail',", walkAway);
+        int lockText = js.indexOf("tr('safe_zones_bluetooth_disabled_detail',", walkAway);
+        assertTrue(walkAway > 0 && walkAwayText > walkAway && lockText > walkAwayText);
+        String en = readRepositoryFile("app/src/main/assets/web/i18n/en.json");
+        assertTrue(en.contains("\"safe_zones_bluetooth_disabled_walk_away_detail\": \"The walk-away is confirmed"));
+        assertTrue(en.contains("or a confirmed walk-away while automatic lock is restricted to outside safe zones"));
+        String html = readRepositoryFile("app/src/main/assets/web/local/remote-access.html");
+        assertTrue(html.contains("or a confirmed walk-away while automatic lock is restricted to outside safe zones"));
     }
 
     private static int count(String text, String needle) {

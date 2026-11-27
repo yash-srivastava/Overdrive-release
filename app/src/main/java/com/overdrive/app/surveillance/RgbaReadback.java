@@ -73,6 +73,29 @@ final class RgbaReadback {
         }
     }
 
+    /** Rare post-verification fallback: pack into unpublished RGB using one preallocated row. */
+    boolean packRows(ByteBuffer rgba, byte[] rgb, byte[] row) {
+        int rowBytes = width * 4;
+        if (!validSource(rgba) || rgb == null || rgb.length != rgbBytes
+                || row == null || row.length != rowBytes) return false;
+        int rowRgbBytes = width * 3;
+        try {
+            // Read mapped memory sequentially and reverse only the destination rows.
+            for (int y = height - 1; y >= 0; y--) {
+                rgba.get(row, 0, rowBytes);
+                int dst = y * rowRgbBytes;
+                for (int src = 0; src < rowBytes; src += 4) {
+                    rgb[dst++] = row[src];
+                    rgb[dst++] = row[src + 1];
+                    rgb[dst++] = row[src + 2];
+                }
+            }
+            return true;
+        } finally {
+            rgba.position(0);
+        }
+    }
+
     void clear() {
         scratch = null;
     }

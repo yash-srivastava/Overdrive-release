@@ -47,7 +47,7 @@
                                   // true, making THREAT_HIGH(loiter) UNREACHABLE and
                                   // pinning every detection at MEDIUM(approach).
 #define V2_BYTES_PER_PIXEL   3    // RGB
-#define V2_QUADRANT_SIZE     (V2_QUADRANT_WIDTH * V2_QUADRANT_HEIGHT * V2_BYTES_PER_PIXEL)
+#define V2_LUMA_SIZE         (V2_QUADRANT_WIDTH * V2_QUADRANT_HEIGHT)
 #define V2_SAMPLED_WIDTH     (V2_QUADRANT_WIDTH / 4)
 #define V2_SAMPLED_SIZE      (V2_SAMPLED_WIDTH * (V2_QUADRANT_HEIGHT / 4))
 #define V2_OSCILLATION_WINDOW 10  // Track last 10 frames for oscillation detection
@@ -227,11 +227,11 @@ struct QuadrantState {
     // Stage 3: Per-block temporal confidence
     float blockConfidence[V2_TOTAL_BLOCKS];
     
-    // Full RGB history remains available for chroma and arbitrary-offset flow.
-    uint8_t frameHistory[V2_FRAME_HISTORY][V2_QUADRANT_SIZE];
-    // Lazily derived stride-4 luma, tied to the same immutable history slot.
+    // Exact luma for arbitrary-offset flow; RGB only at stride-4 sample sites.
+    // All planes share one ring index and are overwritten together.
+    uint8_t frameLuma[V2_FRAME_HISTORY][V2_LUMA_SIZE];
+    uint8_t sampledRgb[V2_FRAME_HISTORY][V2_SAMPLED_SIZE * V2_BYTES_PER_PIXEL];
     uint8_t sampledLuma[V2_FRAME_HISTORY][V2_SAMPLED_SIZE];
-    bool    sampledLumaReady[V2_FRAME_HISTORY];
     int     historyIndex;
     int     historyCount;
     

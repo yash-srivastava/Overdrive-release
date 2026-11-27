@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recording_library_loading">Chargement des enregistrements</string>
+    <string name="recording_library_refreshing">Actualisation des enregistrements</string>
+    <string name="recording_library_loading_more">Chargement d’autres enregistrements</string>
+    <string name="recording_library_page_error">Impossible de charger plus d’enregistrements.</string>
+    <string name="recording_library_page_unavailable">Les autres enregistrements sont temporairement indisponibles.</string>
+    <string name="recording_library_refresh_error">Actualisation impossible. Affichage des enregistrements déjà chargés.</string>
+    <string name="recording_library_fatal_title">Impossible d’ouvrir les enregistrements</string>
+    <string name="recording_library_fatal_body">Vérifiez le service d’enregistrement et le stockage, puis réessayez.</string>
+    <string name="recording_library_select">Sélectionner des enregistrements</string>
+    <string name="recording_library_open_filters">Filtrer les enregistrements</string>
+    <string name="recording_library_clear_search">Effacer la recherche de lieu</string>
+    <string name="recording_preview_details">Détails de l’enregistrement</string>
+    <string name="cd_expand_recording_details">Afficher les détails de l’enregistrement</string>
+    <string name="cd_collapse_recording_details">Masquer les détails de l’enregistrement</string>
+    <string name="recording_item_description">%1$s, %2$s, %3$s. Ouvrir l’enregistrement.</string>
+    <string name="recording_item_selection_description">%1$s, %2$s, %3$s. %4$s</string>
+    <string name="recording_item_selected_action">Sélectionné. Appuyez deux fois pour désélectionner.</string>
+    <string name="recording_item_not_selected_action">Non sélectionné. Appuyez deux fois pour sélectionner.</string>
+    <string name="recording_item_select">Sélectionner %1$s</string>
+    <string name="recording_item_deselect">Désélectionner %1$s</string>
+    <string name="cd_pause">Pause</string>
+    <string name="cd_player_unmute">Activer le son</string>
+    <string name="cd_player_mute_audio">Couper le son</string>
+    <string name="video_player_buffering">Chargement de la vidéo</string>
+    <string name="video_player_error_title">Impossible de lire cet enregistrement</string>
+    <string name="video_player_error_body">Le fichier est peut-être indisponible ou le périphérique de stockage s’est déconnecté.</string>
+    <string name="video_player_retry">Réessayer</string>
+    <string name="video_player_next">Enregistrement suivant</string>
+    <string name="video_timeline_empty">Chronologie des événements. Aucun événement détecté.</string>
+    <string name="video_timeline_events">Chronologie des événements. %1$d événements détectés. Appuyez pour aller à l’événement le plus proche.</string>
+    <string name="video_timeline_selected">Événement %1$s à %2$s</string>
+</resources>

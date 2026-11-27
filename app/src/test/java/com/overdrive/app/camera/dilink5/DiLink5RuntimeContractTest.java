@@ -388,7 +388,7 @@ public class DiLink5RuntimeContractTest {
                 "if (USE_DILINK5_QCARCAM_PATH)",
                 "requestDiLink5SourceOnlyRecovery(",
                 "return;",
-                "restartInProgress.compareAndSet(false, true)");
+                "claimRestart()");
         assertTrue(camera.contains(
                 "DiLink 5 camera startup degraded to camera-off mode"));
         assertTrue(camera.contains(
@@ -1076,7 +1076,7 @@ public class DiLink5RuntimeContractTest {
         assertTrue(cropper.contains(
                 "quadrantCornerOffsetsXY, false);"));
         assertTrue(streamScaler.contains(
-                "this(outputWidth, outputHeight, quadrantStripOffsetX, false);"));
+                "this(outputWidth, outputHeight, null, false);"));
         assertTrue(previewSampler.contains(
                 "this(sharedContext, false);"));
         assertTrue(pipeline.contains(

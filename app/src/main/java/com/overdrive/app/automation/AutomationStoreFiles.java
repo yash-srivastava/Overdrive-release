@@ -20,6 +20,17 @@ final class AutomationStoreFiles {
         return new JSONObject(new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
     }
 
+    /** Whether the live file holds a parseable JSON object and may replace the backup. */
+    static boolean isParseable(File file, String label, Consumer<String> logWarning) {
+        try {
+            readObject(file);
+            return true;
+        } catch (Exception e) {
+            logWarning.accept("Live " + label + " config is unparseable — keeping the existing backup");
+            return false;
+        }
+    }
+
     /** Sync scratch bytes before preparing the backup and replacing the live file. */
     static boolean save(File scratch, File live, File backup, byte[] bytes,
                         Predicate<File> backupAllowed, String label, Consumer<String> logError) {

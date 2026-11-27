@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
@@ -153,7 +154,11 @@ public final class AgeCodec {
         private final long total;
         private long pos;
         private long bufIndex = -1;
+        // Lazily allocated, stream-local scratch: a final short chunk uses only its valid prefix.
+        private byte[] plainBuffer;
         private byte[] buf;
+        private int bufLength;
+        private final byte[] one = new byte[1];
 
         CipherStream(Material m, File plain, long plainLen, long offset)
                 throws IOException, GeneralSecurityException {
@@ -173,7 +178,6 @@ public final class AgeCodec {
 
         @Override
         public int read() throws IOException {
-            byte[] one = new byte[1];
             int n = read(one, 0, 1);
             return n <= 0 ? -1 : (one[0] & 0xff);
         }
@@ -192,23 +196,33 @@ public final class AgeCodec {
             long index = rel / SEALED;
             int within = (int) (rel % SEALED);
             if (index != bufIndex) {
-                buf = sealChunk(index);
+                // A failed read or encryption may have overwritten scratch; never publish it.
+                bufIndex = -1;
+                sealChunk(index);
                 bufIndex = index;
             }
-            int n = Math.min(len, buf.length - within);
+            int n = Math.min(len, bufLength - within);
             System.arraycopy(buf, within, b, off, n);
             pos += n;
             return n;
         }
 
-        private byte[] sealChunk(long index) throws IOException {
+        private void sealChunk(long index) throws IOException {
             long start = index * CHUNK;
             int n = (int) Math.min(CHUNK, plainLen - start);
-            byte[] p = new byte[Math.max(0, n)];
+            if (plainBuffer == null) {
+                int capacity = (int) Math.min(CHUNK, plainLen);
+                plainBuffer = new byte[capacity];
+                buf = new byte[capacity + TAG];
+            }
             raf.seek(start);
-            raf.readFully(p, 0, p.length);
+            raf.readFully(plainBuffer, 0, n);
             try {
-                return chacha(true, payloadKey, streamNonce(index, index == chunks - 1), p);
+                Cipher c = initChacha(true, payloadKey, streamNonce(index, index == chunks - 1));
+                // Use the caller-supplied output overload; no new result array at this layer.
+                int written = c.doFinal(plainBuffer, 0, n, buf, 0);
+                if (written != n + TAG) throw new IOException("Unexpected age chunk length");
+                bufLength = written;
             } catch (GeneralSecurityException e) {
                 throw new IOException(e.getMessage(), e);
             }
@@ -216,6 +230,8 @@ public final class AgeCodec {
 
         @Override
         public void close() throws IOException {
+            // Do not retain the last plaintext chunk after the stream is closed.
+            if (plainBuffer != null) Arrays.fill(plainBuffer, (byte) 0);
             raf.close();
         }
     }
@@ -300,6 +316,11 @@ public final class AgeCodec {
 
     private static byte[] chacha(boolean encrypt, byte[] key, byte[] nonce, byte[] in)
             throws GeneralSecurityException {
+        return initChacha(encrypt, key, nonce).doFinal(in);
+    }
+
+    private static Cipher initChacha(boolean encrypt, byte[] key, byte[] nonce)
+            throws GeneralSecurityException {
         Cipher c;
         try {
             c = Cipher.getInstance("ChaCha20/Poly1305/NoPadding");
@@ -308,7 +329,7 @@ public final class AgeCodec {
         }
         c.init(encrypt ? Cipher.ENCRYPT_MODE : Cipher.DECRYPT_MODE,
                 new SecretKeySpec(key, "ChaCha20"), new IvParameterSpec(nonce));
-        return c.doFinal(in);
+        return c;
     }
 
     private static byte[] hmac(byte[] key, byte[] data) throws GeneralSecurityException {

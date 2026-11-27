@@ -1726,28 +1726,6 @@ public class AppUpdater {
         });
     }
 
-    // ==================== COMPANION APK INSTALL (OverDrive Launcher, WP-H) ====================
-    //
-    // Silent install of a SEPARATE companion package (com.overdrive.launcher)
-    // from its OWN GitHub release track. This is fully ADDITIVE and REUSES the
-    // download + `pm install` primitives of the core self-update path
-    // ({@link #firstApkAsset}, {@link #buildClient}, {@link #downloadApkOkHttp} /
-    // {@link #buildDownloadCommand}, {@link #runShell}), but deliberately does
-    // NOT touch ANY of core's self-update bookkeeping:
-    //   - no {@link #stopAllDaemons()} / kill cascade (we are NOT replacing
-    //     OURSELVES, so no core process needs to die),
-    //   - no per-channel baseline / VERSION_FILE / PREF_JUST_UPDATED writes
-    //     (those track CORE's version, not the companion's),
-    //   - no `am start` relaunch of MainActivity.
-    // `pm install -r` of a DIFFERENT package never kills core's process, so the
-    // simple synchronous flow the pre-daemon app-process path used is sufficient
-    // and safe from either UID (runShell tunnels through the ADB daemon launcher
-    // when the app UID can't write /data/local/tmp). The core self-update
-    // methods ({@link #downloadAndInstall} / {@link #runDetachedInstall}) are
-    // left BYTE-IDENTICAL by this addition.
-    private static final String COMPANION_APK_PATH =
-            com.overdrive.app.util.ScratchRoot.path("overdrive_companion.apk");
-
     /** No-op shell callback for fire-and-forget cleanup commands. */
     private static final com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback NOOP_SHELL =
             new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
@@ -1755,156 +1733,6 @@ public class AppUpdater {
                 @Override public void onLaunched() {}
                 @Override public void onError(String e) {}
             };
-
-    /**
-     * Resolve, download, and silently install a companion APK from a GitHub
-     * release track that is INDEPENDENT of core's update channels. Runs on the
-     * shared {@link #executor}. The companion (e.g. {@code com.overdrive.launcher})
-     * is a fully optional add-on: this method has no side effect on core's own
-     * version/state, and core behaves identically whether or not it is ever
-     * called.
-     *
-     * <p>Serializes against the core self-update via the SAME process-wide
-     * {@link #tryBeginInstall()} gate so a companion install and a core update
-     * can't race the shared {@code /data/local/tmp} staging + {@code pm install}.
-     *
-     * @param repo     {@code "owner/name"} GitHub repo of the companion release
-     *                 track (parameterized — the companion ships separately from
-     *                 core, so its repo/tag are supplied by the caller)
-     * @param tag      release tag to install (e.g. {@code "prod"})
-     * @param callback progress / success / error surface — SAME contract as the
-     *                 core install ({@link InstallCallback})
-     */
-    public void installCompanionApk(String repo, String tag, InstallCallback callback) {
-        cancelled = false;
-        executor.execute(() -> {
-            boolean gateHeld = false;
-            try {
-                if (repo == null || repo.isEmpty() || tag == null || tag.isEmpty()) {
-                    postInstallError(callback, "No companion release configured");
-                    return;
-                }
-                if (!tryBeginInstall()) {
-                    postInstallError(callback, "Another install is already in progress");
-                    return;
-                }
-                gateHeld = true;
-
-                // Step 1: resolve the first APK asset on the companion release.
-                // Reuses the exact GitHub-release asset resolution the core path
-                // uses (firstApkAsset), just against the companion repo/tag.
-                postProgress(callback, "Resolving launcher release...");
-                String apiUrl = "https://api.github.com/repos/" + repo
-                        + "/releases/tags/" + tag;
-                OkHttpClient client = buildClient(15, 15);
-                Request request = new Request.Builder()
-                        .url(apiUrl)
-                        .header("Accept", "application/vnd.github.v3+json")
-                        .build();
-                String downloadUrl;
-                try (Response response = client.newCall(request).execute()) {
-                    if (!response.isSuccessful()) {
-                        postInstallError(callback, "GitHub API error: HTTP " + response.code());
-                        return;
-                    }
-                    JSONObject release = new JSONObject(response.body().string());
-                    String[] apk = firstApkAsset(release.optJSONArray("assets"));
-                    if (apk == null) {
-                        postInstallError(callback, "No APK found in launcher release");
-                        return;
-                    }
-                    downloadUrl = apk[0];
-                }
-
-                // Step 2: download to a companion-specific path (NEVER the core
-                // APK_PATH, so a concurrent core update and this can't clobber
-                // each other's staged bytes). Same two transfer paths as the
-                // core install: direct OkHttp when we can write /data/local/tmp
-                // (daemon UID), else the ADB-tunnelled shell download.
-                postProgress(callback, "Downloading launcher...");
-                runCallback(() -> callback.onDownloadProgress(-1));
-                final String[] dlResult = {null};
-                if (canWriteLocalTmp()) {
-                    try {
-                        downloadApkOkHttp(downloadUrl, COMPANION_APK_PATH, callback);
-                        dlResult[0] = "OK";
-                    } catch (Exception e) {
-                        dlResult[0] = "ERROR: " + (e.getMessage() == null ? "download failed" : e.getMessage());
-                    }
-                } else {
-                    final boolean[] dlDone = {false};
-                    String downloadCmd = buildDownloadCommand(downloadUrl, COMPANION_APK_PATH);
-                    runShellLong(downloadCmd, DOWNLOAD_DEADLINE_MS, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
-                        @Override public void onLog(String m) { dlResult[0] = m; }
-                        @Override public void onLaunched() { dlDone[0] = true; synchronized (dlDone) { dlDone.notify(); } }
-                        @Override public void onError(String e) { dlResult[0] = "ERROR: " + e; dlDone[0] = true; synchronized (dlDone) { dlDone.notify(); } }
-                    });
-                    // Wait must outlast the deadline — see the invariant note.
-                    awaitFlag(dlDone, DOWNLOAD_DEADLINE_MS + WAIT_MARGIN_MS);
-                }
-
-                if (cancelled) {
-                    runShell("rm -f " + COMPANION_APK_PATH, NOOP_SHELL);
-                    postInstallError(callback, "Cancelled");
-                    return;
-                }
-                String dlOutput = dlResult[0] != null ? dlResult[0] : "";
-                if (dlOutput.startsWith("ERROR") || !dlOutput.contains("OK")) {
-                    postInstallError(callback, "Download failed: " + dlOutput);
-                    return;
-                }
-                runCallback(() -> callback.onDownloadProgress(100));
-
-                // Step 3: size sanity check (same >=1MB floor as the core path).
-                final boolean[] szDone = {false};
-                final String[] szResult = {null};
-                runShell("stat -c%s " + COMPANION_APK_PATH + " 2>/dev/null || echo 0",
-                        new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
-                    @Override public void onLog(String m) { szResult[0] = m.trim(); }
-                    @Override public void onLaunched() { szDone[0] = true; synchronized (szDone) { szDone.notify(); } }
-                    @Override public void onError(String e) { szResult[0] = "0"; szDone[0] = true; synchronized (szDone) { szDone.notify(); } }
-                });
-                synchronized (szDone) { if (!szDone[0]) szDone.wait(10000); }
-                long fileSize = 0;
-                try { fileSize = Long.parseLong(szResult[0].trim()); } catch (Exception ignored) {}
-                if (fileSize < 1_000_000) {
-                    runShell("rm -f " + COMPANION_APK_PATH, NOOP_SHELL);
-                    postInstallError(callback, "Invalid APK (size: " + fileSize + ")");
-                    return;
-                }
-
-                // Step 4: `pm install -r` the companion. NO daemon kill, NO
-                // relaunch, NO baseline writes — this replaces a DIFFERENT
-                // package, so core keeps running untouched.
-                postProgress(callback, "Installing launcher...");
-                final boolean[] done = {false};
-                final String[] result = {null};
-                String installCmd = "pm install -r " + COMPANION_APK_PATH
-                        + "; rm -f " + COMPANION_APK_PATH;
-                runShellLong(installCmd, INSTALL_DEADLINE_MS, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
-                    @Override public void onLog(String m) { Log.i(TAG, "Companion install: " + m); result[0] = m; }
-                    @Override public void onLaunched() { done[0] = true; synchronized (done) { done.notify(); } }
-                    @Override public void onError(String e) { result[0] = "ERROR: " + e; done[0] = true; synchronized (done) { done.notify(); } }
-                });
-                // Wait must outlast the deadline — see the invariant note.
-                awaitFlag(done, INSTALL_DEADLINE_MS + WAIT_MARGIN_MS);
-
-                String output = result[0] != null ? result[0] : "";
-                if (output.toLowerCase().contains("success")) {
-                    postProgress(callback, "Launcher installed.");
-                    runCallback(callback::onSuccess);
-                } else {
-                    runShell("rm -f " + COMPANION_APK_PATH, NOOP_SHELL);
-                    postInstallError(callback, "Install failed: " + output);
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Companion install error: " + e.getMessage());
-                postInstallError(callback, e.getMessage());
-            } finally {
-                if (gateHeld) endInstall();
-            }
-        });
-    }
 
     /**
      * Build a shell command that downloads a URL to a file path.
@@ -1963,11 +1791,6 @@ public class AppUpdater {
      * {@link #cancelled} between reads so the dialog's Cancel button
      * stops the transfer within one buffer's worth.
      */
-    private void downloadApkOkHttp(String url, String outputPath, InstallCallback callback)
-            throws Exception {
-        downloadApkOkHttp(url, outputPath, callback, null);
-    }
-
     private void downloadApkOkHttp(String url, String outputPath, InstallCallback callback,
                                    AutoInstallGuard guard) throws Exception {
         // Drop any stale APK from a previous attempt so a partial download
@@ -2281,25 +2104,6 @@ public class AppUpdater {
     }
 
     /**
-     * Set when abort-restart could not resume trip sampling, so the caller can
-     * tell the user their trip is no longer recording. Null when the last abort
-     * succeeded or none was attempted.
-     */
-    private volatile String lastAbortRestartFailure;
-
-    /**
-     * Suffix warning the user that trip recording did not resume, or "" when it
-     * did. Appended to the safe-stop message so a frozen recorder is visible
-     * instead of hidden behind "stopped safely".
-     */
-    private String abortRestartWarning() {
-        String failure = lastAbortRestartFailure;
-        return failure == null ? ""
-                : " (warning: trip recording did not resume — " + failure
-                        + "; restart the camera daemon to resume)";
-    }
-
-    /**
      * Best-effort cancellation for a prepare request whose subsequent install
      * handoff failed. The endpoint is idempotent when trips are disabled or no
      * active trip was quiesced.
@@ -2328,11 +2132,6 @@ public class AppUpdater {
                 Log.e(TAG, "abort-restart returned HTTP " + statusCode
                         + (detail.isEmpty() ? "" : ": " + detail)
                         + " — trip sampling may still be frozen");
-                lastAbortRestartFailure = detail.isEmpty()
-                        ? "camera daemon could not resume trip recording"
-                        : detail;
-            } else {
-                lastAbortRestartFailure = null;
             }
         } catch (Exception e) {
             Log.w(TAG, "Could not abort prepared camera restart: "
@@ -3518,82 +3317,6 @@ public class AppUpdater {
         } catch (Exception e) {
             return false;
         }
-    }
-
-    /**
-     * Fetch the latest published version label for the current channel from
-     * GitHub Releases (best-effort, non-blocking). Returns the same label
-     * format as the on-device "display version" (e.g. "alpha-v6.1") so the
-     * UI can swap one for the other without further parsing.
-     *
-     * Used by the Settings → About surface so the user sees the truth-source
-     * version (what's published) rather than what was last installed locally.
-     * Falls back through {@link #onError} when offline / proxy down.
-     */
-    public interface RemoteVersionCallback {
-        void onResult(String version);
-        void onError(String error);
-    }
-
-    public void fetchLatestReleaseVersion(RemoteVersionCallback callback) {
-        // The published label for the resolved channel. For alpha this is the
-        // bare rolling-head tag (the legacy "alpha" release); for braveheart
-        // it's the "braveheart" tag. Both expose a single .apk whose name
-        // extractVersion parses into the display label.
-        String channel = resolveChannel();
-        if (channel == null || channel.isEmpty()) {
-            runCallback(() -> callback.onError("No channel configured"));
-            return;
-        }
-        executor.execute(() -> {
-            try {
-                String apiUrl = "https://api.github.com/repos/" + GITHUB_REPO +
-                        "/releases/tags/" + channel;
-
-                OkHttpClient client = buildClient(10, 10);
-                Request request = new Request.Builder()
-                        .url(apiUrl)
-                        .header("Accept", "application/vnd.github.v3+json")
-                        .build();
-
-                try (Response response = client.newCall(request).execute()) {
-                    if (!response.isSuccessful()) {
-                        String err = "GitHub API HTTP " + response.code();
-                        runCallback(() -> callback.onError(err));
-                        return;
-                    }
-                    JSONObject release = new JSONObject(response.body().string());
-                    JSONArray assets = release.optJSONArray("assets");
-                    String label = null;
-                    if (assets != null) {
-                        for (int i = 0; i < assets.length(); i++) {
-                            JSONObject asset = assets.getJSONObject(i);
-                            String name = asset.optString("name", "");
-                            if (name.endsWith(".apk")) {
-                                label = extractVersion(name);
-                                break;
-                            }
-                        }
-                    }
-                    if (label == null || label.isEmpty() || "unknown".equals(label)) {
-                        // Fallback to the release tag_name when the asset name
-                        // doesn't expose a parseable version.
-                        label = release.optString("tag_name", "");
-                    }
-                    final String result = label;
-                    runCallback(() -> {
-                        if (result == null || result.isEmpty()) {
-                            callback.onError("No version in release");
-                        } else {
-                            callback.onResult(result);
-                        }
-                    });
-                }
-            } catch (Exception e) {
-                String err = e.getMessage() != null ? e.getMessage() : "Unknown error";
-                runCallback(() -> callback.onError(err));
-            }
-        });
     }
 
     // ==================== Alpha catalog (pick-any) ====================

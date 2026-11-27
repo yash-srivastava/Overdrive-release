@@ -344,7 +344,6 @@ public class HardwareEventRecorderGpu {
         this.writerAbortListener = listener;
     }
     public boolean isWriterAborted() { return writerAbortedCorrupt; }
-    public String getWriterAbortedErrorMessage() { return writerAbortedErrorMessage; }
     // Log throttle for the "encoder hasn't published format" spin path.
     // The drainer's 16 ms cadence would spam this same line ~70 Hz on a
     // wedged encoder; throttle to once per 30 s so the log captures the
@@ -1844,12 +1843,6 @@ public class HardwareEventRecorderGpu {
     }
 
     /**
-     * Sets the codec MIME type before initialization.
-     * Must be called before init().
-     *
-     * @param mimeType MIMETYPE_VIDEO_AVC (H.264) or MIMETYPE_VIDEO_HEVC (H.265)
-     */
-    /**
      * Skip KEY_OPERATING_RATE on this encoder. Call before {@link #init()}.
      * Secondary encoders running concurrently with a primary one (e.g. OEM
      * dashcam alongside pano) should disable this so the SDM665 Venus
@@ -1863,16 +1856,6 @@ public class HardwareEventRecorderGpu {
         this.pinOperatingRate = pin;
     }
 
-    public void setCodecMimeType(String mimeType) {
-        if (encoder != null) {
-            logger.warn("Cannot change codec after initialization - restart required");
-            return;
-        }
-        this.codecMimeType = mimeType;
-        hevcFallback = false;
-        logger.info("Codec set to: " + (mimeType.equals(MediaFormat.MIMETYPE_VIDEO_HEVC) ? "H.265/HEVC" : "H.264/AVC"));
-    }
-    
     /**
      * Gets the current codec MIME type.
      */
@@ -5051,7 +5034,7 @@ public class HardwareEventRecorderGpu {
 
                     // Geo sidecar for non-sentry flows (cam_*, proximity_*).
                     // Sentry events (event_*.mp4) use the richer path
-                    // through SurveillanceEngineGpu.scheduleSegmentMetadataFlush
+                    // through SurveillanceEngineGpu.scheduleSegmentMetadataFlushWithSnapshot
                     // which produces the v3 sidecar with actors/hero +
                     // geo. Dashcam + proximity recordings have no actor
                     // tracking, so they get a lighter sidecar covering
@@ -5660,15 +5643,6 @@ public class HardwareEventRecorderGpu {
         }
     }
 
-    /**
-     * Gets the number of recorded frames.
-     * 
-     * @return Frame count
-     */
-    public int getRecordedFrames() {
-        return recordedFrames;
-    }
-    
     /**
      * Get the actual duration of the pre-record buffer that was flushed.
      * This may be longer than the configured preRecordMs because the H.264

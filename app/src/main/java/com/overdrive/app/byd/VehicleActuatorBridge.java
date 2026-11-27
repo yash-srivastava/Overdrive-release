@@ -61,7 +61,6 @@ public final class VehicleActuatorBridge {
     public static final int DILINK5_CANCELLATION_REGISTERED = 2;
     private static final ThreadLocal<LocalActuationCancellation> REMOTE_KEY_CANCELLATION =
             new ThreadLocal<>();
-    private static final ThreadLocal<Boolean> SHELL_START_UNCERTAIN = new ThreadLocal<>();
     /** Daemon side, per dispatching thread: the app's lock outcome of the last DI5 dispatch. */
     private static final ThreadLocal<String> LAST_DILINK5_LOCK_OUTCOME = new ThreadLocal<>();
     /** Same freshness the daemon applies to bridged DI5 dynamics. */
@@ -983,9 +982,7 @@ public final class VehicleActuatorBridge {
                 // call so the live ResultReceiver and Parcelable extras stay
                 // intact (they cannot be marshalled through `am` string
                 // extras). UID-2000 only; a real app process never takes it.
-                started = startDiLink5ServiceAsShell(startContext, intent);
-                if (Boolean.TRUE.equals(SHELL_START_UNCERTAIN.get())) serviceMayOwnRequest.set(true);
-                SHELL_START_UNCERTAIN.remove();
+                started = startDiLink5ServiceAsShell(startContext, intent, true, serviceMayOwnRequest);
                 if (started != null) serviceMayOwnRequest.set(true);
                 if (started != null) {
                     if (!diLink5ShellStartLogged) {
@@ -1054,6 +1051,12 @@ public final class VehicleActuatorBridge {
                 || cause instanceof IllegalStateException || cause instanceof NoSuchMethodException;
     }
 
+    /** Start an ordinary app service from the shell daemon with the original callback extras. */
+    public static android.content.ComponentName startDiLink5BackgroundServiceAsShell(
+            android.content.Context context, android.content.Intent intent) {
+        return startDiLink5ServiceAsShell(context, intent, false, null);
+    }
+
     /**
      * Shell-identity ActivityManager start for the synchronous DI5 bridge.
      *
@@ -1070,8 +1073,8 @@ public final class VehicleActuatorBridge {
      * and the caller degrades exactly as before this fallback existed.
      */
     private static android.content.ComponentName startDiLink5ServiceAsShell(
-            android.content.Context context, android.content.Intent intent) {
-        SHELL_START_UNCERTAIN.remove();
+            android.content.Context context, android.content.Intent intent, boolean requireForeground,
+            java.util.concurrent.atomic.AtomicBoolean serviceMayOwnRequest) {
         if (android.os.Process.myUid() != ANDROID_SHELL_UID) return null;
         boolean serviceStartInvoked = false;
         try {
@@ -1101,7 +1104,7 @@ public final class VehicleActuatorBridge {
                         && parameters[6] == int.class) {
                     // Android 11 / API 30: startService(caller, intent, resolvedType,
                     // requireForeground, callingPackage, callingFeatureId, userId)
-                    arguments = new Object[]{null, intent, resolvedType, Boolean.TRUE,
+                    arguments = new Object[]{null, intent, resolvedType, requireForeground,
                             "com.android.shell", null, userId};
                 } else if (parameters.length == 6
                         && parameters[1] == android.content.Intent.class
@@ -1111,7 +1114,7 @@ public final class VehicleActuatorBridge {
                         && parameters[5] == int.class) {
                     // Android 8-10: startService(caller, intent, resolvedType,
                     // requireForeground, callingPackage, userId)
-                    arguments = new Object[]{null, intent, resolvedType, Boolean.TRUE,
+                    arguments = new Object[]{null, intent, resolvedType, requireForeground,
                             "com.android.shell", userId};
                 } else {
                     continue;
@@ -1127,16 +1130,18 @@ public final class VehicleActuatorBridge {
         } catch (java.lang.reflect.InvocationTargetException invocation) {
             Throwable cause = invocation.getCause() != null
                     ? invocation.getCause() : invocation;
-            if (serviceStartInvoked && !isDefiniteServiceStartRejection(cause)) {
-                SHELL_START_UNCERTAIN.set(true);
+            if (serviceMayOwnRequest != null && serviceStartInvoked && !isDefiniteServiceStartRejection(cause)) {
+                serviceMayOwnRequest.set(true);
             }
-            logger.warn("DI5 shell-identity start rejected: " + cause.getMessage());
+            logger.warn("DI5 shell-identity start rejected: " + (requireForeground
+                    ? cause.getMessage() : cause.getClass().getSimpleName()));
             return null;
         } catch (Throwable failed) {
-            if (serviceStartInvoked && !isDefiniteServiceStartRejection(failed)) {
-                SHELL_START_UNCERTAIN.set(true);
+            if (serviceMayOwnRequest != null && serviceStartInvoked && !isDefiniteServiceStartRejection(failed)) {
+                serviceMayOwnRequest.set(true);
             }
-            logger.warn("DI5 shell-identity start failed: " + failed.getMessage());
+            logger.warn("DI5 shell-identity start failed: " + (requireForeground
+                    ? failed.getMessage() : failed.getClass().getSimpleName()));
             return null;
         }
     }

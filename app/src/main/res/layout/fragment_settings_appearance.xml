@@ -258,6 +258,63 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- BYD100F drive mode window (#1002); shown only on that head unit. -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardDriveModeWindow"
+            style="@style/Widget.Overdrive.Revamp.Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:visibility="gone"
+            app:contentPaddingBottom="@dimen/od_space_2"
+            app:contentPaddingTop="@dimen/od_space_2">
+
+            <LinearLayout
+                android:id="@+id/rowDriveModeWindow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:minHeight="@dimen/set_row_link_min_height"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="14dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_drive_mode_window_title"
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:text="@string/settings_drive_mode_window_desc"
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
+
+                    <TextView
+                        android:id="@+id/tvDriveModeWindowStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/od_space_2"
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
+                </LinearLayout>
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/swDriveModeWindow"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
         <!-- Navigation pinning -->
         <com.google.android.material.card.MaterialCardView
             style="@style/Widget.Overdrive.Revamp.Card"

@@ -18,6 +18,24 @@ import java.util.concurrent.atomic.AtomicReference
 
 class DiLink5HostedProjectionBridgeTest {
     @Test
+    fun onlyOptedInShellStartsThroughTheDaemonAndFallsBackOnceOnNull() {
+        fun check(optedIn: Boolean, uid: Int, shellResult: String?, expectedCalls: List<String>) {
+            val calls = mutableListOf<String>()
+            val result = HostedProjectionBoundary.startService(optedIn, uid,
+                asShell = { calls.add("shell"); shellResult },
+                fromContext = { calls.add("context"); "context" },
+            )
+            assertEquals(expectedCalls, calls)
+            assertEquals(expectedCalls.last(), result)
+        }
+        check(true, 2000, "shell", listOf("shell"))
+        check(true, 2000, null, listOf("shell", "context"))
+        check(false, 2000, "shell", listOf("context"))
+        check(true, 10001, "shell", listOf("context"))
+        check(true, 0, "shell", listOf("context"))
+    }
+
+    @Test
     fun confirmedProbeReturnsTheSelectedCoordinatesAndRejectsIncompleteOrOffPanelFrames() {
         fun decode(vararg coordinates: Int) = HostedProjectionBoundary.mapBoundsFromProbe(coordinates, 1920, 720)
         assertEquals(HostedProjectionGeometry.Bounds(640, 220, 1280, 500), decode(640, 220, 1280, 500))
@@ -196,14 +214,40 @@ class DiLink5HostedProjectionBridgeTest {
 
     @Test fun virtualDisplayUsesPreferredThenFallbackFlags() {
         val attempts = mutableListOf<Int>()
-        val allocation = HostedProjectionBoundary.preferredThenFallback<String> { flags ->
+        val preferred = HostedProjectionBoundary.allocateDisplay(sealion7Hdmi = false) { flags ->
+            attempts += flags
+            "preferred display"
+        }
+        assertEquals(listOf(323), attempts)
+        assertEquals(323, preferred?.flags)
+
+        attempts.clear()
+        val allocation = HostedProjectionBoundary.allocateDisplay<String>(sealion7Hdmi = false) { flags ->
             attempts += flags
             if (flags == DiLink5HostedProjectionBridge.FLAGS_FALLBACK) "display" else null
         }
         assertEquals(listOf(323, 322), attempts)
         assertEquals("display", allocation?.value)
         assertEquals(322, allocation?.flags)
-        assertNull(HostedProjectionBoundary.preferredThenFallback<String> { null })
+        assertNull(HostedProjectionBoundary.allocateDisplay<String>(sealion7Hdmi = false) { null })
+    }
+
+    @Test fun sealion7AllocatesOnlyThePublicOwnContentDisplay() {
+        val attempts = mutableListOf<Int>()
+        val success = HostedProjectionBoundary.allocateDisplay(sealion7Hdmi = true) { flags ->
+            attempts += flags
+            "display"
+        }
+        assertEquals(listOf(331), attempts)
+        assertEquals("display", success?.value)
+        assertEquals(331, success?.flags)
+
+        attempts.clear()
+        assertNull(HostedProjectionBoundary.allocateDisplay<String>(sealion7Hdmi = true) { flags ->
+            attempts += flags
+            null
+        })
+        assertEquals(listOf(331), attempts)
     }
 
     @Test fun failedReleaseRemainsOwnedAndCanBeRetried() {
@@ -262,6 +306,30 @@ class DiLink5HostedProjectionBridgeTest {
             2000, "com.overdrive.app", 2000, 2000, "com.overdrive.app"))
         assertFalse(HostedProjectionBoundary.shellIdentityAccepted(
             10001, "com.android.shell", 2000, 2000, "com.android.shell"))
+    }
+
+    @Test fun frameworkAttributionIsSpecificToTheSealion7ShellDisplayContext() {
+        fun accepted(
+            opPackage: String?,
+            sealion7Hdmi: Boolean = true,
+            processUid: Int = 2000,
+            packageName: String = "com.android.shell",
+            contextUid: Int = 2000,
+            installedUid: Int = 2000,
+        ) = HostedProjectionBoundary.shellIdentityAccepted(
+            processUid, packageName, contextUid, installedUid, opPackage, sealion7Hdmi,
+        )
+
+        assertTrue(accepted("android"))
+        assertFalse(accepted("android", sealion7Hdmi = false))
+        assertTrue(accepted("com.android.shell"))
+        assertTrue(accepted("com.android.shell", sealion7Hdmi = false))
+        assertFalse(accepted(null))
+        assertFalse(accepted("com.overdrive.app"))
+        assertFalse(accepted("android", processUid = 1000))
+        assertFalse(accepted("android", packageName = "android"))
+        assertFalse(accepted("android", contextUid = 1000))
+        assertFalse(accepted("android", installedUid = 1000))
     }
 
     @Test(expected = IllegalArgumentException::class)

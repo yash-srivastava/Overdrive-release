@@ -117,6 +117,7 @@ class GlassPowerView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
     private var glowK = 0.25f
     private var bsOn = false
     private var bsPulse = 1f
+    private var bsClosing = false
     private var liveMask = 0
     private var lastDriving = false
     private var staticSig = ""
@@ -169,6 +170,10 @@ class GlassPowerView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
     private var dotSh: RadialGradient? = null
 
     private val flowing get() = anyActive() && env.allows(GlassEnv.Loop.DRIVE, stale)
+
+    // the springs, pulses and the blind-spot warning keep every frame; the steady flow alone (dots placed by time) runs at 30 fps
+    override val minFrameMs: Long get() =
+        if (kw.moving || bsClosing || liveMask != 0) 0L else FLOW_FRAME_MS
 
     override val hasMid get() = true
 
@@ -393,6 +398,7 @@ class GlassPowerView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
         if (syncLive(nowMs)) busy = true
         for (w in wheels) if (pulsing(w, nowMs)) busy = true
         val closing = bsOn && (state.bsLeft == 2 || state.bsRight == 2) && env.allows(GlassEnv.Loop.URGENT, stale)
+        bsClosing = closing
         if (closing) {
             val c = cos(PI * nowMs / 600.0).toFloat()
             bsPulse = c * c
@@ -865,6 +871,7 @@ class GlassPowerView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
     }
 
     companion object {
+        private const val FLOW_FRAME_MS = 33L
         /** The car's parts, as bits for [drawObject] and [objectBounds]. */
         const val PART_BODY = 1
         const val PART_PACK = 2

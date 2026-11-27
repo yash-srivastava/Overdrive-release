@@ -147,9 +147,10 @@ internal object BriefingJson {
     fun cleanLabel(raw: Any?): String? {
         val s = raw as? String ?: return null
         val cleaned = buildString { for (c in withoutLoneSurrogates(s)) if (!isControl(c)) append(c) }.trim()
-        if (cleaned.isEmpty() || !shows(cleaned)) return null
-        if (cleaned.codePointCount(0, cleaned.length) <= MAX_NAME) return cleaned
-        return cleaned.substring(0, cleaned.offsetByCodePoints(0, MAX_NAME)).trim()
+        val limited = if (cleaned.codePointCount(0, cleaned.length) <= MAX_NAME) cleaned
+            else cleaned.substring(0, cleaned.offsetByCodePoints(0, MAX_NAME)).trim()
+        // Truncation can remove the only visible characters in a synced label.
+        return limited.takeIf(::shows)
     }
 
     fun app(raw: Any?): String {

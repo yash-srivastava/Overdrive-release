@@ -111,8 +111,8 @@ static void check(int w, int h, int sw, int sh, int ww, int wh,
 }
 // A horizontally exact grid with vertical scaling uses the new path even
 // though it does not qualify for the separate 1:1 composeGrid fast path.
-static void checkGrid(std::mt19937& rng) {
-    const int w = 128, h = 80, sw = 256, sh = 56;
+static void checkGrid(std::mt19937& rng, int w = 128) {
+    const int h = 80, sw = 256, sh = 56;
     for (int sm = 0; sm < 3; sm++) {
         for (int dm = 0; dm < 3; dm++) {
             Frame strip(sw, sh, sm, 7, &rng);
@@ -191,6 +191,49 @@ static void checkVerticalRows(std::mt19937& rng) {
     }
 }
 
+// Fixed-Y gathers must match individual samples even for clipped columns,
+// non-contiguous scaling, SIMD tails, and the last source row.
+static void checkFixedRows(std::mt19937& rng) {
+    for (int sm = 0; sm < 3; sm++) {
+        Frame strip(64, 12, sm, 7, &rng);
+        RemapSource sr = {strip.planes, 64, 12};
+        for (int dm = 0; dm < 3; dm++) {
+            for (int div : {1, 2}) {
+                const int width = sr.w / div, height = sr.h / div;
+                for (int vf : {0, 1, 383, (height - 1) * 256}) {
+                    for (int step : {127, 256, 519}) {
+                        const int n = 29;
+                        int32_t u[n];
+                        for (int i = 0; i < n; i++) u[i] = i * step - 200;
+                        const int off = 63;
+                        Frame expected(64, 12, dm, 9, nullptr), actual(64, 12, dm, 9, nullptr);
+                        if (div == 1) {
+                            gatherY<true>(sr, n, u, &vf, off, actual.planes.y);
+                        } else {
+                            gatherUV<true>(sr, n, u, &vf, off, actual.planes.u,
+                                    actual.planes.v, actual.planes.pixUV);
+                        }
+                        for (int i = 0; i < n; i++) {
+                            const int uf = clampFx(u[i] + off, (width - 1) * 256);
+                            if (div == 1) {
+                                expected.planes.y[i] = sample1(sr.pl.y, sr.pl.rowY, 1,
+                                        uf, vf, width, height);
+                            } else {
+                                const int pos = i * expected.planes.pixUV;
+                                expected.planes.u[pos] = sample1(sr.pl.u, sr.pl.rowUV,
+                                        sr.pl.pixUV, uf, vf, width, height);
+                                expected.planes.v[pos] = sample1(sr.pl.v, sr.pl.rowUV,
+                                        sr.pl.pixUV, uf, vf, width, height);
+                            }
+                        }
+                        assert(actual.y == expected.y && actual.u == expected.u && actual.v == expected.v);
+                    }
+                }
+            }
+        }
+    }
+}
+
 }  // namespace odcpu
 
 int main() {
@@ -229,5 +272,7 @@ int main() {
     odcpu::check(4096, 12, 8192, 8, 4096, 8, 1, 2, true, 0.f, 0.f,
                  0.75f, 0.7f, 0.f, 32, rng);
     cases++;
+    odcpu::checkGrid(rng, 148);
+    odcpu::checkFixedRows(rng);
     std::printf("Dashcam column parity passed (%d cases)\n", cases);
 }

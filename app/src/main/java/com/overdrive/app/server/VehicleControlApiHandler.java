@@ -12,6 +12,7 @@ import com.overdrive.app.byd.routing.VehicleCommandRouter.CommandResult;
 import com.overdrive.app.byd.routing.VehicleCommandRouter.VehicleCommand;
 import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.genai.GenAiRoutineLearner;
+import com.overdrive.app.launcher.dilink5.cluster.Sealion7HdmiProjection;
 import com.overdrive.app.logging.DaemonLogger;
 
 import org.json.JSONArray;
@@ -243,6 +244,34 @@ public class VehicleControlApiHandler {
                     .applyBackgroundAccess(startupAppVerified);
             logDiLink5BackgroundAccess(access);
             HttpResponse.sendJson(out, access.toString());
+            return true;
+        }
+
+        // BYD100F drive mode window (#1002): status, opt-in, and the app's "main screen resumed" ping.
+        if (cleanPath.equals("/api/vehicle/drive-mode-window") && method.equals("GET")) {
+            HttpResponse.sendJson(out, com.overdrive.app.launcher.DriveModeWindow
+                    .status(null).toString());
+            return true;
+        }
+        if (cleanPath.equals("/api/vehicle/drive-mode-window") && method.equals("POST")) {
+            JSONObject req;
+            try {
+                req = new JSONObject(body == null || body.isEmpty() ? "{}" : body);
+            } catch (Exception e) {
+                HttpResponse.sendJsonError(out, "Invalid JSON");
+                return true;
+            }
+            if (!req.has("enabled")) {
+                HttpResponse.sendJsonError(out, "Missing enabled");
+                return true;
+            }
+            HttpResponse.sendJson(out, com.overdrive.app.launcher.DriveModeWindow
+                    .setEnabled(req.optBoolean("enabled", false)).toString());
+            return true;
+        }
+        if (cleanPath.equals("/api/vehicle/drive-mode-window/resumed") && method.equals("POST")) {
+            com.overdrive.app.launcher.DriveModeWindow.onAppResumed();
+            HttpResponse.sendJson(out, new JSONObject().put("success", true).toString());
             return true;
         }
 
@@ -1005,6 +1034,12 @@ public class VehicleControlApiHandler {
                                 .from(projectionConfig);
                 response.put("projectionPathConfigured", di5Config.getTransport().getWire());
                 response.put("projectionTargetConfigured", di5Config.getTarget().getWire());
+                if (com.overdrive.app.camera.dilink5.ClusterTransport.AAOS_HDMI.equals(transport.transport)) {
+                    android.content.Context context = com.overdrive.app.daemon.CameraDaemon.getAppContext();
+                    response.put("sealion7FullHdmiSupported",
+                            context != null && Sealion7HdmiProjection.isSupported(context));
+                    response.put(Sealion7HdmiProjection.CONFIG_KEY, Sealion7HdmiProjection.isOptedIn(projectionConfig));
+                }
                 response.put("di5HostedWidthPercent", di5Config.getWidthPercent());
                 response.put("di5HostedHeightPercent", di5Config.getHeightPercent());
                 response.put("di5HostedXOffsetPercent", di5Config.getXOffsetPercent());

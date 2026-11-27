@@ -478,6 +478,11 @@ public class ProximityGuardController implements ProximityRadarMonitor.TriggerCa
                 // capturing event aftermath and should remain full quality.
                 break;
         }
+        // Tell the OEM DVR (opt-in throttle) whether the low-power monitor is waiting.
+        try {
+            com.overdrive.app.recording.OemDashcamMirror.onProximityMonitorFps(desiredCameraFps());
+        } catch (Throwable ignored) {
+        }
     }
 
     // ==================== ADAPTIVE RECORDING PROFILE ====================

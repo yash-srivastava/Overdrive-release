@@ -558,23 +558,6 @@ public class MqttConnectionManager {
     }
 
     /**
-     * Get status of a single connection.
-     */
-    public JSONObject getConnectionStatus(String id) {
-        MqttConnectionConfig config = store.getById(id);
-        if (config == null) return null;
-
-        JSONObject entry = config.toSafeJson();
-        MqttPublisherService publisher = publishers.get(id);
-        if (publisher != null) {
-            try {
-                entry.put("status", publisher.getStatus());
-            } catch (Exception ignored) {}
-        }
-        return entry;
-    }
-
-    /**
      * Get the latest telemetry snapshot (for UI preview).
      */
     public JSONObject getLatestTelemetry() {
@@ -1712,8 +1695,6 @@ public class MqttConnectionManager {
 
     // ==================== GETTERS ====================
 
-    public MqttConnectionStore getStore() { return store; }
-    public boolean isInitialized() { return initialized; }
     public int getActiveCount() { return publishers.size(); }
 
     /**

@@ -54,14 +54,6 @@ class OverlayDoubleBuffer {
     }
 
     /**
-     * Returns the current front bitmap without swapping.
-     * Used when the GL thread needs the bitmap reference but no new content is available.
-     */
-    public Bitmap getFront() {
-        return frontBitmap;
-    }
-
-    /**
      * Recycles both bitmaps and sets references to null.
      */
     public void release() {

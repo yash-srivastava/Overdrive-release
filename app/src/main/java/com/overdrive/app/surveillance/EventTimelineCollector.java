@@ -27,7 +27,7 @@ import java.util.concurrent.Executors;
  *
  * 2. ACTIVE SPAN BUFFER (only during recording):
  *    The main span array that stores committed spans for the current event.
- *    When startCollecting(preRecordMs) is called, the pre-trigger ring buffer
+ *    When startCollecting(actualPreRecordMs, requestedPreRecordMs) is called, the pre-trigger ring buffer
  *    is flushed into this array with timestamps shifted to align with the
  *    video's pre-record window.
  *
@@ -224,24 +224,12 @@ public class EventTimelineCollector {
     // LIFECYCLE
     // ========================================================================
 
-    public synchronized int startCollecting() {
-        return startCollecting(0);
-    }
-
     /**
-     * Start collecting with a pre-record offset.
-     * Flushes the pre-trigger ring buffer into the active span array,
-     * shifting timestamps to align with the video's pre-record window.
-     *
-     * @return the new collection generation (audit R11-4) — pass it to the
-     *         generation-checked {@code stopAndWrite} overload so a stale
-     *         stop cannot corrupt a successor's collection.
+     * Start collecting with the actual pre-roll offset and configured pre-roll
+     * for the sidecar. Replay the pre-trigger ring into the active span array.
+     * Return the generation to pass to stopAndWrite so a stale stop cannot
+     * corrupt a successor's collection.
      */
-    public synchronized int startCollecting(long preRecordMs) {
-        return startCollecting(preRecordMs, /*flushPreRing=*/true);
-    }
-
-    /** As {@link #startCollecting(long)}, also recording the configured pre-roll for the sidecar. */
     public synchronized int startCollecting(long actualPreRecordMs, long requestedPreRecordMs) {
         int gen = startCollecting(actualPreRecordMs, /*flushPreRing=*/true);
         this.actualPreRecordMs = Math.max(0L, actualPreRecordMs);
@@ -320,54 +308,8 @@ public class EventTimelineCollector {
     }
 
     /**
-     * Stop collecting and write the JSON sidecar ASYNCHRONOUSLY.
-     */
-    public synchronized void stopAndWrite(File mp4File) {
-        stopAndWrite(mp4File, null, null);
-    }
-
-    /**
-     * Stop collecting and write a v3 JSON sidecar with Actor records + hero
-     * thumbnail reference. Backwards-compat: the v3 sidecar is a strict superset
-     * of v2 (all v2 fields preserved), so old readers continue to work.
-     *
-     * @param mp4File          The recording file
-     * @param actors           Final actor snapshot from ActorTracker (may be null/empty)
-     * @param heroThumbnail    Filename of the hero JPEG, written by ThumbnailBuffer.
-     *                         Just the basename (e.g. "event_xxx.jpg"), or null.
-     */
-    public synchronized void stopAndWrite(File mp4File,
-                                          java.util.List<Actor> actors,
-                                          String heroThumbnail) {
-        stopAndWrite(mp4File, actors, heroThumbnail, null, null, null);
-    }
-
-    /**
-     * Geo-aware overload — adds {@code geo.start} / {@code geo.peak} /
-     * {@code geo.end} fields to the v3 sidecar. Each snapshot may be null;
-     * the JSON writer omits absent ones rather than emitting empty objects.
-     *
-     * <p>This overload is preferred when the recorder side has captured
-     * locations (HardwareEventRecorderGpu's startGeo* fields). Called from
-     * SurveillanceEngineGpu.scheduleSegmentMetadataFlush via the same
-     * writeExecutor as the legacy 3-arg form, so ordering with hero +
-     * per-actor JPEG writes is unchanged.
-     */
-    public synchronized void stopAndWrite(File mp4File,
-                                          java.util.List<Actor> actors,
-                                          String heroThumbnail,
-                                          com.overdrive.app.geo.GeoSnapshot startGeo,
-                                          com.overdrive.app.geo.GeoSnapshot peakGeo,
-                                          com.overdrive.app.geo.GeoSnapshot endGeo) {
-        // Legacy (un-tokened) form: no generation check. Kept for callers
-        // that cannot know their generation; new code should use the
-        // generation-checked overload (audit R11-4).
-        stopAndWrite(mp4File, actors, heroThumbnail, startGeo, peakGeo, endGeo,
-                /* expectedGen = */ -1);
-    }
-
-    /**
-     * Generation-checked stop (audit R11-4 / ExtD-5). No-ops — leaving the
+     * Stop collecting and queue the JSON/SRT sidecars with actor, hero and geo data.
+     * Generation-checked (audit R11-4 / ExtD-5). No-ops — leaving the
      * live collection UNTOUCHED — when {@code expectedGen} is non-negative
      * and a newer {@code startCollecting*} has run since the caller's
      * collection began. This is what makes an old event's stop tail safe
@@ -680,7 +622,7 @@ public class EventTimelineCollector {
 
                 // Severity → proximity-band alert. peakSeverityRelMs may be -1
                 // when the peak fell outside this segment's window (renormalized
-                // upstream by SurveillanceEngineGpu#flushSegmentMetadata).
+                // upstream by SurveillanceEngineGpu#scheduleSegmentMetadataFlushWithSnapshot).
                 if (a.peakSeverityRelMs >= 0) {
                     if (a.peakSeverity == Actor.Severity.CRITICAL) {
                         srt.addEvent(a.peakSeverityRelMs, SrtWriter.K_PROXIMITY_RED);
@@ -813,10 +755,6 @@ public class EventTimelineCollector {
     // HOT PATH — Motion events
     // ========================================================================
 
-    public void onMotionDetected(int activeBlocks) {
-        onMotionDetected(activeBlocks, 0);
-    }
-
     public void onMotionDetected(int activeBlocks, int cameraMask) {
         long now = System.currentTimeMillis();
         if (collecting) {
@@ -925,10 +863,6 @@ public class EventTimelineCollector {
     // ========================================================================
     // HOT PATH — AI detection events
     // ========================================================================
-
-    public void onAiDetection(List<Detection> detections, boolean hasActiveMotion) {
-        onAiDetection(detections, hasActiveMotion, 0);
-    }
 
     public synchronized void onAiDetection(List<Detection> detections, boolean hasActiveMotion, int cameraMask) {
         if (!hasActiveMotion || detections == null || detections.isEmpty()) return;
@@ -1112,27 +1046,6 @@ public class EventTimelineCollector {
         });
     }
 
-    private void writeJsonSidecar(File mp4File, long[] starts, long[] ends,
-                                   byte[] types, float[] confs, byte[] counts,
-                                   byte[] cameras, int count, long durationMs) {
-        // Backwards-compat overload: delegate to the v3 writer with no actors/hero/geo.
-        writeJsonSidecar(mp4File, starts, ends, types, confs, counts, cameras,
-                count, durationMs, java.util.Collections.<Actor>emptyList(),
-                null, null, null, null);
-    }
-
-    /**
-     * Backwards-compat 11-arg overload (no geo). Retained for any caller
-     * that still threads only actors + hero through.
-     */
-    private void writeJsonSidecar(File mp4File, long[] starts, long[] ends,
-                                   byte[] types, float[] confs, byte[] counts,
-                                   byte[] cameras, int count, long durationMs,
-                                   java.util.List<Actor> actors, String heroThumbnail) {
-        writeJsonSidecar(mp4File, starts, ends, types, confs, counts, cameras,
-                count, durationMs, actors, heroThumbnail, null, null, null);
-    }
-
     /**
      * v3 sidecar writer — superset of v2. Old readers (which look for
      * {@code version=2}, {@code events[]}, {@code stats.{motion,person,car,bike}})
@@ -1149,17 +1062,6 @@ public class EventTimelineCollector {
      *     {@link com.overdrive.app.geo.SidecarGeoUpdater} when the resolver
      *     completes; absent when the geocoding feature is off).
      */
-    private void writeJsonSidecar(File mp4File, long[] starts, long[] ends,
-                                   byte[] types, float[] confs, byte[] counts,
-                                   byte[] cameras, int count, long durationMs,
-                                   java.util.List<Actor> actors, String heroThumbnail,
-                                   com.overdrive.app.geo.GeoSnapshot startGeo,
-                                   com.overdrive.app.geo.GeoSnapshot peakGeo,
-                                   com.overdrive.app.geo.GeoSnapshot endGeo) {
-        writeJsonSidecar(mp4File, starts, ends, types, confs, counts, cameras, count,
-                durationMs, actors, heroThumbnail, startGeo, peakGeo, endGeo, null, null, 0L, 0L);
-    }
-
     private void writeJsonSidecar(File mp4File, long[] starts, long[] ends,
                                    byte[] types, float[] confs, byte[] counts,
                                    byte[] cameras, int count, long durationMs,

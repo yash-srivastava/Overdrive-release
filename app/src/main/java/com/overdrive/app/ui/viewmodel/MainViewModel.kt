@@ -14,14 +14,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _currentUrl = MutableLiveData<String?>()
     val currentUrl: LiveData<String?> = _currentUrl
 
-    private val _logsExpanded = MutableLiveData<Boolean>()
-    val logsExpanded: LiveData<Boolean> = _logsExpanded
-
     private val _tunnelUrl = MutableLiveData<String?>()
     val tunnelUrl: LiveData<String?> = _tunnelUrl
 
     init {
-        _logsExpanded.value = PreferencesManager.isLogsExpanded()
         _tunnelUrl.value = PreferencesManager.getLastTunnelUrl()
         _currentUrl.value = _tunnelUrl.value
     }
@@ -36,16 +32,5 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setCurrentUrl(url: String?) {
         _currentUrl.value = url
-    }
-
-    fun toggleLogsExpanded() {
-        val newValue = !(_logsExpanded.value ?: false)
-        _logsExpanded.value = newValue
-        PreferencesManager.setLogsExpanded(newValue)
-    }
-
-    fun setLogsExpanded(expanded: Boolean) {
-        _logsExpanded.value = expanded
-        PreferencesManager.setLogsExpanded(expanded)
     }
 }

@@ -2,6 +2,7 @@ package com.overdrive.app.safekeep;
 
 import com.overdrive.app.storage.removable.RemovableStorageFs;
 
+import com.overdrive.app.trips.TelemetrySample;
 import com.overdrive.app.trips.TripRecord;
 
 import org.json.JSONObject;
@@ -85,7 +86,7 @@ public final class TripExporter {
     }
 
     public static String csvRow(TripRecord t) {
-        double kwh = (t.kwhStart > 0 && t.kwhEnd > 0) ? Math.max(0, t.kwhStart - t.kwhEnd) : 0;
+        double kwh = t.getResolvedEnergyKwh();
         return fmt("yyyy-MM-dd", t.startTime) + "," + fmt("HH:mm", t.startTime) + "," + fmt("HH:mm", t.endTime)
                 + "," + (t.durationSeconds / 60) + "," + num(t.distanceKm, 2) + "," + num(t.avgSpeedKmh, 1)
                 + "," + t.maxSpeedKmh + "," + num(t.socStart, 1) + "," + num(t.socEnd, 1) + "," + num(kwh, 2)
@@ -130,8 +131,8 @@ public final class TripExporter {
                 } catch (Exception e) {
                     continue;
                 }
-                double lat = j.optDouble("la", 0), lon = j.optDouble("lo", 0);
-                if ((lat == 0 && lon == 0) || Double.isNaN(lat) || Double.isNaN(lon)) continue;
+                double lat = j.optDouble("la", Double.NaN), lon = j.optDouble("lo", Double.NaN);
+                if (!TelemetrySample.hasGpsFix(lat, lon)) continue;
                 double alt = j.has("al") ? j.optDouble("al", Double.NaN) : Double.NaN;
                 // The recorder writes 0.0 when the fix has no altitude; an exact 0 is "unknown", not sea level.
                 if (alt == 0.0) alt = Double.NaN;
@@ -158,7 +159,8 @@ public final class TripExporter {
 
     private static String csv(String s) {
         if (s == null) return "";
-        return s.contains(",") || s.contains("\"") ? "\"" + s.replace("\"", "\"\"") + "\"" : s;
+        return s.contains(",") || s.contains("\"") || s.contains("\r") || s.contains("\n")
+                ? "\"" + s.replace("\"", "\"\"") + "\"" : s;
     }
 
     private static String esc(String s) {

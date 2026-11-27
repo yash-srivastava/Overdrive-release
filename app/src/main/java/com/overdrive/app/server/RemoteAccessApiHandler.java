@@ -134,6 +134,11 @@ public final class RemoteAccessApiHandler {
     private static volatile long parkedBluetoothLockConfirmedAtElapsedMs = -1;
     // Settings and mode the walk-away lock was confirmed under; any change voids it as reset() did.
     private static volatile String parkedBluetoothLockConfirmedScope;
+    // The latch came from a valid walk-away whose lock was blocked only by a lock-restricted
+    // safe zone: the car may be unlocked, so closures and door edges replace the lock check.
+    private static volatile boolean parkedBluetoothDepartureOnly;
+    // Phone episode that armed the departure-only latch; the same episode never re-arms it.
+    private static volatile String parkedBluetoothDepartureOnlyEpisode;
     private static volatile boolean parkedBluetoothSafeZoneDisableDirective;
     private static volatile long parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
     // Explicit Bluetooth-ON intent wins until the next genuine phone departure episode.
@@ -1001,7 +1006,7 @@ public final class RemoteAccessApiHandler {
         final String action, source, deviceName, eventMessage;
         final long observed, freshnessMs;
         final boolean requiresBluetooth;
-        private boolean safeZonesBound, safeZoneRestricted;
+        private boolean safeZonesBound, safeZoneRestricted, safeZoneLockBlockedInside;
         private ProximitySafeZonePolicy.Lease safeZoneLease;
         private String safeZoneFailure;
         ActionDecision(String action, String source, String deviceName, String eventMessage,
@@ -1016,6 +1021,8 @@ public final class RemoteAccessApiHandler {
         }
         abstract boolean sourceValid() throws Exception;
         void satisfied() throws Exception {}
+        /** A lock blocked only by a confident Inside fix; the source decides whether that arms anything. */
+        void lockBlockedInsideSafeZone(JSONObject live) throws Exception {}
         boolean quietSatisfied() throws Exception { return false; }
         boolean publishesTransition() { return true; }
         boolean sourceValidForDelayedActuation() throws Exception { return sourceValid(); }
@@ -1039,6 +1046,9 @@ public final class RemoteAccessApiHandler {
             ProximitySafeZonePolicy.Result result = safeZoneSnapshot(settings);
             safeZoneLease = result.lease(action);
             if (safeZoneLease == null) safeZoneFailure = safeZoneMessage(result.actionReason(action));
+            // Only a confident Inside fix with the parked-Bluetooth option on; boundary and unknown never count.
+            safeZoneLockBlockedInside = safeZoneLease == null && "lock".equals(action)
+                    && "inside_safe_zone".equals(result.actionReason(action)) && result.shouldDisableBluetooth();
             return safeZoneLease != null;
         }
         private boolean safeZonesCurrent() throws Exception {
@@ -1114,12 +1124,14 @@ public final class RemoteAccessApiHandler {
                                 && config.optBoolean("parkedBluetoothSafeZoneEnabled")
                                 && !parkedBluetoothExplicitOnOverride && lastObservedPower == 0) {
                             parkedBluetoothLockConfirmed = true;
+                            parkedBluetoothDepartureOnly = false;
                             parkedBluetoothLockConfirmedAtElapsedMs = SystemClock.elapsedRealtime();
                             parkedBluetoothLockConfirmedScope = config + "|" + presenceModeGeneration;
                             parkedBluetoothSafeZoneDisableDirective = false;
                             parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
                         } else {
                             parkedBluetoothLockConfirmed = false;
+                            parkedBluetoothDepartureOnly = false;
                             parkedBluetoothLockConfirmedAtElapsedMs = -1;
                             parkedBluetoothSafeZoneDisableDirective = false;
                             parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
@@ -1131,6 +1143,42 @@ public final class RemoteAccessApiHandler {
                         }
                     }
                 }
+            }
+            /**
+             * Arms the departure-only latch when the walk-away would have dispatched a lock but
+             * the lock is restricted inside this safe zone. Once per episode, so ticks never move it.
+             */
+            @Override void lockBlockedInsideSafeZone(JSONObject live) throws Exception {
+                if (!"lock".equals(action) || live.optBoolean("dryRun", true)
+                        || settings.optBoolean("dryRun", true) || !sourceValid()
+                        || !BluetoothProximityDecisionGuard.fresh(observed, SystemClock.elapsedRealtime(), freshnessMs)
+                        || readVehiclePowerNow() != 0 || UnifiedConfigManager.isVehicleOnOnlyMode()
+                        || !UnifiedConfigManager.isBluetoothKeepAliveEnabled()) return;
+                synchronized (STATE) {
+                    refreshSettings();
+                    PhoneState current = PHONES.get(reading.address);
+                    String episode = instance + "|" + reading.address + "|" + reading.episodeId;
+                    if (!capturedEpisodeCurrent(current) || current.satisfiedEpisodeId == reading.episodeId
+                            || !config.optBoolean("lockEnabled")
+                            || !config.optBoolean("restrictLockToOutsideSafeZones")
+                            || !config.optBoolean("parkedBluetoothSafeZoneEnabled")
+                            || parkedBluetoothExplicitOnOverride || lastObservedPower != 0
+                            || episode.equals(parkedBluetoothDepartureOnlyEpisode)) return;
+                    parkedBluetoothDepartureOnlyEpisode = episode;
+                    String scope = config + "|" + presenceModeGeneration;
+                    // A live latch of either flavour keeps its timestamp.
+                    if (parkedBluetoothLockConfirmed && parkedBluetoothLockConfirmedAtElapsedMs > 0
+                            && lastDoorOpenedElapsed < parkedBluetoothLockConfirmedAtElapsedMs
+                            && scope.equals(parkedBluetoothLockConfirmedScope)) return;
+                    parkedBluetoothLockConfirmed = true;
+                    parkedBluetoothDepartureOnly = true;
+                    parkedBluetoothLockConfirmedAtElapsedMs = SystemClock.elapsedRealtime();
+                    parkedBluetoothLockConfirmedScope = scope;
+                    parkedBluetoothSafeZoneDisableDirective = false;
+                    parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
+                }
+                com.overdrive.app.daemon.CameraDaemon.log(
+                        "Proximity: parked Bluetooth latch set reason=walk_away_lock_restricted_in_safe_zone");
             }
             private boolean capturedEpisodeCurrent(PhoneState current) {
                 return current != null && config.optBoolean("enabled")
@@ -1179,6 +1227,7 @@ public final class RemoteAccessApiHandler {
                 if (locking) return; // Key-fob locks do not arm the phone-walk-away latch.
                 synchronized (STATE) {
                     parkedBluetoothLockConfirmed = false;
+                    parkedBluetoothDepartureOnly = false;
                     parkedBluetoothLockConfirmedAtElapsedMs = -1;
                     parkedBluetoothSafeZoneDisableDirective = false;
                     parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
@@ -1262,6 +1311,7 @@ public final class RemoteAccessApiHandler {
                 return;
             }
             if (!decision.bindSafeZones(live)) {
+                if (decision.safeZoneLockBlockedInside) decision.lockBlockedInsideSafeZone(live);
                 recordAction(action, "blocked", decision.blockedReason("Safe-zone restriction paused this action"));
                 return;
             }
@@ -2399,12 +2449,13 @@ public final class RemoteAccessApiHandler {
         }
         ProximitySafeZonePolicy.Result safeZones = safeZoneSnapshot(effectiveConfig);
         boolean safeZoneBluetoothDisable = cachedParkedBluetoothSafeZoneDisable(lastObservedPower);
-        boolean walkAwayLockConfirmed;
+        boolean walkAwayLockConfirmed, departureOnly;
         synchronized (STATE) {
             walkAwayLockConfirmed = parkedBluetoothLockConfirmed
                     && parkedBluetoothLockConfirmedAtElapsedMs > 0
                     && lastDoorOpenedElapsed < parkedBluetoothLockConfirmedAtElapsedMs
                     && lastObservedPower == 0;
+            departureOnly = walkAwayLockConfirmed && parkedBluetoothDepartureOnly;
         }
         return new JSONObject().put("success", true).put("sequence", sequence).put("sessionId", SESSION_ID)
                 .put("config", new JSONObject(effectiveConfig.toString()))
@@ -2422,6 +2473,7 @@ public final class RemoteAccessApiHandler {
                                 && effectiveConfig.optBoolean("keepBluetoothOn")
                                 && effectiveConfig.optBoolean("parkedBluetoothSafeZoneEnabled"))
                         .put("walkAwayLockConfirmed", walkAwayLockConfirmed)
+                        .put("departureOnly", departureOnly)
                         .put("safeZoneDisableRequested", safeZoneBluetoothDisable))
                 .put("devices", pairedDevices == null ? new JSONArray() : pairedDevices)
                 .put("events", events).put("lastAction", lastAction)
@@ -3041,6 +3093,7 @@ public final class RemoteAccessApiHandler {
     public static void noteBluetoothExplicitlyEnabled() {
         synchronized (STATE) {
             parkedBluetoothLockConfirmed = false;
+            parkedBluetoothDepartureOnly = false;
             parkedBluetoothLockConfirmedAtElapsedMs = -1;
             parkedBluetoothSafeZoneDisableDirective = false;
             parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
@@ -3057,6 +3110,7 @@ public final class RemoteAccessApiHandler {
         if (power != 0) {
             synchronized (STATE) {
                 parkedBluetoothLockConfirmed = false;
+                parkedBluetoothDepartureOnly = false;
                 parkedBluetoothLockConfirmedAtElapsedMs = -1;
                 parkedBluetoothSafeZoneDisableDirective = false;
                 parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
@@ -3066,6 +3120,7 @@ public final class RemoteAccessApiHandler {
         }
         final JSONObject settingsSnapshot;
         final long lockConfirmedAt;
+        final boolean departureOnly;
         synchronized (STATE) {
             try {
                 refreshSettings();
@@ -3074,6 +3129,7 @@ public final class RemoteAccessApiHandler {
                         || !config.optBoolean("parkedBluetoothSafeZoneEnabled")) {
                     // reset() stays frozen: the option or a prerequisite switched off forgets the latch here.
                     parkedBluetoothLockConfirmed = false;
+                    parkedBluetoothDepartureOnly = false;
                     parkedBluetoothLockConfirmedAtElapsedMs = -1;
                     parkedBluetoothExplicitOnOverride = false;
                     return false;
@@ -3082,6 +3138,7 @@ public final class RemoteAccessApiHandler {
                         && !(config + "|" + presenceModeGeneration).equals(parkedBluetoothLockConfirmedScope)) {
                     // Any settings or mode change since the walk-away lock voids it (the old reset() hook).
                     parkedBluetoothLockConfirmed = false;
+                    parkedBluetoothDepartureOnly = false;
                     parkedBluetoothLockConfirmedAtElapsedMs = -1;
                     return false;
                 }
@@ -3093,8 +3150,10 @@ public final class RemoteAccessApiHandler {
                         || RemoteAccessSettings.lockWithKeyInside(config) && KEY_INSIDE.latched())
                     return false;
                 lockConfirmedAt = parkedBluetoothLockConfirmedAtElapsedMs;
+                departureOnly = parkedBluetoothDepartureOnly;
                 if (lastDoorOpenedElapsed >= lockConfirmedAt) {
                     parkedBluetoothLockConfirmed = false;
+                    parkedBluetoothDepartureOnly = false;
                     parkedBluetoothLockConfirmedAtElapsedMs = -1;
                     return false;
                 }
@@ -3103,12 +3162,14 @@ public final class RemoteAccessApiHandler {
                 return false;
             }
         }
-        if (!DiLink5Platform.isSelected() && !doorOpenObserverRegistered) return false;
+        // A departure-only latch has no lock to lose, so door edges are its return signal on every platform.
+        if ((departureOnly || !DiLink5Platform.isSelected()) && !doorOpenObserverRegistered) return false;
         // Verify the live vehicle before consulting GPS so an unlock/door-open cycle
         // outside the selected zones also invalidates the old walk-away confirmation.
-        if (!parkedVehicleStillLocked()) {
+        if (departureOnly ? !parkedClosuresShut() : !parkedVehicleStillLocked()) {
             synchronized (STATE) {
                 parkedBluetoothLockConfirmed = false;
+                parkedBluetoothDepartureOnly = false;
                 parkedBluetoothLockConfirmedAtElapsedMs = -1;
             }
             return false;
@@ -3120,9 +3181,11 @@ public final class RemoteAccessApiHandler {
                 refreshSettings();
                 if (!parkedBluetoothLockConfirmed || lastObservedPower != 0
                         || parkedBluetoothLockConfirmedAtElapsedMs != lockConfirmedAt
+                        || parkedBluetoothDepartureOnly != departureOnly
                         || config.optLong("revision") != settingsSnapshot.optLong("revision")) return false;
                 if (lastDoorOpenedElapsed >= lockConfirmedAt) {
                     parkedBluetoothLockConfirmed = false;
+                    parkedBluetoothDepartureOnly = false;
                     parkedBluetoothLockConfirmedAtElapsedMs = -1;
                     return false;
                 }
@@ -3141,7 +3204,16 @@ public final class RemoteAccessApiHandler {
                     ? collector.readDiLink5GateDoorLockEvidence().state
                     : collector.readDoorLockState();
             if (lockState != BydDataCollector.DOOR_STATE_LOCK) return false;
-            int[] doors = collector.readAllDoorOpenStates();
+            return parkedClosuresShut();
+        } catch (Throwable unavailable) {
+            return false;
+        }
+    }
+
+    /** All six bodywork closures read shut; the lock state is not read. Unavailable data fails open. */
+    private static boolean parkedClosuresShut() {
+        try {
+            int[] doors = BydDataCollector.getInstance().readAllDoorOpenStates();
             return doors != null && doors.length >= 6
                     && DiLink5GateActuationPolicy.doorBlockReason(doors) == null;
         } catch (Throwable unavailable) {

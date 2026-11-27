@@ -72,7 +72,7 @@ public class DataUsageMonitor {
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
     private static final String DB_PATH = com.overdrive.app.util.ScratchRoot.path("overdrive_datausage_h2");
-    // Same H2 flags rationale as SocHistoryDatabase: socket lock, no trace file,
+    // Same H2 flags rationale as SocHistoryDatabase: kernel file lock, no trace file,
     // we own shutdown (DB_CLOSE_ON_EXIT=FALSE). Single writer (the sampler thread)
     // + same-JVM HTTP reads, so AUTO_SERVER is intentionally omitted.
     // AUTO_COMPACT_FILL_RATE=50: idle-CPU tuning shared by all seven H2 stores
@@ -80,7 +80,7 @@ public class DataUsageMonitor {
     // WRITE_DELAY=5000: H2 housekeeps every WRITE_DELAY/10 ms; a kill may drop the last
     // 5 s of counter updates, and resetHistory checkpoints at once.
     private static final String JDBC_URL = "jdbc:h2:file:" + DB_PATH +
-            ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
+            ";FILE_LOCK=FS;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
             ";AUTO_COMPACT_FILL_RATE=50;WRITE_DELAY=5000";
 
     private static final String TABLE_DAILY = "data_usage_daily";

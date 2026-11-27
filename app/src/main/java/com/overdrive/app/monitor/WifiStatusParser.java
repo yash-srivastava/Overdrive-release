@@ -75,7 +75,11 @@ public final class WifiStatusParser {
             }
             if (line.startsWith(CONNECTED_PREFIX)) {
                 connected = true;
-                ssid = normalizeSsid(line.substring(CONNECTED_PREFIX.length()));
+                String rawSsid = line.substring(CONNECTED_PREFIX.length());
+                // A timed-out shell may end in the middle of a quoted SSID.
+                if (!isIncompleteQuotedSsid(rawSsid)) {
+                    ssid = normalizeSsid(rawSsid);
+                }
                 continue;
             }
             if (line.startsWith(WIFI_INFO_PREFIX)) {
@@ -88,7 +92,7 @@ public final class WifiStatusParser {
                     continue;
                 }
                 String rawSsid = line.substring(SSID_PREFIX.length(), bssidStart).trim();
-                if (rawSsid.startsWith("\"") && (rawSsid.length() < 2 || !rawSsid.endsWith("\""))) {
+                if (isIncompleteQuotedSsid(rawSsid)) {
                     continue; // Incomplete quoted SSID, not a trustworthy field boundary.
                 }
                 if (ssid == null) {
@@ -106,6 +110,10 @@ public final class WifiStatusParser {
             return UNKNOWN;
         }
         return new Parsed(ssid, metered, true);
+    }
+
+    private static boolean isIncompleteQuotedSsid(String raw) {
+        return raw.startsWith("\"") && (raw.length() < 2 || !raw.endsWith("\""));
     }
 
     /**

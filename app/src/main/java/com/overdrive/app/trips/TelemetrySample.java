@@ -220,8 +220,8 @@ public class TelemetrySample {
     /**
      * Serialize to JSON with compact keys for storage.
      * Keys: t, s, a, b, bp, g, la, lo, al, va, gt, am, ss, pu, nl, sz, sp, ha, dl, so
-     * "va"/"gt"/"am"/"ss"/"pu"/"nl"/"sz"/"sp"/"ha"/"dl"/"so" are written only when informative (va, gt,
-     * ha, dl > 0 / ss != 0 / sp >= 0 / so a recorded SoC / the rest true)
+     * "va"/"gt"/"am"/"ss"/"pu"/"nl"/"sz"/"sp"/"ha"/"dl"/"so" are written only when informative
+     * (va, ha, dl finite and > 0 / gt > 0 / ss != 0 / sp >= 0 / so a recorded SoC / the rest true)
      * to keep the common-case line size unchanged; fromJson() defaults cover absence.
      */
     public JSONObject toJson() {
@@ -236,7 +236,8 @@ public class TelemetrySample {
             json.put("la", lat);
             json.put("lo", lon);
             json.put("al", altitude);
-            if (verticalAccuracyM > 0) json.put("va", verticalAccuracyM);
+            // A non-finite optional measurement must not suppress later valid fields.
+            if (Double.isFinite(verticalAccuracyM) && verticalAccuracyM > 0) json.put("va", verticalAccuracyM);
             // Omitted when unreported so existing files stay byte-identical in shape.
             if (gpsFixTimeUtc > 0) json.put("gt", gpsFixTimeUtc);
             if (altitudeIsMsl) json.put("am", true);
@@ -245,11 +246,11 @@ public class TelemetrySample {
             if (gpsNotLive) json.put("nl", true);
             if (stopConfirmed) json.put("sz", true);
             if (peakSpeedKmh >= 0) json.put("sp", peakSpeedKmh);
-            if (horizontalAccuracyM > 0) json.put("ha", horizontalAccuracyM);
-            if (distanceLandedM > 0) json.put("dl", distanceLandedM);
+            if (Float.isFinite(horizontalAccuracyM) && horizontalAccuracyM > 0) json.put("ha", horizontalAccuracyM);
+            if (Float.isFinite(distanceLandedM) && distanceLandedM > 0) json.put("dl", distanceLandedM);
             if (isRecordedSoc(socPercent)) json.put("so", Math.round(socPercent * 100.0) / 100.0);
         } catch (Exception e) {
-            // JSONObject.put only throws on null key, which won't happen here
+            // Keep the existing best-effort handling for malformed mandatory fields.
         }
         return json;
     }

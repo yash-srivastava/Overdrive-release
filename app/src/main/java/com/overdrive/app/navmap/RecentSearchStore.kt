@@ -62,7 +62,7 @@ object RecentSearchStore {
     private const val GOOGLE_MAX_AGE_MS = 30L * 24 * 60 * 60 * 1000
 
     /** A stored recent and its wall-clock add time (0 for entries written before it was tracked). */
-    private class Entry(val result: SearchResult, val savedAtMs: Long)
+    internal class Entry(val result: SearchResult, val savedAtMs: Long)
 
     /**
      * Prepend [result] to the recent list (most-recent-first), removing any
@@ -75,7 +75,7 @@ object RecentSearchStore {
             if (result.label.isBlank()) {
                 return
             }
-            if (result.lat.isNaN() || result.lng.isNaN()) return
+            if (!validCoordinates(result.lat, result.lng)) return
             val current = entries(context)
             // Re-picking the same Google place keeps its first-seen time so the 30-day limit still applies.
             val keptAt = current.firstOrNull {
@@ -182,8 +182,11 @@ object RecentSearchStore {
     private fun optText(obj: JSONObject, key: String): String? =
         (obj.opt(key) as? String)?.takeIf { it.isNotBlank() }
 
-    /** Defensive JSON parse — skips any malformed element, never throws. */
-    private fun parse(raw: String): List<Entry> {
+    internal fun validCoordinates(lat: Double, lng: Double): Boolean =
+        lat in -90.0..90.0 && lng in -180.0..180.0
+
+    /** Parse the stored array, skipping entries with malformed coordinates. */
+    internal fun parse(raw: String): List<Entry> {
         val out = ArrayList<Entry>()
         val arr = JSONArray(raw)
         for (i in 0 until arr.length()) {
@@ -195,7 +198,7 @@ object RecentSearchStore {
             // optDouble returns NaN for a missing/non-numeric value.
             val lat = obj.optDouble(KEY_LAT, Double.NaN)
             val lng = obj.optDouble(KEY_LNG, Double.NaN)
-            if (lat.isNaN() || lng.isNaN()) {
+            if (!validCoordinates(lat, lng)) {
                 continue
             }
             out.add(Entry(readPlace(obj, label, lat, lng), obj.optLong(KEY_SAVED_AT, 0L)))

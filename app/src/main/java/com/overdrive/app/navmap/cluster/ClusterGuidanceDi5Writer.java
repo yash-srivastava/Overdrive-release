@@ -1,17 +1,22 @@
 package com.overdrive.app.navmap.cluster;
 
-import android.content.ComponentName;
-import android.content.Context;
-import android.content.Intent;
+import static com.overdrive.app.navmap.cluster.ClusterCommContract.abandonMapFocus;
+import static com.overdrive.app.navmap.cluster.ClusterCommContract.displayMode;
+import static com.overdrive.app.navmap.cluster.ClusterCommContract.displayModeDirect;
+import static com.overdrive.app.navmap.cluster.ClusterCommContract.mapFocusDirect;
+import static com.overdrive.app.navmap.cluster.ClusterCommContract.message;
+import static com.overdrive.app.navmap.cluster.ClusterCommContract.naviState;
+import static com.overdrive.app.navmap.cluster.ClusterCommContract.presentation;
+import static com.overdrive.app.navmap.cluster.ClusterCommContract.requestMapFocus;
+
 import android.os.Bundle;
-import android.os.ResultReceiver;
 import android.os.SystemClock;
 
-import com.overdrive.app.BuildConfig;
 import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.monitor.AccMonitor;
+import com.overdrive.app.navmap.cluster.ClusterCommDispatcher.Reply;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -27,9 +32,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
 
@@ -40,7 +43,7 @@ import java.util.regex.Pattern;
  * restart or a failed clear never loses it; settings are restored compare-and-swap.
  */
 final class ClusterGuidanceDi5Writer {
-    static final String MODE_SETTING = "moet_extension_navi_display_mode";
+    static final String MODE_SETTING = ClusterCommContract.INSTRUMENT_MODE_SETTING;
     static final String FOCUS_SETTING = "moet_extension_navi_focus_map";
     static final String SIMPLE_MODE_VALUE = "2", MAP_FOCUS_VALUE = "1";
     private static final String MARKER = "clusterGuidanceDi5Restore";
@@ -446,60 +449,6 @@ final class ClusterGuidanceDi5Writer {
         return Arrays.asList(naviState(NAVI_START), presentation(STATE_SIMPLE_OPEN));
     }
 
-    private static Bundle message(int dataType, int subtype) {
-        Bundle bundle = new Bundle();
-        bundle.putInt("msgType", 3);
-        if (subtype >= 0) bundle.putInt("subtype", subtype);
-        bundle.putInt("DataType", dataType);
-        return bundle;
-    }
-
-    static Bundle displayMode(int mode) {
-        Bundle bundle = message(30, 3);
-        bundle.putInt("mode", mode);
-        return bundle;
-    }
-
-    /** Same mode through the QNX passthrough, which the settings observer cannot deduplicate. */
-    static Bundle displayModeDirect(int mode) {
-        Bundle bundle = message(31, 3);
-        bundle.putInt("mode", mode);
-        return bundle;
-    }
-
-    static Bundle requestMapFocus() {
-        Bundle bundle = message(33, -1);
-        bundle.putInt("mapType", 1);
-        return bundle;
-    }
-
-    static Bundle mapFocusDirect(int mapType) {
-        Bundle bundle = message(31, 14);
-        bundle.putInt("mapType", mapType);
-        return bundle;
-    }
-
-    static Bundle abandonMapFocus() {
-        Bundle bundle = message(34, -1);
-        bundle.putInt("mapType", 1);
-        return bundle;
-    }
-
-    static Bundle naviState(int state) {
-        Bundle bundle = message(35, 2);
-        bundle.putInt("mapType", 1);
-        bundle.putInt("naviState", state);
-        return bundle;
-    }
-
-    /** The QNX serializer reads the key "state". */
-    static Bundle presentation(int state) {
-        Bundle bundle = message(31, 15);
-        bundle.putInt("mapType", 1);
-        bundle.putInt("state", state);
-        return bundle;
-    }
-
     static List<Bundle> tbt(ClusterGuidanceFrame frame) {
         Tbt fields = Tbt.of(frame, System.currentTimeMillis(), TimeZone.getDefault());
         return Arrays.asList(fields.navigation(), fields.strings());
@@ -607,67 +556,9 @@ final class ClusterGuidanceDi5Writer {
 
     // --- App-process transport ---------------------------------------------------------------
 
-    static final class Reply {
-        final boolean dispatched, answered;
-        final int code, sent;
-        final String token, failure;
-
-        Reply(boolean dispatched, boolean answered, int code, String token, int sent, String failure) {
-            this.dispatched = dispatched;
-            this.answered = answered;
-            this.code = code;
-            this.token = token == null ? "" : token;
-            this.sent = sent;
-            this.failure = failure;
-        }
-
-        boolean ok() { return answered && code == ClusterCommContract.RESULT_SENT; }
-        boolean maybeDelivered() { return ok() || dispatched && (!answered || sent > 0); }
-
-        boolean definitive() {
-            return answered && (code == ClusterCommContract.RESULT_SERVICE_UNAVAILABLE
-                    || code == ClusterCommContract.RESULT_BIND_DENIED
-                    || code == ClusterCommContract.RESULT_UNSUPPORTED_INTERFACE);
-        }
-
-        String name() { return answered ? ClusterCommContract.resultName(code) : failure; }
-    }
-
     private static final class DaemonIo implements Io {
         @Override public Reply dispatch(List<Bundle> commands, long budgetMs) {
-            Context context = CameraDaemon.getAppContext();
-            if (context == null) return new Reply(false, false, -1, "", 0, "daemon_context_unavailable");
-            long deadline = SystemClock.elapsedRealtime() + budgetMs;
-            CountDownLatch done = new CountDownLatch(1);
-            AtomicReference<Reply> answer = new AtomicReference<>();
-            ResultReceiver receiver = new ResultReceiver(null) {
-                @Override protected void onReceiveResult(int code, Bundle data) {
-                    answer.compareAndSet(null, new Reply(true, true, code,
-                            data == null ? "" : data.getString(ClusterCommContract.REPLY_TOKEN, ""),
-                            data == null ? 0 : data.getInt(ClusterCommContract.REPLY_SENT, 0), ""));
-                    done.countDown();
-                }
-            };
-            Intent intent = new Intent(ClusterCommContract.ACTION)
-                    .setComponent(new ComponentName(BuildConfig.APPLICATION_ID, ClusterCommContract.RECEIVER))
-                    // BYD's power service force-stops the app at ACC-off; stopped apps get no broadcasts.
-                    .addFlags(Intent.FLAG_RECEIVER_FOREGROUND | Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
-                    .putParcelableArrayListExtra(ClusterCommContract.EXTRA_COMMANDS, new ArrayList<>(commands))
-                    .putExtra(ClusterCommContract.EXTRA_DEADLINE, deadline)
-                    .putExtra(ClusterCommContract.EXTRA_REPLY, receiver);
-            try {
-                context.sendBroadcast(intent);
-            } catch (SecurityException denied) {
-                return new Reply(false, false, -1, "", 0, "broadcast_denied");
-            } catch (Throwable failure) {
-                return new Reply(false, false, -1, "", 0, "broadcast_failed");
-            }
-            try {
-                if (done.await(budgetMs + 1_000L, TimeUnit.MILLISECONDS)) return answer.get();
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-            }
-            return new Reply(true, false, -1, "", 0, "app_unavailable");
+            return ClusterCommDispatcher.dispatch(CameraDaemon.getAppContext(), commands, budgetMs, null);
         }
 
         @Override public String settings(String verb, String key, String value) {

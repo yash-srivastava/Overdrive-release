@@ -195,6 +195,8 @@ class GlassWidgetsOverlayService : Service() {
     private val main = Handler(Looper.getMainLooper())
     private var ioThread: HandlerThread? = null
     private var io: Handler? = null
+    // RoadSense's live overlay state from the daemon (io thread only)
+    private val roadState = com.overdrive.app.roadsense.overlay.RoadSenseOverlayClient()
     private var feedThread: HandlerThread? = null
     private var feed: Handler? = null
     // the live drive samples get their own thread: the summary poll's latency would space them unevenly
@@ -357,6 +359,10 @@ class GlassWidgetsOverlayService : Service() {
     private var probeAt = 0L
     // the powertrain from the last summary that said (feed thread)
     private var lastPhev: Boolean? = null
+    // the last full summary's version, the powertrain it was parsed with and the result (feed thread)
+    private var summaryV = ""
+    private var summaryVPhev: Boolean? = null
+    private var summarySnap: GlassWidgetsFeed.Snapshot? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -435,6 +441,7 @@ class GlassWidgetsOverlayService : Service() {
         io?.removeCallbacksAndMessages(null)
         feed?.removeCallbacksAndMessages(null)
         liveH?.removeCallbacksAndMessages(null)
+        roadState.close()
         ioThread?.quitSafely()
         feedThread?.quitSafely()
         liveThread?.quitSafely()
@@ -2045,10 +2052,7 @@ class GlassWidgetsOverlayService : Service() {
         // after the settings that list them: docs land once their ids are known on main
         syncDocs(s)
         if ("roadsense" in s.widgets || customRoad) {
-            val o = try {
-                UnifiedConfigManager.loadConfig().optJSONObject(ROADSENSE_SECTION)?.optJSONObject(ROADSENSE_KEY)
-            } catch (_: Throwable) { null }
-            val r = GlassWidgetsFeed.road(o, System.currentTimeMillis())
+            val r = GlassWidgetsFeed.road(roadState.read(), System.currentTimeMillis())
             val key = "${r.feed}|${r.clear}|${r.kind}|${r.severity}|${r.distanceM}|${r.cluster}"
             if (key != lastRoadKey) {
                 lastRoadKey = key
@@ -2063,10 +2067,25 @@ class GlassWidgetsOverlayService : Service() {
     }
 
     private fun pollSummary() {
-        val (code, text) = http("GET", "/api/launcher/v1/summary", "")
+        // the version of the last body read: an unchanged summary answers in a line and reuses its reading
+        val known = summarySnap?.takeIf { summaryVPhev == lastPhev }?.let { summaryV } ?: ""
+        val (code, text) = http("GET", "/api/launcher/v1/summary?v=$known", "")
         val now = SystemClock.elapsedRealtime()
         // core answers some failures with 200 and {"success": false}: no data, a failed poll
-        val snap = if (code == 200) try { JSONObject(text).takeIf { !GlassWidgetsFeed.failed(it) }?.let { GlassWidgetsFeed.parse(it, lastPhev) } } catch (t: Throwable) { null } else null
+        val o = if (code == 200) try { JSONObject(text).takeIf { !GlassWidgetsFeed.failed(it) } } catch (t: Throwable) { null } else null
+        val same = o != null && known.isNotEmpty() && o.optBoolean("unchanged", false) && o.optString("v") == known
+        val snap = when {
+            same -> summarySnap
+            // an "unchanged" for a version we no longer hold carries no data
+            o == null || o.optBoolean("unchanged", false) -> null
+            else -> try { GlassWidgetsFeed.parse(o, lastPhev) } catch (t: Throwable) { null }
+        }
+        if (!same) {
+            // a core without versions sends no v: every read stays a full one
+            summaryV = if (snap != null) o?.optString("v", "").orEmpty() else ""
+            summaryVPhev = lastPhev
+            summarySnap = snap?.takeIf { summaryV.isNotEmpty() }
+        }
         snap?.let { lastPhev = it.phev }
         if (snap != null) {
             lastOk = now
@@ -2293,8 +2312,6 @@ class GlassWidgetsOverlayService : Service() {
     companion object {
         private const val TAG = "GlassWidgets"
         private const val SECTION = "glassWidgets"
-        private const val ROADSENSE_SECTION = "roadSense"
-        private const val ROADSENSE_KEY = "overlayState"
         private const val CHANNEL = "glass_widgets_overlay"
         private const val NOTIFICATION_ID = 9988
         private const val PREFS = "glass_widgets"

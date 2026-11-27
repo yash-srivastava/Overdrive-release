@@ -277,7 +277,8 @@ public final class ActionGroups {
             if (!HOME.exists()) HOME.mkdirs();
             byte[] bytes = toJson().toString().getBytes(StandardCharsets.UTF_8);
             return AutomationStoreFiles.save(TMP, CONFIG, BACKUP, bytes,
-                    file -> true, "action-groups", logger::error);
+                    file -> AutomationStoreFiles.isParseable(file, "action-group", logger::warn),
+                    "action-groups", logger::error);
         }
     }
 

@@ -205,9 +205,6 @@ public final class ClusterSpeedOverlay {
         }
     }
 
-    /** Whether a head-unit view-mirror is currently capturing the cluster stack. */
-    static boolean isMirrorActive() { return sMirrorActive; }
-
     /** Applies a saved {@link #CONFIG_KEY} change to an already-open projection. Any thread. */
     public static void onEnabledChanged() {
         ClusterSpeedOverlay i = instance;

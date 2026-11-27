@@ -229,6 +229,8 @@ public final class BydFeatureIds {
     public static final int INSTRUMENT_NAVI_TYPE_SET = resolveOrFallback("Instrument.NAVI_TYPE_SET", 1276157976);
     public static final int INSTRUMENT_2IN1_CURRENT_JOURNEY_DRIVE_MILEAGE = resolveOrFallback("Instrument.INSTRUMENT_2IN1_CURRENT_JOURNEY_DRIVE_MILEAGE", 1246801948);
     public static final int INSTRUMENT_2IN1_CURRENT_JOURNEY_DRIVE_TIME = resolveOrFallback("Instrument.INSTRUMENT_2IN1_CURRENT_JOURNEY_DRIVE_TIME", 1246801938);
+    /** Unit of the STAT_DD_MILEAGE trip meters: 1 = km, 2 = miles. */
+    public static final int INSTRUMENT_DD_MILEAGE_UNIT_03 = resolveOrFallback("Instrument.INSTRUMENT_DD_MILEAGE_UNIT_03", 1246769212);
     // Instrument tyre temperature feature IDs — used for two-arg listener
     // registration and polled get() calls. May return null on some firmwares
     // but are the correct channel for TPMS temperature on others.
@@ -400,6 +402,9 @@ public final class BydFeatureIds {
     public static final int STAT_THIS_TRIP_ELEC_CONSUMPTION = resolveOrFallback("Statistic.STATISTIC_THIS_TRIP_TOTAL_ELEC_CONSUMPTION", 1246801976);
     public static final int STAT_BATTERY_HEALTHY_INDEX = resolveOrFallback("Statistic.STATISTIC_BATTERY_HEALTHY_INDEX", 1145045032);
     public static final int STAT_MILEAGE_AFTER_ZEROING = resolveOrFallback("Statistic.STATISTICS_MILEAGE_AFTER_ZEROING", 1245753360);
+    /** The cluster's driver-resettable TRIP A / TRIP B meters (int, 0.1 units; CarSetting's meter page). */
+    public static final int STAT_DD_MILEAGE1 = resolveOrFallback("Statistic.STATISTIC_DD_MILEAGE1", 1246769168);
+    public static final int STAT_DD_MILEAGE2 = resolveOrFallback("Statistic.STATISTIC_DD_MILEAGE2", 1246769188);
     public static final int STAT_MILEAGE_HEV = resolveOrFallback("Statistic.STATISTIC_MILEAGE_HEV", 1246773264);
     public static final int STAT_TOTAL_MILEAGE = resolveOrFallback("Statistic.STATISTIC_TOTAL_MILEAGE", 1246765072);
     public static final int STAT_ELEC_PERCENTAGE = resolveOrFallback("Statistic.STATISTIC_ELEC_PERCENTAGE", 1246777400);

@@ -105,6 +105,12 @@ object UnifiedConfigManager {
     private const val MUTATION_CLOCKS_KEY = "__overdriveMutationClocks"
     private val processMutationOrigin = UUID.randomUUID().toString()
     private val processMutationSequence = AtomicLong(0)
+    // Per origin: "wallMs:configSeq" of its last applied write (not a section name).
+    private const val MUTATION_TOUCH_KEY = "@touched"
+    // In the clocks object: the same pair, from when origins without a touch began ageing.
+    private const val MUTATION_UNTOUCHED_KEY = "@untouched"
+    private const val MUTATION_CLOCK_PRUNE_MS = 7L * 24 * 60 * 60 * 1000
+    private const val MUTATION_CLOCK_PRUNE_COMMITS = 1_000L
 
     // Daemon IPC: the app process (UID >= 10000) cannot create the .tmp sibling
     // needed for an atomic write in sticky /data/local/tmp/. App-process writes are
@@ -519,6 +525,14 @@ object UnifiedConfigManager {
     @JvmStatic
     fun readDurableConfigStrict(): JSONObject = withConfigFileLock {
         readDurableConfigLockedStrict()
+    }
+
+    /** Strict worker read with an elapsed-realtime deadline. Null means the config lock was busy. */
+    internal fun readDurableConfigBefore(deadlineMs: Long): JSONObject? = try {
+        withConfigFileLock(deadlineMs) { readDurableConfigLockedStrict() }
+    } catch (e: ConfigLockUnavailableException) {
+        if (!e.contended) throw e
+        null
     }
 
     /**
@@ -979,6 +993,8 @@ object UnifiedConfigManager {
         // clips well under the budget without user tuning.
         if (!oemDashcam.has("recordingQuality")) oemDashcam.put("recordingQuality", "STANDARD")
         if (!oemDashcam.has("codec")) oemDashcam.put("codec", "H264")
+        // fps = the OEM camera HAL rate. fpsMode is NOT seeded here: the daemon's
+        // one-time migrateOemFpsMode() writes it (follow) so the choice is recorded.
         if (!oemDashcam.has("fps")) oemDashcam.put("fps", 30)
         // ---- OEM parked-idle low-power throttle (default OFF = byte-identical) ----
         // When parked + smart surveillance + vehicle OFF, the OEM dashcam is kept
@@ -2314,27 +2330,11 @@ object UnifiedConfigManager {
     }
     
     /**
-     * Get streaming config section.
-     */
-    @JvmStatic
-    fun getStreaming(): JSONObject {
-        return loadConfig().optJSONObject("streaming") ?: JSONObject()
-    }
-
-    /**
      * Get logging config section.
      */
     @JvmStatic
     fun getLogging(): JSONObject {
         return loadConfig().optJSONObject("logging") ?: JSONObject()
-    }
-
-    /**
-     * Get the active minimum log level (DEBUG, INFO, WARN, ERROR). Defaults to INFO.
-     */
-    @JvmStatic
-    fun getLogLevel(): String {
-        return getPersistedLogLevel() ?: "INFO"
     }
 
     /** The level the user saved, or null when none was ever saved (code defaults apply). */
@@ -2442,6 +2442,35 @@ object UnifiedConfigManager {
     fun getOemIdleFps(): Int =
         getOemDashcam().optInt("idleFps", 5).coerceIn(1, 15)
 
+    const val OEM_FPS_MODE_FOLLOW = "follow"
+    const val OEM_FPS_MODE_FIXED = "fixed"
+
+    /** True when the OEM DVR follows the recording fps. Absent (migration not yet run) = fixed. */
+    @JvmStatic
+    fun isOemFpsFollow(): Boolean = try {
+        OEM_FPS_MODE_FOLLOW == getOemDashcam().optString("fpsMode", OEM_FPS_MODE_FIXED)
+    } catch (t: Throwable) { false }
+
+    /** ACC-on recording fps (camera.targetFps) the OEM DVR follows while driving. */
+    @JvmStatic
+    fun getOemFollowFps(): Int = try {
+        (loadConfig().optJSONObject("camera")?.optInt("targetFps", 15) ?: 15).coerceIn(1, 60)
+    } catch (t: Throwable) { 15 }
+
+    /** Parked (surveillance) recording fps the OEM DVR follows: camera.surveillanceTargetFps, else targetFps. */
+    @JvmStatic
+    fun getOemFollowParkedFps(): Int = try {
+        val cam = loadConfig().optJSONObject("camera")
+        val drive = cam?.optInt("targetFps", 15) ?: 15
+        (cam?.optInt("surveillanceTargetFps", drive) ?: drive).coerceIn(1, 60)
+    } catch (t: Throwable) { 15 }
+
+    /** Opt-in: stride the warm DVR to the Proximity monitor rate while it waits. Default FALSE. */
+    @JvmStatic
+    fun isOemProximityIdleThrottle(): Boolean = try {
+        getOemDashcam().optBoolean("proximityIdleThrottle", false)
+    } catch (t: Throwable) { false }
+
     /** Blind-spot display target: "head_unit" (default) or "cluster". */
     @JvmStatic
     fun getBlindSpotTarget(): String =
@@ -2502,9 +2531,6 @@ object UnifiedConfigManager {
     /** Camera-view display target: "head_unit" (default) or "cluster". */
     @JvmStatic
     fun getCamViewTarget(): String = getCamView().optString("target", "head_unit")
-
-    @JvmStatic
-    fun isCamViewCluster(): Boolean = "cluster" == getCamViewTarget()
 
     /** Auto-hide timeout in seconds (0 = stay until explicitly hidden). */
     @JvmStatic
@@ -2605,10 +2631,6 @@ object UnifiedConfigManager {
         } catch (t: Throwable) {
             true
         }
-
-    @JvmStatic
-    fun setWifiAutoEnableEnabled(enabled: Boolean): Boolean =
-        setWifiKeepAliveSuppressed(!enabled)
 
     /** Persist user/automation WiFi-off intent only. The hotspot owns its separate
      *  suppressedByHotspot marker. Single-key merge on the "radio" section, off the
@@ -2925,22 +2947,6 @@ object UnifiedConfigManager {
     }
     
     /**
-     * Update telegram config section.
-     */
-    @JvmStatic
-    fun setTelegram(telegram: JSONObject): Boolean {
-        return updateSection("telegram", telegram)
-    }
-    
-    /**
-     * Update proximity guard config section.
-     */
-    @JvmStatic
-    fun setProximityGuard(proximityGuard: JSONObject): Boolean {
-        return updateSection("proximityGuard", proximityGuard)
-    }
-    
-    /**
      * Update telemetry overlay config section.
      */
     @JvmStatic
@@ -3193,6 +3199,25 @@ object UnifiedConfigManager {
     }
 
     /**
+     * One-time: a config without oemDashcam.fpsMode gets fpsMode="follow" written,
+     * raising oemDashcam.fps (camera rate) only when the stored rate can't reach
+     * the drive follow rate. A stored fpsMode (fixed or follow) is never touched.
+     * Called only from the camera daemon's boot hook, before any OEM session
+     * starts; check and write share the cross-process config lock.
+     */
+    @JvmStatic
+    fun migrateOemFpsMode(): Boolean = withConfigFileLock {
+        val oem = forceReload().optJSONObject("oemDashcam") ?: return@withConfigFileLock false
+        if (oem.has("fpsMode")) return@withConfigFileLock false
+        val delta = JSONObject().put("fpsMode", OEM_FPS_MODE_FOLLOW)
+        val stored = oem.optInt("fps", 30)
+        val hal = com.overdrive.app.camera.OemDashcamPipeline.followHalFps(stored, 30, getOemFollowFps())
+        if (hal != stored.coerceIn(15, 60)) delta.put("fps", hal)
+        Log.i(TAG, "OEM fpsMode migration: $delta (stored fps=$stored)")
+        updateSection("oemDashcam", delta)
+    }
+
+    /**
      * Resolve the effective OEM Dashcam AVMCamera id.
      *
      * Symmetric to pano's default: pano defaults to id=1 (see
@@ -3246,28 +3271,6 @@ object UnifiedConfigManager {
         }
     }
     
-    /**
-     * Get trip analytics config section.
-     * Defaults to enabled=true (matching TripConfig.DEFAULT_ENABLED and the
-     * applyDefaults seed) when the section is absent — the old `false` here
-     * disagreed with every other default and would silently disable trips for
-     * any future caller that trusted it.
-     */
-    @JvmStatic
-    fun getTripAnalytics(): JSONObject {
-        return loadConfig().optJSONObject("tripAnalytics") ?: JSONObject().apply {
-            put("enabled", true)
-        }
-    }
-    
-    /**
-     * Update trip analytics config section.
-     */
-    @JvmStatic
-    fun setTripAnalytics(tripAnalytics: JSONObject): Boolean {
-        return updateSection("tripAnalytics", tripAnalytics)
-    }
-
     /**
      * Resolve the active update channel ("alpha" | "braveheart").
      *
@@ -3346,11 +3349,6 @@ object UnifiedConfigManager {
         }
     }
 
-    @JvmStatic
-    fun setRemoteCommunication(remoteCommunication: JSONObject): Boolean {
-        return updateSection("remoteCommunication", remoteCommunication)
-    }
-    
     /**
      * Get BYD Cloud config section.
      * Defaults to enabled=false if section doesn't exist.
@@ -3362,14 +3360,6 @@ object UnifiedConfigManager {
         }
     }
     
-    /**
-     * Update BYD Cloud config section.
-     */
-    @JvmStatic
-    fun setBydCloud(bydCloud: JSONObject): Boolean {
-        return updateSection("bydCloud", bydCloud)
-    }
-
     /**
      * Get Cloudflared config section.
      */
@@ -4028,8 +4018,57 @@ object UnifiedConfigManager {
             sectionClock.put(key, stamp.sequence)
         }
         originClock.put(section, sectionClock)
+        val now = System.currentTimeMillis()
+        val seq = seqOf(config)
+        originClock.put(MUTATION_TOUCH_KEY, "$now:$seq")
         clocks.put(stamp.origin, originClock)
+        pruneMutationClocks(clocks, now, seq)
         config.put(MUTATION_CLOCKS_KEY, clocks)
+    }
+
+    /**
+     * Drop the clocks of origins (one per process start) untouched for both
+     * [MUTATION_CLOCK_PRUNE_MS] and [MUTATION_CLOCK_PRUNE_COMMITS] commits. A clock
+     * only orders its own origin's writes, and a stamped write resolves within its
+     * IPC and lock timeouts (seconds), so nothing from a pruned origin is in flight;
+     * a later write from it carries a higher sequence and applies as it should. The
+     * commit bound keeps an RTC jump forward from pruning alone; a clock stepped back
+     * never prunes. Origins with no touch (written before touches existed) share one
+     * [MUTATION_UNTOUCHED_KEY] age, so they cost no bytes each. This process's origin
+     * is never pruned.
+     */
+    private fun pruneMutationClocks(clocks: JSONObject, now: Long, seq: Long) {
+        val untouchedSince = mutationTouch(clocks.opt(MUTATION_UNTOUCHED_KEY))
+        var untouchedLeft = false
+        val origins = ArrayList<String>()
+        clocks.keys().forEach { origins.add(it) }
+        for (origin in origins) {
+            if (origin.startsWith("@") || origin == processMutationOrigin) continue
+            val clock = clocks.optJSONObject(origin) ?: continue
+            val own = mutationTouch(clock.opt(MUTATION_TOUCH_KEY))
+            // also drops a touch in an older, unparseable shape
+            if (own == null) clock.remove(MUTATION_TOUCH_KEY)
+            val touched = own ?: untouchedSince
+            if (touched != null
+                    && now - touched[0] >= MUTATION_CLOCK_PRUNE_MS
+                    && seq - touched[1] >= MUTATION_CLOCK_PRUNE_COMMITS) {
+                clocks.remove(origin)
+            } else if (own == null) {
+                untouchedLeft = true
+            }
+        }
+        if (!untouchedLeft) clocks.remove(MUTATION_UNTOUCHED_KEY)
+        else if (untouchedSince == null) clocks.put(MUTATION_UNTOUCHED_KEY, "$now:$seq")
+    }
+
+    /** A "wallMs:configSeq" touch, or null. */
+    private fun mutationTouch(v: Any?): LongArray? {
+        val text = v as? String ?: return null
+        val sep = text.indexOf(':')
+        if (sep <= 0) return null
+        val ms = text.substring(0, sep).toLongOrNull() ?: return null
+        val sq = text.substring(sep + 1).toLongOrNull() ?: return null
+        return longArrayOf(ms, sq)
     }
 
     private fun isBluetoothPreferenceKey(section: String, key: String): Boolean =
@@ -4366,30 +4405,6 @@ object UnifiedConfigManager {
     // ==================== CONVENIENCE METHODS ====================
     
     /**
-     * Get a specific surveillance value.
-     */
-    @JvmStatic
-    fun getSurveillanceValue(key: String, default: Any): Any {
-        return getSurveillance().opt(key) ?: default
-    }
-    
-    /**
-     * Get a specific recording value.
-     */
-    @JvmStatic
-    fun getRecordingValue(key: String, default: Any): Any {
-        return getRecording().opt(key) ?: default
-    }
-    
-    /**
-     * Get a specific proximity guard value.
-     */
-    @JvmStatic
-    fun getProximityGuardValue(key: String, default: Any): Any {
-        return getProximityGuard().opt(key) ?: default
-    }
-    
-    /**
      * Check if surveillance is enabled in config (user preference for ACC OFF auto-start).
      */
     @JvmStatic
@@ -4698,9 +4713,12 @@ object UnifiedConfigManager {
     // outermost holder owns the OS lock; inner calls just run body().
     private val holdingFileLock = ThreadLocal.withInitial { false }
 
-    private fun <T> withConfigFileLock(body: () -> T): T {
-        val waitMs = lockWaitMs()
-        val deadline = SystemClock.elapsedRealtime() + waitMs
+    private fun <T> withConfigFileLock(body: () -> T): T = withConfigFileLock(Long.MAX_VALUE, body)
+
+    private fun <T> withConfigFileLock(deadlineMs: Long, body: () -> T): T {
+        val now = SystemClock.elapsedRealtime()
+        val deadline = minOf(now + lockWaitMs(), deadlineMs)
+        val waitMs = (deadline - now).coerceAtLeast(0L)
         if (!acquireConfigLock(deadline)) {
             // The owner may itself be waiting on a peer process, so name both.
             reportStableLockUnavailable(waitMs) {
@@ -4881,12 +4899,6 @@ object UnifiedConfigManager {
      */
     private fun loadIsolatedConfigForMutation(): JSONObject =
         JSONObject(loadConfigFresh().toString())
-    
-    /**
-     * Get the config file path (for debugging).
-     */
-    @JvmStatic
-    fun getConfigPath(): String = CONFIG_PATH
     
     /**
      * Check if config file exists.

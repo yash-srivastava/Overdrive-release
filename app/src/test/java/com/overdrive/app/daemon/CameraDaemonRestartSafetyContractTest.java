@@ -94,27 +94,39 @@ public class CameraDaemonRestartSafetyContractTest {
                 "restartCameraDaemonForCameraSettings()"));
         assertFalse(reconfigureBody.contains("killDaemon("));
 
-        String appManager = readRepositoryFile(
-                "app/src/main/java/com/overdrive/app/daemon/management/DaemonManager.kt");
-        int appStop = appManager.indexOf("private fun stopCameraDaemon");
-        int appPrepare = appManager.indexOf("prepareCameraRestart()", appStop);
-        int appKill = appManager.indexOf("adbLauncher.killDaemon(", appPrepare);
-        assertTrue(appPrepare > appStop);
-        assertTrue(appKill > appPrepare);
-        assertTrue(appManager.contains(
-                "\"/api/surveillance/prepare-restart\", \"POST\""));
+        int settingsRestart = activity.indexOf(
+                "private fun restartCameraDaemonForCameraSettings()");
+        int settingsRestartEnd = activity.indexOf(
+                "private fun buildCameraPreviewPath(", settingsRestart);
+        assertTrue(settingsRestart >= 0);
+        assertTrue(settingsRestartEnd > settingsRestart);
+        String settingsRestartBody = activity.substring(
+                settingsRestart, settingsRestartEnd);
+        assertOrdered(settingsRestartBody,
+                "\"/api/surveillance/prepare-restart\", \"POST\"",
+                "if (code in 200..299) {\n",
+                "true\n                    } else {",
+                "runOnUiThread {",
+                "if (!prepared) {",
+                "return@runOnUiThread\n                }",
+                "daemonStartupManager.adbLauncher.killDaemon(");
 
         String telegram = readRepositoryFile(
-                "app/src/main/java/com/overdrive/app/telegram/impl/DaemonManager.java");
+                "app/src/main/java/com/overdrive/app/daemon/telegram/DaemonCommandHandler.java");
+        int telegramStop = telegram.indexOf("private boolean stopDaemon(");
         int cameraBranch = telegram.indexOf(
-                "if (\"camera\".equals(name.toLowerCase()))");
+                "if (\"byd_cam_daemon\".equals(processName))", telegramStop);
         int telegramPrepare = telegram.indexOf(
-                "if (!prepareCameraRestart())", cameraBranch);
-        int firstKill = telegram.indexOf("kill -9", cameraBranch);
+                "prepareCameraDaemonForKill(ctx);", cameraBranch);
+        int firstKill = telegram.indexOf("ctx.execShell(", cameraBranch);
+        assertTrue(telegramStop >= 0);
+        assertTrue(cameraBranch > telegramStop);
         assertTrue(telegramPrepare > cameraBranch);
         assertTrue(firstKill > telegramPrepare);
-        assertTrue(telegram.contains(
-                "\"/api/surveillance/prepare-restart\", \"POST\""));
+        int prepareMethod = telegram.indexOf("private void prepareCameraDaemonForKill(");
+        int prepareRequest = telegram.indexOf(
+                "\"/api/surveillance/prepare-restart\", \"POST\"", prepareMethod);
+        assertTrue(prepareMethod >= 0 && prepareRequest > prepareMethod);
     }
 
     @Test

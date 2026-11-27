@@ -18,11 +18,13 @@ BYD.events = {
     totalPages: 1,
     
     // Watched state is stored on the daemon, not in per-browser localStorage.
-    // Mark only after a clip actually plays for 2.5 seconds. The server
-    // fingerprints the file so a new clip at the same path stays unwatched.
+    // Mark after 2.5 seconds of playback, or completion of a shorter clip.
+    // The server fingerprints the file so replacements stay unwatched.
     _WATCHED_AFTER_MS: 2500,
     _watchActiveKey: null,
     _watchTimer: null,
+    _watchShortPlayback: false,
+    _watchWrites: new Set(),
     _watchListenersReady: false,
     _watchRevision: 0,
 
@@ -105,7 +107,7 @@ BYD.events = {
     _recordingNavBoundary: { '-1': false, '1': false },
     _timelineSeq: 0,
     // Off by default: continuing to the next clip is an opt-in (it streams over tunnels too).
-    _playlist: { direction: 0, skipDvr: false, skipEvent: false, skipCam: false, unwatchedOnly: false },
+    _playlist: { direction: 0, skipDvr: false, skipDvrOn: false, skipEvent: false, skipCam: false, unwatchedOnly: false },
     _playlistRequest: null,
     _PLAYLIST_LS_KEY: 'byd.events.playlist',
 
@@ -116,7 +118,7 @@ BYD.events = {
             const saved = JSON.parse(localStorage.getItem(this._PLAYLIST_LS_KEY));
             if (saved) {
                 if ([-1, 0, 1].includes(saved.direction)) this._playlist.direction = saved.direction;
-                for (const key of ['skipDvr', 'skipEvent', 'skipCam', 'unwatchedOnly']) {
+                for (const key of ['skipDvr', 'skipDvrOn', 'skipEvent', 'skipCam', 'unwatchedOnly']) {
                     if (typeof saved[key] === 'boolean') this._playlist[key] = saved[key];
                 }
             }
@@ -175,6 +177,7 @@ BYD.events = {
         if (resume) params.push('resume=1');
         else params.push('fromId=' + encodeURIComponent(this._activeRecording.id));
         if (this._playlist.skipDvr) params.push('skip_dvr_p=1');
+        if (this._playlist.skipDvrOn) params.push('skip_dvr_=1');
         if (this._playlist.skipEvent) params.push('skip_event_=1');
         if (this._playlist.skipCam) params.push('skip_cam_=1');
         if (this._playlist.unwatchedOnly) params.push('unwatchedOnly=1');
@@ -186,6 +189,11 @@ BYD.events = {
         this._refreshPlaylistControls();
         this._refreshRecordingNav();
         try {
+            // Resume must see any watched writes still in flight from playback.
+            if (resume && this._watchWrites.size) {
+                await Promise.all(Array.from(this._watchWrites));
+                if (!current()) return;
+            }
             const response = await fetch('/api/recordings/adjacent?' + params.filter(Boolean).join('&'), { cache: 'no-store' });
             const data = await response.json();
             if (!current()) return;
@@ -2386,12 +2394,24 @@ BYD.events = {
     _bindWatchedTracking(player) {
         if (this._watchListenersReady) return;
         this._watchListenersReady = true;
+        const recording = key => (this._activeRecording && this.recordingKey(this._activeRecording) === key)
+            ? this._activeRecording : this.findRecording(key);
+        const shortDuration = () => Number.isFinite(player.duration) && player.duration > 0
+            && player.duration * 1000 <= this._WATCHED_AFTER_MS;
+        const edgeTolerance = () => Math.min(0.1, player.duration * 0.1);
+        const resetPlayback = () => {
+            this._cancelWatchedTimer();
+            this._watchShortPlayback = false;
+        };
         const schedule = () => {
             const key = this._watchActiveKey;
-            if (!key || this._watchTimer !== null || document.hidden || player.paused) return;
-            const rec = (this._activeRecording && this.recordingKey(this._activeRecording) === key)
-                ? this._activeRecording : this.findRecording(key);
+            if (!key || this._watchTimer !== null || document.hidden
+                    || player.paused || player.seeking || player.ended) return;
+            const rec = recording(key);
             if (!rec || rec.watched || !rec.id) return;
+            if (shortDuration() && player.currentTime <= edgeTolerance()) {
+                this._watchShortPlayback = true;
+            }
             // Start the threshold only when playback genuinely begins;
             // opening the modal, buffering, or seeking alone does not count.
             this._watchTimer = setTimeout(() => {
@@ -2406,18 +2426,41 @@ BYD.events = {
         // uninterrupted. Start a fresh threshold after the seek finishes.
         player.addEventListener('seeked', schedule);
         document.addEventListener('visibilitychange', () => {
-            if (document.hidden) this._cancelWatchedTimer();
+            if (document.hidden) resetPlayback();
             else if (!player.paused && !player.seeking) schedule();
         });
-        ['pause', 'waiting', 'seeking', 'ended', 'emptied'].forEach(type => {
+        ['pause', 'waiting'].forEach(type => {
             player.addEventListener(type, () => this._cancelWatchedTimer());
+        });
+        ['seeking', 'emptied'].forEach(type => player.addEventListener(type, resetPlayback));
+        player.addEventListener('ended', () => {
+            const started = this._watchShortPlayback;
+            resetPlayback();
+            const key = this._watchActiveKey;
+            if (!key || !started || document.hidden || !player.ended
+                    || player.seeking || !shortDuration()) return;
+            // A seek to the end is not playback. Require a played range covering
+            // the clip, allowing only small media timestamp rounding at the edges.
+            const played = player.played;
+            const tolerance = edgeTolerance();
+            if (played.length !== 1 || played.start(0) > tolerance
+                    || played.end(0) < player.duration - tolerance) return;
+            const rec = recording(key);
+            if (rec && rec.id && !rec.watched) this._persistWatched(rec, key);
         });
     },
 
-    async _persistWatched(rec, key) {
+    _persistWatched(rec, key) {
         if (this._watchActiveKey !== key || rec.watched) return;
         // Do not issue repeated requests while this one is in flight.
         this._watchActiveKey = null;
+        const write = this._writeWatched(rec, key);
+        this._watchWrites.add(write);
+        write.then(() => this._watchWrites.delete(write));
+        return write;
+    },
+
+    async _writeWatched(rec, key) {
         try {
             const response = await fetch('/api/recordings/id/' + encodeURIComponent(rec.id)
                     + '/watched', {
@@ -2503,6 +2546,7 @@ BYD.events = {
         
         const player = document.getElementById('videoPlayer');
         this._cancelWatchedTimer();
+        this._watchShortPlayback = false;
         this._watchActiveKey = rec.watched ? null : this.recordingKey(rec);
         this._bindWatchedTracking(player);
         player.setAttribute('playsinline', '');
@@ -2576,6 +2620,7 @@ BYD.events = {
         const playlistSettings = document.getElementById('videoPlaylistSettings');
         if (playlistSettings) playlistSettings.open = false;
         this._cancelWatchedTimer();
+        this._watchShortPlayback = false;
         this._watchActiveKey = null;
         const player = document.getElementById('videoPlayer');
         player.pause();

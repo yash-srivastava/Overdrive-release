@@ -47,7 +47,7 @@ object CoordinateInputParser {
     private const val LNG_ABS_MAX = 180.0
 
     /**
-     * A Plus-Code-shaped token: 2–8 code chars, the `+` separator, then 0–7 more.
+     * A Plus-Code-shaped token: 2–8 code or padding chars, the `+` separator, then 0–7 code chars.
      * Case-insensitive; validated afterwards by [OpenLocationCode.isValidCode].
      *
      * <p>ANCHORED to the START of the input (after optional whitespace) and bounded
@@ -61,7 +61,7 @@ object CoordinateInputParser {
      * resolves. Group 1 is the code token.
      */
     private val PLUS_CODE = Regex(
-        "^\\s*([23456789CFGHJMPQRVWX]{2,8}\\+[23456789CFGHJMPQRVWX]{0,7})(?:\\s|,|\$)",
+        "^\\s*([023456789CFGHJMPQRVWX]{2,8}\\+[23456789CFGHJMPQRVWX]{0,7})(?:\\s|,|\$)",
         RegexOption.IGNORE_CASE
     )
 

@@ -93,6 +93,8 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
     private final int recFixedW;      // <= 0 when the width is dynamic
     private final int recClasses;
 
+    // read() is synchronized; detector and recognizer share one scratch span.
+    private final OcrPixelNormalizer normalizer = new OcrPixelNormalizer();
     private ByteBuffer detInput;
     private ByteBuffer detOutput;
     private int[] tilePixels;
@@ -532,7 +534,7 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
     /** Normalize, infer and copy one tile (including a whole resized coarse frame). */
     private void runDetectorTile(Bitmap bmp, int x, int y, int w, int h) {
         bmp.getPixels(tilePixels, 0, detW, x, y, w, h);
-        OcrPixelNormalizer.detector(tilePixels, detW, w, h, detInput, detNchw, detW, detH);
+        normalizer.detector(tilePixels, detW, w, h, detInput, detNchw, detW, detH);
         detInput.rewind();
         detOutput.rewind();
         det.run(detInput, detOutput);
@@ -541,11 +543,11 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
     }
 
     /** (x/255 - 0.5) / 0.5 with right padding to {@code targetW}. */
-    private static void fillSignedNormalised(Bitmap bmp, ByteBuffer buf, boolean nchw, int targetW) {
+    private void fillSignedNormalised(Bitmap bmp, ByteBuffer buf, boolean nchw, int targetW) {
         int w = bmp.getWidth(), h = bmp.getHeight();
         int[] px = new int[w * h];
         bmp.getPixels(px, 0, w, 0, 0, w, h);
-        OcrPixelNormalizer.recognizer(px, w, h, buf, nchw, targetW);
+        normalizer.recognizer(px, w, h, buf, nchw, targetW);
     }
 
     // ==================== LOADING ====================

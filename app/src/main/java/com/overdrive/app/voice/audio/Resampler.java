@@ -9,6 +9,7 @@ public final class Resampler {
     private final float[] coeffs;
     private final float[] ring;
     private final boolean passthrough;
+    private final boolean symmetricDecimator;
     private int write;
     private int rel;
 
@@ -19,6 +20,7 @@ public final class Resampler {
         down = srcRate / g;
         passthrough = up == 1 && down == 1;
         if (passthrough) {
+            symmetricDecimator = false;
             taps = 0;
             coeffs = new float[0];
             ring = new float[0];
@@ -50,6 +52,13 @@ public final class Resampler {
                 coeffs[p * k + j] = (float) (h[p + j * up] * scale);
             }
         }
+        // Only a single-phase filter is symmetric within that phase. Check the
+        // actual rounded coefficients, not just the ideal Blackman formula.
+        boolean symmetric = up == 1 && k <= 512;
+        for (int j = 0; symmetric && j < k / 2; j++) {
+            symmetric = coeffs[j] == coeffs[k - 1 - j];
+        }
+        symmetricDecimator = symmetric;
         ring = new float[2 * k];
     }
 
@@ -83,6 +92,7 @@ public final class Resampler {
                 return n;
             }
         }
+        if (symmetricDecimator) return processSymmetric(in, off, len, out, outOff);
         int o = outOff;
         for (int i = 0; i < len; i++) {
             float s = in[off + i];
@@ -103,6 +113,38 @@ public final class Resampler {
             rel -= up;
         }
         return o - outOff;
+    }
+
+    private int processSymmetric(short[] in, int off, int len, short[] out, int outOff) {
+        int o = outOff;
+        final int k = taps;
+        for (int i = 0; i < len; i++) {
+            float s = in[off + i];
+            ring[write] = s;
+            ring[write + k] = s;
+            if (++write == k) write = 0;
+            // up == 1: at most one output per input, with rel always nonnegative.
+            if (rel == 0) {
+                int v = symmetricSample(write + k - 1);
+                out[o++] = (short) (v > 32767 ? 32767 : (v < -32768 ? -32768 : v));
+                rel = down;
+            }
+            rel--;
+        }
+        return o - outOff;
+    }
+
+    private int symmetricSample(int newest) {
+        // Pair equally weighted samples. PCM16 sums fit exactly in float;
+        // double accumulation limits rounding error after reassociation.
+        int oldest = newest - taps + 1;
+        int half = taps / 2;
+        double acc = 0;
+        for (int j = 0; j < half; j++) {
+            acc += (double) coeffs[j] * (ring[newest - j] + ring[oldest + j]);
+        }
+        if ((taps & 1) != 0) acc += (double) coeffs[half] * ring[newest - half];
+        return (int) Math.round(acc);
     }
 
     private static boolean isSilent(short[] in, int off, int len) {

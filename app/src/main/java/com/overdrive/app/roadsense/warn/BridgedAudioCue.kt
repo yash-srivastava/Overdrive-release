@@ -13,10 +13,8 @@ fun interface BridgedChimeDispatcher {
  * media player, so it can ride a chosen audio channel — in particular the OEM-extended
  * navigation stream (`STREAM_NAVI`, 14), where the head unit's own guidance prompts play.
  *
- * ## Why not SoundPool / ToneGenerator (the two cues this replaces)
- * Both ran in the daemon and could only reach usage-routed or public streams:
- * [SoundPoolAudioCue] sets `USAGE_ASSISTANCE_SONIFICATION` with no legacy stream type,
- * and [ToneAudioCue] is hardwired to `STREAM_MUSIC`. Neither can address stream 14 —
+ * Daemon-side SoundPool and ToneGenerator could only reach usage-routed or public
+ * streams, not stream 14.
  * `AudioAttributes.setLegacyStreamType` alone doesn't reach the OEM-extended streams;
  * only `MediaPlayer.setAudioStreamType` does, and that needs a MediaPlayer that can
  * actually prepare, which the daemon has none of (prepare fails `0x80000000`).

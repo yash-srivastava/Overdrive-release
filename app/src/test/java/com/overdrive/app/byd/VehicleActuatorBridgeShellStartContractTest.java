@@ -43,7 +43,7 @@ public class VehicleActuatorBridgeShellStartContractTest {
                 "!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()", dispatch);
         int directStart = source.indexOf("startContext.startForegroundService(intent)", dispatch);
         int fallbackCall = source.indexOf(
-                "startDiLink5ServiceAsShell(startContext, intent)", dispatch);
+                "startDiLink5ServiceAsShell(startContext, intent, true, serviceMayOwnRequest)", dispatch);
         assertTrue(di5Gate > dispatch);
         assertTrue(directStart > di5Gate);
         assertTrue(fallbackCall > directStart);
@@ -58,10 +58,11 @@ public class VehicleActuatorBridgeShellStartContractTest {
         assertTrue(body.contains(
                 "if (android.os.Process.myUid() != ANDROID_SHELL_UID) return null;"));
         assertTrue(body.contains("\"startService\".equals(candidate.getName())"));
-        // Both signature arms pass caller=null, requireForeground=TRUE and the
-        // shell package UID 2000 actually owns.
-        assertTrue(body.contains(
-                "new Object[]{null, intent, resolvedType, Boolean.TRUE,"));
+        // Foreground actuator requests and ordinary projection requests preserve their
+        // service type and the original Intent on both supported Android signatures.
+        String args = "new Object[]{null, intent, resolvedType, requireForeground,";
+        assertTrue(body.indexOf(args) >= 0 && body.lastIndexOf(args) > body.indexOf(args));
+        assertTrue(source.contains("startDiLink5ServiceAsShell(context, intent, false, null)"));
         assertTrue(body.contains("\"com.android.shell\""));
         // Fail-soft: every failure path returns null so callers degrade
         // exactly as before the fallback existed.

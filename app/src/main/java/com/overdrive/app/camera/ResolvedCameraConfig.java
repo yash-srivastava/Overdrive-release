@@ -98,10 +98,6 @@ public final class ResolvedCameraConfig {
         return selectedProfileId;
     }
 
-    public boolean isAutoProfile() {
-        return autoProfile;
-    }
-
     public int getPanoCameraId() {
         return panoCameraId;
     }
@@ -143,10 +139,6 @@ public final class ResolvedCameraConfig {
     /** Source of the resolved dimensions; saved values may be profile-seeded. */
     public String getPanoGeometrySource() {
         return panoGeometrySource;
-    }
-
-    public EnumMap<CameraRole, CameraSourceRef> getRoleMappings() {
-        return new EnumMap<>(roleMappings);
     }
 
     public int getDirectCameraIdForRole(CameraRole role) {

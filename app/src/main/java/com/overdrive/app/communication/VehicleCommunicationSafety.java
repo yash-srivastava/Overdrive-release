@@ -3,13 +3,10 @@ package com.overdrive.app.communication;
 import com.overdrive.app.byd.BydDataCollector;
 import com.overdrive.app.byd.BydVehicleData;
 import com.overdrive.app.camera.dilink5.DiLink5Platform;
-import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.monitor.AccMonitor;
 import com.overdrive.app.monitor.GearMonitor;
 import com.overdrive.app.surveillance.GpuSurveillancePipeline;
-
-import org.json.JSONObject;
 
 /** Motion and overlay-surface gates used by remote communication. */
 public final class VehicleCommunicationSafety {
@@ -57,14 +54,13 @@ public final class VehicleCommunicationSafety {
         } catch (Throwable ignored) {}
 
         try {
-            JSONObject state = UnifiedConfigManager.loadConfig()
-                    .optJSONObject("roadSense");
-            state = state == null ? null : state.optJSONObject("overlayState");
+            com.overdrive.app.roadsense.warn.OverlayState state =
+                    com.overdrive.app.roadsense.warn.RoadSenseOverlayChannel.INSTANCE.current();
             if (state != null) {
-                long age = System.currentTimeMillis() - state.optLong("ts", 0L);
+                long age = System.currentTimeMillis() - state.getUpdatedMs();
                 if (age >= 0L && age <= ROAD_SENSE_STATE_FRESH_MS
-                        && (state.optBoolean("ahead", false)
-                        || state.optJSONObject("pending") != null)) {
+                        && (state.getHazardAhead()
+                        || state.getPendingConfirm() != null)) {
                     return false;
                 }
             }

@@ -209,7 +209,7 @@ public class Di3BootAnimationSafetyContractTest {
         String userActivity = method(
                 source,
                 "private static boolean injectFakeUserActivity",
-                "\n    private static void immediateWakeUpMcu()");
+                "\n    private static boolean applyMonitorState(");
         assertOrdered(
                 userActivity,
                 "panelReconciler.isDesired(",

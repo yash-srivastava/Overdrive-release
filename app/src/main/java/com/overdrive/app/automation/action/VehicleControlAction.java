@@ -4,6 +4,7 @@ import com.overdrive.app.automation.AutomationAction;
 import com.overdrive.app.automation.AutomationQueue;
 import com.overdrive.app.automation.ExpressionEvaluator;
 import com.overdrive.app.automation.TextInterpolator;
+import com.overdrive.app.automation.type.DynamicIntType;
 import com.overdrive.app.automation.type.Type;
 import com.overdrive.app.automation.value.Label;
 import com.overdrive.app.byd.BydDataCollector;
@@ -11,8 +12,11 @@ import com.overdrive.app.byd.BydVehicleData;
 import com.overdrive.app.byd.routing.VehicleCommandRouter;
 import com.overdrive.app.mqtt.VehicleControlCatalog;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 import java.util.Objects;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public class VehicleControlAction extends DeclaredAction {
@@ -71,6 +75,45 @@ public class VehicleControlAction extends DeclaredAction {
             return text;
         }
         return ExpressionEvaluator.format(value);
+    }
+
+    /** A plain decimal number, as produced by a variable, a signal or {@link ExpressionEvaluator#format}. */
+    private static final Pattern DECIMAL = Pattern.compile("[-+]?\\d+(\\.\\d+)?([eE][-+]?\\d{1,3})?");
+
+    /** Whether the raw payload references live state or is arithmetic, i.e. is not a typed constant. */
+    static boolean isDynamicPayload(String raw) {
+        return raw != null && (raw.indexOf("${") >= 0 || looksArithmetic(raw));
+    }
+
+    /**
+     * Fit a dynamic numeric payload to a "number" entity: round half-up to an integer, snap to
+     * the entity's step and clamp to [min, max]. A variable holding 47.6 or a signal at 85
+     * then sets 48 or the cap instead of failing the action. Anything that is not a plain
+     * number after resolution (an unresolved token, a word, an expression that did not
+     * evaluate) is returned unchanged so the catalog still rejects it. Constant payloads never
+     * reach this; they keep the catalog's strict range check, as MQTT ingress does.
+     */
+    static String fitDynamicNumber(String resolved, VehicleControlCatalog.ControlEntity entity) {
+        if (resolved == null || entity == null || !"number".equals(entity.platform)
+                || !(entity.max >= entity.min)) {
+            return resolved;
+        }
+        String text = resolved.trim();
+        if (!DECIMAL.matcher(text).matches()) return resolved;
+        double fitted;
+        try {
+            fitted = new BigDecimal(text).setScale(0, RoundingMode.HALF_UP).doubleValue();
+        } catch (ArithmeticException | NumberFormatException e) {
+            return resolved;
+        }
+        double step = entity.step;
+        if (step > 1d && step == Math.rint(step)) {
+            fitted = entity.min + Math.rint((fitted - entity.min) / step) * step;
+            if (fitted > entity.max) fitted -= step;
+        }
+        fitted = Math.max(entity.min, Math.min(entity.max, fitted));
+        if (fitted != Math.rint(fitted)) return resolved;
+        return Long.toString((long) fitted);
     }
 
     /** Whether the text is worth handing to the arithmetic evaluator (operator or function call). */
@@ -134,8 +177,8 @@ public class VehicleControlAction extends DeclaredAction {
             return false;
         }
         // Vehicle control currently only uses a single variable for an action
-        String payload = Objects.requireNonNullElse(automationAction.getVariables().get("payload"), "").toString();
-        payload = resolvePayload(payload);
+        String rawPayload = Objects.requireNonNullElse(automationAction.getVariables().get("payload"), "").toString();
+        String payload = controlPayload(rawPayload, entity);
         // TODO: Add other variables in to sub for actions like climate control
         // Pass the latest vehicle snapshot so composite commands can preserve sibling state (e.g. a
         // seat_heat_driver command reads the other zones' current levels from the snapshot; a null
@@ -170,6 +213,50 @@ public class VehicleControlAction extends DeclaredAction {
             AutomationQueue.completeLatestStateCompensation(
                     compensationToken, successful);
         }
+    }
+
+    /**
+     * The payload sent to {@code entity}: references and arithmetic resolved, and, for a payload
+     * field that opts in to variables/signals, a dynamic numeric result fitted to the entity.
+     */
+    String controlPayload(String rawPayload, VehicleControlCatalog.ControlEntity entity) {
+        boolean dynamicNumber = hasDynamicNumberPayload() && isDynamicPayload(rawPayload);
+        if (dynamicNumber && hasBlankReference(rawPayload)) {
+            // An unset or empty reference must fail, not fold into the arithmetic
+            // ("${var:x}+1" would otherwise become "+1" and be clamped to the minimum).
+            logger.warn("Dynamic payload '" + rawPayload + "' has an unresolved reference for "
+                    + entity.key + " — rejecting");
+            return rawPayload;
+        }
+        String payload = resolvePayload(rawPayload);
+        if (!dynamicNumber) return payload;
+        String fitted = fitDynamicNumber(payload, entity);
+        if (!Objects.equals(fitted, payload)) {
+            logger.info("Dynamic payload '" + rawPayload + "' = " + payload + " fitted to "
+                    + fitted + " for " + entity.key + " [" + ExpressionEvaluator.format(entity.min)
+                    + ".." + ExpressionEvaluator.format(entity.max) + "]");
+        }
+        return fitted;
+    }
+
+    private static final Pattern REFERENCE = Pattern.compile("\\$\\{[^}]+\\}");
+
+    /** Whether any {@code ${…}} reference in {@code raw} is unresolvable or resolves to blank text. */
+    private static boolean hasBlankReference(String raw) {
+        java.util.regex.Matcher m = REFERENCE.matcher(raw);
+        while (m.find()) {
+            String value = TextInterpolator.resolve(m.group());
+            if (value == null || value.trim().isEmpty()) return true;
+        }
+        return false;
+    }
+
+    /** Whether this action's payload field opts in to variables/signals ({@link DynamicIntType}). */
+    private boolean hasDynamicNumberPayload() {
+        for (Type variable : getVariables()) {
+            if ("payload".equals(variable.getLabel().getId())) return variable instanceof DynamicIntType;
+        }
+        return false;
     }
 
     /** The complete latest-state compensation allowlist. */

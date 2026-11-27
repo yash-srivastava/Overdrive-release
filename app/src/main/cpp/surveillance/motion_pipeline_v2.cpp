@@ -73,36 +73,12 @@ void v2_initPipeline(PipelineStateV2* state) {
 }
 
 // ============================================================================
-// Helper: Extract quadrant from mosaic
-// ============================================================================
-
-static void extractQuadrant(
-    const uint8_t* mosaic, int mosaicW, int mosaicH,
-    int quadrant, uint8_t* out)
-{
-    int qW = mosaicW / 2;
-    int qH = mosaicH / 2;
-    int startX = (quadrant % 2) * qW;
-    int startY = (quadrant / 2) * qH;
-    
-    // Clamp to actual quadrant dimensions we process
-    int copyW = std::min(qW, V2_QUADRANT_WIDTH);
-    int copyH = std::min(qH, V2_QUADRANT_HEIGHT);
-    
-    for (int y = 0; y < copyH; y++) {
-        int srcOffset = ((startY + y) * mosaicW + startX) * V2_BYTES_PER_PIXEL;
-        int dstOffset = y * copyW * V2_BYTES_PER_PIXEL;
-        memcpy(out + dstOffset, mosaic + srcOffset, copyW * V2_BYTES_PER_PIXEL);
-    }
-}
-
-// ============================================================================
 // Stage 1: Global Brightness Check
 // ============================================================================
 
 static bool stage1_brightnessCheck(
     QuadrantState* qs,
-    const uint8_t* quadrantRgb,
+    const uint8_t* sampledLuma,
     const PipelineConfigV2* config,
     float* outMeanLuma)
 {
@@ -111,13 +87,9 @@ static bool stage1_brightnessCheck(
     int sampleCount = 0;
     
     for (int y = 0; y < V2_QUADRANT_HEIGHT; y += 8) {
-        int rowOffset = y * V2_QUADRANT_WIDTH * V2_BYTES_PER_PIXEL;
+        int rowOffset = (y / 4) * V2_SAMPLED_WIDTH;
         for (int x = 0; x < V2_QUADRANT_WIDTH; x += 8) {
-            int idx = rowOffset + x * V2_BYTES_PER_PIXEL;
-            int r = quadrantRgb[idx] & 0xFF;
-            int g = quadrantRgb[idx + 1] & 0xFF;
-            int b = quadrantRgb[idx + 2] & 0xFF;
-            lumaSum += (r + (g << 1) + b) >> 2;
+            lumaSum += sampledLuma[rowOffset + x / 4];
             sampleCount++;
         }
     }
@@ -326,7 +298,6 @@ static int stage2_blockAnalysis(
                 int gy = startY + y;
                 if (gy >= V2_QUADRANT_HEIGHT) break;
                 
-                const int rowIdx = gy * V2_QUADRANT_WIDTH * V2_BYTES_PER_PIXEL;
                 const int sampleBase = (gy / 4) * V2_SAMPLED_WIDTH + startX / 4;
                 // Quiet rows never reach the ratio, chroma or edge gates.
                 if (!motion_luma::rowHasChange(currentLuma + sampleBase,
@@ -352,7 +323,7 @@ static int stage2_blockAnalysis(
                     
                     // Shadow discrimination: check if this pixel change is shadow-like
                     if (shadowFilterEnabled) {
-                        const int idx = rowIdx + gx * V2_BYTES_PER_PIXEL;
+                        const int idx = sample * V2_BYTES_PER_PIXEL;
                         if (isShadowPixel(current[idx], current[idx + 1], current[idx + 2],
                                 reference[idx], reference[idx + 1], reference[idx + 2], chromaTol)) {
                             shadowPixelCount++;
@@ -565,14 +536,6 @@ static int stage4_connectedComponents(
 // fabricate a spurious vector; we only trust textured blocks.
 // ============================================================================
 
-static inline int lumaAt(const uint8_t* img, int x, int y) {
-    int idx = (y * V2_QUADRANT_WIDTH + x) * V2_BYTES_PER_PIXEL;
-    int r = img[idx] & 0xFF;
-    int g = img[idx + 1] & 0xFF;
-    int b = img[idx + 2] & 0xFF;
-    return (r + (g << 1) + b) >> 2;
-}
-
 static float stage4b_flowCoherence(
     const uint8_t* current,
     const uint8_t* reference,
@@ -633,7 +596,7 @@ static float stage4b_flowCoherence(
         int n = 0, sampleSum = 0;
         for (int y = 0; y < patchHeight; y += 4) {
             for (int x = 0; x < V2_BLOCK_SIZE; x += 4) {
-                int v = lumaAt(current, x0 + x, y0 + y);
+                int v = current[(y0 + y) * V2_QUADRANT_WIDTH + x0 + x];
                 curSamp[n++] = v;
                 sampleSum += v;
             }
@@ -649,15 +612,15 @@ static float stage4b_flowCoherence(
         // ~64 samples; require average per-sample deviation ≥ 6 luma.
         if (texture < sampleCount * 6) continue;
 
-        // Search the same candidates with the same luma samples, batching
-        // eight SAD terms at a time and caching complete reference rows.
+        // Search the same candidates directly in the already-packed luma
+        // history, batching eight SAD terms at a time.
         static_assert(V2_BLOCK_SIZE == 32, "Flow SAD expects eight stride-4 samples");
         const uint8_t* searchOrigin = reference +
-                ((y0 - V2_FLOW_SEARCH_RADIUS) * V2_QUADRANT_WIDTH +
-                 x0 - V2_FLOW_SEARCH_RADIUS) * V2_BYTES_PER_PIXEL;
+                (y0 - V2_FLOW_SEARCH_RADIUS) * V2_QUADRANT_WIDTH +
+                 x0 - V2_FLOW_SEARCH_RADIUS;
         int bestDx, bestDy;
         motion_flow::bestDisplacement<V2_FLOW_SEARCH_RADIUS>(curSamp, searchOrigin,
-                V2_QUADRANT_WIDTH * V2_BYTES_PER_PIXEL, patchHeight, bestDx, bestDy);
+                V2_QUADRANT_WIDTH, patchHeight, bestDx, bestDy);
 
         netX += bestDx;
         netY += bestDy;
@@ -777,13 +740,17 @@ static int stage5_behaviorClassification(
 // Process single quadrant through all stages
 // ============================================================================
 
-static const uint8_t* sampledLumaForSlot(QuadrantState* qs, int slot) {
-    if (!qs->sampledLumaReady[slot]) {
-        motion_luma::sampleFrame<V2_QUADRANT_WIDTH, V2_QUADRANT_HEIGHT>(
-                qs->frameHistory[slot], qs->sampledLuma[slot]);
-        qs->sampledLumaReady[slot] = true;
-    }
-    return qs->sampledLuma[slot];
+static void writeHistorySlot(
+    QuadrantState* qs, int slot,
+    const uint8_t* mosaic, int mosaicW, int mosaicH, int quadrantIdx)
+{
+    const int startX = (quadrantIdx % 2) * (mosaicW / 2);
+    const int startY = (quadrantIdx / 2) * (mosaicH / 2);
+    const int stride = mosaicW * V2_BYTES_PER_PIXEL;
+    const uint8_t* origin = mosaic + startY * stride + startX * V2_BYTES_PER_PIXEL;
+    motion_luma::packHistory<V2_QUADRANT_WIDTH, V2_QUADRANT_HEIGHT>(
+            origin, stride, qs->frameLuma[slot], qs->sampledLuma[slot],
+            qs->sampledRgb[slot]);
 }
 
 static void processQuadrant(
@@ -804,18 +771,18 @@ static void processQuadrant(
 
     if (!qs->enabled) return;
 
-    // Extract straight into the next history slot. It is distinct from the
+    // Pack straight into the next history slot. It is distinct from the
     // N-3 reference and stays immutable throughout this quadrant's processing.
     static_assert(V2_COMPARE_OFFSET > 0 && V2_COMPARE_OFFSET < V2_FRAME_HISTORY,
                   "Current and reference history slots must be distinct");
     int histIdx = qs->historyIndex;
-    uint8_t* quadrantRgb = qs->frameHistory[histIdx];
-    extractQuadrant(mosaic, mosaicW, mosaicH, quadrantIdx, quadrantRgb);
-    qs->sampledLumaReady[histIdx] = false;
+    writeHistorySlot(qs, histIdx, mosaic, mosaicW, mosaicH, quadrantIdx);
+    const uint8_t* currentRgb = qs->sampledRgb[histIdx];
+    const uint8_t* currentLuma = qs->sampledLuma[histIdx];
 
     // --- Stage 1: Brightness check ---
     float meanLuma = 0;
-    bool suppressed = stage1_brightnessCheck(qs, quadrantRgb, config, &meanLuma);
+    bool suppressed = stage1_brightnessCheck(qs, currentLuma, config, &meanLuma);
     result->meanLuma = meanLuma;
     result->brightnessSuppressed = suppressed;
     
@@ -842,8 +809,10 @@ static void processQuadrant(
     
     // Get reference frame (N-3 from ring buffer)
     int refIdx = (histIdx - V2_COMPARE_OFFSET + V2_FRAME_HISTORY) % V2_FRAME_HISTORY;
-    const uint8_t* referenceFrame = qs->frameHistory[refIdx];
+    const uint8_t* referenceRgb = qs->sampledRgb[refIdx];
     
+    static_assert(V2_QUADRANT_WIDTH % 8 == 0 && V2_QUADRANT_HEIGHT % 8 == 0,
+                  "Diagnostic center must be present in sampled RGB history");
     // DIAGNOSTIC: Every 100 frames, compute raw pixel diff between current and reference
     // to verify frames are actually different. If maxDiff=0, the downscaler is returning
     // identical frames (stale data).
@@ -854,13 +823,13 @@ static void processQuadrant(
         int samples = 0;
         for (int y = 0; y < V2_QUADRANT_HEIGHT; y += 16) {
             for (int x = 0; x < V2_QUADRANT_WIDTH; x += 16) {
-                int idx = (y * V2_QUADRANT_WIDTH + x) * V2_BYTES_PER_PIXEL;
-                int r1 = quadrantRgb[idx] & 0xFF;
-                int g1 = quadrantRgb[idx+1] & 0xFF;
-                int b1 = quadrantRgb[idx+2] & 0xFF;
-                int r2 = referenceFrame[idx] & 0xFF;
-                int g2 = referenceFrame[idx+1] & 0xFF;
-                int b2 = referenceFrame[idx+2] & 0xFF;
+                int idx = ((y / 4) * V2_SAMPLED_WIDTH + x / 4) * V2_BYTES_PER_PIXEL;
+                int r1 = currentRgb[idx] & 0xFF;
+                int g1 = currentRgb[idx+1] & 0xFF;
+                int b1 = currentRgb[idx+2] & 0xFF;
+                int r2 = referenceRgb[idx] & 0xFF;
+                int g2 = referenceRgb[idx+1] & 0xFF;
+                int b2 = referenceRgb[idx+2] & 0xFF;
                 int diff = std::abs(r1-r2) + std::abs(g1-g2) + std::abs(b1-b2);
                 if (diff > maxDiff) maxDiff = diff;
                 totalDiff += diff;
@@ -876,11 +845,11 @@ static void processQuadrant(
         // Also log a sample pixel from center of quadrant
         int cx = V2_QUADRANT_WIDTH / 2;
         int cy = V2_QUADRANT_HEIGHT / 2;
-        int ci = (cy * V2_QUADRANT_WIDTH + cx) * V2_BYTES_PER_PIXEL;
+        int ci = ((cy / 4) * V2_SAMPLED_WIDTH + cx / 4) * V2_BYTES_PER_PIXEL;
         LOGI_V2("Q%d DIAG: center pixel cur=(%d,%d,%d) ref=(%d,%d,%d)",
                 quadrantIdx,
-                quadrantRgb[ci] & 0xFF, quadrantRgb[ci+1] & 0xFF, quadrantRgb[ci+2] & 0xFF,
-                referenceFrame[ci] & 0xFF, referenceFrame[ci+1] & 0xFF, referenceFrame[ci+2] & 0xFF);
+                currentRgb[ci] & 0xFF, currentRgb[ci+1] & 0xFF, currentRgb[ci+2] & 0xFF,
+                referenceRgb[ci] & 0xFF, referenceRgb[ci+1] & 0xFF, referenceRgb[ci+2] & 0xFF);
     }
     
     // --- Stage 2: Block analysis ---
@@ -934,9 +903,8 @@ static void processQuadrant(
     
     bool activeBlocks[V2_TOTAL_BLOCKS];
     int shadowSuppressed = 0;
-    const uint8_t* currentLuma = sampledLumaForSlot(qs, histIdx);
-    const uint8_t* referenceLuma = sampledLumaForSlot(qs, refIdx);
-    int activeCount = stage2_blockAnalysis(quadrantRgb, referenceFrame, currentLuma, referenceLuma,
+    const uint8_t* referenceLuma = qs->sampledLuma[refIdx];
+    int activeCount = stage2_blockAnalysis(currentRgb, referenceRgb, currentLuma, referenceLuma,
             qs, &localConfig, activeBlocks, &shadowSuppressed);
     result->activeBlocks = activeCount;
     
@@ -1075,7 +1043,7 @@ static void processQuadrant(
     // while a coherently translating approach keeps THREAT_HIGH.
     {
         float netX = 0.0f, netY = 0.0f;
-        float coh = stage4b_flowCoherence(quadrantRgb, referenceFrame,
+        float coh = stage4b_flowCoherence(qs->frameLuma[histIdx], qs->frameLuma[refIdx],
                                           componentLabels, largestLabel, &netX, &netY);
         // Push this frame's net vector into the ring (even when coh<0, push 0 so
         // a stalled/uniform frame decays the windowed drift rather than freezing it).
@@ -1297,9 +1265,7 @@ void v2_processFrame(
         
         // The JNI caller guarantees a 640x480 RGB mosaic. Stage 1 only
         // samples every eighth pixel, so read those samples from the mosaic
-        // directly instead of copying the entire 320x240 RGB quadrant into
-        // the scratch buffer. PASS 2 still extracts the same quadrant bytes
-        // for the motion filters; brightness/suppression results are identical.
+        // directly before PASS 2 packs each quadrant into its history slot.
         float meanLuma = 0;
         int sampleCount = 0;
         const int startX = (q % 2) * (width / 2);
@@ -1351,7 +1317,7 @@ void v2_processFrame(
             continue;
         }
         
-        // Process through all stages, extracting directly into history.
+        // Process through all stages, packing directly into history.
         processQuadrant(&state->quadrants[q], frame, width, height,
                         config, &results[q], q, state->frameCount);
     }

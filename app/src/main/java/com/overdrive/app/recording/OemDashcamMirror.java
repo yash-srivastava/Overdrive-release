@@ -43,6 +43,28 @@ public final class OemDashcamMirror {
         com.overdrive.app.server.OemDashcamApiHandler.scheduleLifecycleRecalc();
     }
 
+    // Pano Proximity low-power monitor rate while it waits; 0 = not waiting.
+    private static volatile int proximityMonitorFps = 0;
+
+    /** Proximity controller state edge: its low-power monitor rate, or 0 when it
+     *  leaves MONITORING (event, stop). Cheap and non-blocking; the OEM pipeline
+     *  only re-strides when its opt-in throttle is on. */
+    public static void onProximityMonitorFps(int monitorFps) {
+        int v = Math.max(0, monitorFps);
+        if (proximityMonitorFps == v) return;
+        proximityMonitorFps = v;
+        try {
+            com.overdrive.app.camera.OemDashcamPipeline oem =
+                com.overdrive.app.daemon.CameraDaemon.getOemDashcamPipeline();
+            if (oem != null) oem.onProximityMonitorChanged();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    public static int getProximityMonitorFps() {
+        return proximityMonitorFps;
+    }
+
     /** Resolved recordingMode: "off" | "continuous" | "smart". */
     private static String getRecordingMode() {
         try {

@@ -115,8 +115,8 @@ public final class TelenavDebugApiHandler {
 
     /**
      * True when the car is off (ACC off). {@code sys.accanim.status} is "0" or empty while
-     * ACC is on; non-zero once the shutdown animation runs / the car is off. Same signal
-     * {@code AccMonitorController} polls. Unknown → treat as ON (navigate immediately),
+     * ACC is on; non-zero once the shutdown animation runs / the car is off.
+     * Unknown → treat as ON (navigate immediately),
      * which is the safe default (never silently swallow a request into the queue).
      */
     private static boolean isAccOff() {

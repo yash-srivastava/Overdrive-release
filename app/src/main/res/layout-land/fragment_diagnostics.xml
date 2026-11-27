@@ -4,22 +4,10 @@
 
   Composition (top→bottom, left→right):
     HERO ROW            : "System diagnostics" + descriptor (left) ║ status pill "All clear" (right)
-    BODY ROW (weight=1) :
-      LEFT COLUMN  (~400dp / weight 0.46):
-        - HEALTH section (label-medium "Health")
-        - 2×2 health-tile grid (Network, Storage, Camera, Battery)
-        - TOOLS section (label-medium "Tools")
-        - 2×2 tool grid (ADB, Traffic, Camera probe, Battery health) — outlined cards
-      RIGHT COLUMN (~480dp / weight 0.54):
-        - "Live event log" container card hosting LogsPanelFragment
-
-  Math (1920px / 540dp content area – allowing for nav rail/drawer space):
-    Body row content height ≈ 540dp − ~80dp hero − padding ⇒ ~420dp for the
-    grids and the logs panel. Logs card uses match_parent against the body
-    row so it always fills the right column.
+    SCROLLING BODY (weight=1): Health tiles and diagnostic tool cards.
 
   IDs preserved (DiagnosticsFragment.kt findViewById targets):
-    cardAdb, cardTraffic, cardCameraProbe, cardBattery, logsPanelContainer
+    cardAdb, cardTraffic, cardCameraProbe, cardBattery
 
   Health-tile IDs (DiagnosticsFragment.kt findViewById targets):
     Network : tvNetworkValue / viewNetworkTunnelDot / tvNetworkTunnelState

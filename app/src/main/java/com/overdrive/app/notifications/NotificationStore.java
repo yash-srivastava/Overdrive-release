@@ -39,12 +39,12 @@ public final class NotificationStore {
 
     // Dedicated H2 file — NOT shared with overdrive_soc_h2. DB_CLOSE_ON_EXIT=FALSE:
     // shutdown is driven explicitly from CameraDaemon.shutdown() (mirrors
-    // SocHistoryDatabase). FILE_LOCK=SOCKET is the cross-process safety net.
+    // SocHistoryDatabase). FILE_LOCK=FS is the cross-process safety net.
     private static final String DB_PATH = com.overdrive.app.util.ScratchRoot.path("overdrive_notif_h2");
     // AUTO_COMPACT_FILL_RATE=50: idle-CPU tuning shared by all seven H2 stores
     // (see SocHistoryDatabase.JDBC_URL for the full rationale).
     private static final String JDBC_URL = "jdbc:h2:file:" + DB_PATH +
-            ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
+            ";FILE_LOCK=FS;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
             ";AUTO_COMPACT_FILL_RATE=50";
 
     private static final String TABLE = "notifications";
@@ -129,7 +129,8 @@ public final class NotificationStore {
             int retryDelayMs = 500;
             for (int attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
-                    connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+                    connection = com.overdrive.app.storage.H2CommitPoint.wrap(
+                            DriverManager.getConnection(JDBC_URL, "sa", ""));
                     try (Statement stmt = connection.createStatement()) {
                         stmt.execute("SET CACHE_SIZE 4096");
                     }
@@ -247,7 +248,8 @@ public final class NotificationStore {
         if (inHealCooldown() || Thread.currentThread().isInterrupted()) return;
         try {
             if (connection == null || connection.isClosed()) {
-                connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+                connection = com.overdrive.app.storage.H2CommitPoint.wrap(
+                        DriverManager.getConnection(JDBC_URL, "sa", ""));
                 isInitialized = true;
                 logger.debug("NotificationStore connection re-established");
             }
@@ -278,7 +280,8 @@ public final class NotificationStore {
             try { connection.close(); } catch (Exception ignored) { /* a dead store throws here */ }
         }
         try {
-            connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+            connection = com.overdrive.app.storage.H2CommitPoint.wrap(
+                    DriverManager.getConnection(JDBC_URL, "sa", ""));
             try (Statement stmt = connection.createStatement()) {
                 stmt.execute("SET CACHE_SIZE 4096");
             }

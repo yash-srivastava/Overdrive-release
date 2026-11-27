@@ -198,7 +198,7 @@ public class GpuStreamScaler {
 
     // Producer-corner remap + per-role X/Y flip flags. Order matches
     // {Front, Right, Rear, Left}. Default = canonical 2x2; pipeline calls
-    // setProducerCornerMap / setFlipFlags on DiLink 4 to override with the
+    // setProducerLayout on DiLink 4 to override with the
     // car's actual layout. UI thread writes, GL thread reads.
     private final float[] producerCornerMap = {
         0.00f, 0.00f,
@@ -304,7 +304,7 @@ public class GpuStreamScaler {
         "}\n";
     
     /** Fragment shader is profile-baked at construction via
-     *  {@link #buildFragmentShader(float[])}. Single-view modes use the four
+     *  {@link #buildFragmentShader(float[], boolean)}. Single-view modes use the four
      *  per-quadrant offsets so streaming a single direction picks the slice
      *  that the user mapped to that role. */
 
@@ -318,11 +318,6 @@ public class GpuStreamScaler {
      * @param quadrantStripOffsetX Per-role X offsets in 5120-wide 4-strip
      *     (legacy HAL). {Front, Right, Rear, Left}.
      */
-    public GpuStreamScaler(int outputWidth, int outputHeight,
-                           float[] quadrantStripOffsetX) {
-        this(outputWidth, outputHeight, quadrantStripOffsetX, false);
-    }
-
     public GpuStreamScaler(int outputWidth, int outputHeight,
                            float[] quadrantStripOffsetX,
                            boolean isTexture2D) {
@@ -887,16 +882,9 @@ public class GpuStreamScaler {
      * 1/a scale — no anamorphic stretch, and det>0 so it can NEVER mirror like the old
      * SurfaceControl-orientation path did). The rounded-card SDF is computed in
      * vTexCoord space (unrotated), so the card + its corners rotate as one rigid unit;
-     * the pillarbox regions stay transparent (map shows through), same as at 0°. Where
-     * that pillarboxed content sits horizontally is set by the alignment — see the
-     * 2-arg overload; this 1-arg form keeps the current alignment.
-     */
-    public void setContentRotation(int degrees) {
-        setContentRotation(degrees, this.contentAlignX);
-    }
-
-    /**
-     * Set both the quarter-turn rotation AND the horizontal alignment of the rotated
+     * the pillarbox regions stay transparent (map shows through), same as at 0°.
+     *
+     * <p>Set both the quarter-turn rotation AND the horizontal alignment of the rotated
      * card, in one atomic publish. {@code alignX}: -1 = hug the LEFT screen edge,
      * +1 = hug the RIGHT, 0 = stay centered. Alignment only matters at 90/270 (where
      * the portrait card is pillarboxed inside the 4:3 output); at 0/180 the card fills
@@ -939,9 +927,6 @@ public class GpuStreamScaler {
         }
         logger.info("BS content rotation set to " + d + " deg, alignX=" + ax);
     }
-
-    /** Current on-screen card rotation in degrees (0/90/180/270). */
-    public int getContentRotation() { return contentRotationDeg; }
 
     /**
      * Turn the blind-spot card's VIDEO by a free angle, inside a card that stays
@@ -1334,13 +1319,9 @@ public class GpuStreamScaler {
         logger.info("OEM source bound to streamScaler (tex=" + oemTextureId + ")");
     }
 
-    /** True when a shared OEM texture has published its first frame transform. */
+    /** True when an OEM texture and its producer surface are bound. */
     public boolean isOemSourceBound() {
         return oemSourceActive && oemTextureId != 0 && oemSurfaceTexture != null;
-    }
-
-    public boolean isOemSourceReady() {
-        return isOemSourceBound() && oemTexMatrixSnapshot != null;
     }
 
     public void unbindOemSource() {
@@ -1462,34 +1443,10 @@ public class GpuStreamScaler {
     }
 
     /**
-     * Sets the per-role producer corner XY map. Each pair is the top-left of
-     * the role's 0.5×0.5 sub-rect inside the producer surface, in {Front,
-     * Right, Rear, Left} order. Default = canonical 2x2; pipeline overrides
-     * with Variant A constants on DiLink 4.
-     */
-    public void setProducerCornerMap(float[] front, float[] right,
-                                     float[] rear, float[] left) {
-        if (front == null || right == null || rear == null || left == null
-                || front.length < 2 || right.length < 2
-                || rear.length  < 2 || left.length  < 2) {
-            return;
-        }
-        synchronized (producerCornerMapLock) {
-            producerCornerMap[0] = front[0]; producerCornerMap[1] = front[1];
-            producerCornerMap[2] = right[0]; producerCornerMap[3] = right[1];
-            producerCornerMap[4] = rear[0];  producerCornerMap[5] = rear[1];
-            producerCornerMap[6] = left[0];  producerCornerMap[7] = left[1];
-            producerCornerDirty = true;
-        }
-    }
-
-    /**
      * Atomic combined setter for both producer corners and flip flags.
-     * Prefer this over the split setProducerCornerMap+setFlipFlags pair —
-     * a drawFrame landing between the two writes can render a frame
-     * with the new corners and the OLD flips (or vice versa), producing
-     * one wrong-orientation mosaic frame per init. Single lock + single
-     * dirty flip removes the window.
+     * Each pair is a role's top-left XY corner or local X/Y flip flags,
+     * in Front, Right, Rear, Left order. One lock and dirty flag prevent
+     * drawFrame from observing new corners with old flips (or vice versa).
      */
     public void setProducerLayout(float[] frontC, float[] rightC,
                                   float[] rearC, float[] leftC,
@@ -1515,26 +1472,6 @@ public class GpuStreamScaler {
     }
 
     /**
-     * Sets the per-role X/Y flip flags ({xFlip, yFlip} ∈ {0,1}). Applied
-     * inside the role's local 0.5×0.5 region. {Front, Right, Rear, Left}.
-     */
-    public void setFlipFlags(float[] front, float[] right,
-                             float[] rear, float[] left) {
-        if (front == null || right == null || rear == null || left == null
-                || front.length < 2 || right.length < 2
-                || rear.length  < 2 || left.length  < 2) {
-            return;
-        }
-        synchronized (producerCornerMapLock) {
-            flipFlags[0] = front[0]; flipFlags[1] = front[1];
-            flipFlags[2] = right[0]; flipFlags[3] = right[1];
-            flipFlags[4] = rear[0];  flipFlags[5] = rear[1];
-            flipFlags[6] = left[0];  flipFlags[7] = left[1];
-            producerCornerDirty = true;
-        }
-    }
-
-    /**
      * Enables or disables the GL red-overlay suppression on the live stream.
      * Mirrors GpuMosaicRecorder.setRedMaskEnabled. Off by default.
      */
@@ -1545,13 +1482,6 @@ public class GpuStreamScaler {
         if (Float.compare(clamped, this.apaCenterInset) == 0) return;   // idempotent
         this.apaCenterInset = clamped;
         this.uniformsDirty.set(true);
-    }
-
-    /** Back-compat 8-arg overload (p8/p9 default to their identity value). */
-    public void setBlindSpotParams(float hfov, float sideHFov, float yaw, float roll,
-                                   float feather, float projExp, float vscale, float pitch) {
-        setBlindSpotParams(hfov, sideHFov, yaw, roll, feather, projExp, vscale, pitch,
-                           0.0f, 0.0f);
     }
 
     /**
@@ -1734,10 +1664,6 @@ public class GpuStreamScaler {
      * Single-view modes (uViewMode 1-4) pick the slice mapped to that role;
      * uViewMode 0 = mosaic; 5 = raw.
      */
-    private static String buildFragmentShader(float[] offsets) {
-        return buildFragmentShader(offsets, false);
-    }
-
     private static String buildFragmentShader(
             float[] offsets,
             boolean isTexture2D) {

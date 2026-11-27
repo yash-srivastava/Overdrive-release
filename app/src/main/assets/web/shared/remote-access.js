@@ -423,18 +423,22 @@ var RemoteAccess = (function () {
                 kind = 'inside'; title = tr('safe_zones_inside', 'Inside selected safe zone');
                 if (restrictBluetooth) {
                     if (parkedBluetooth.safeZoneDisableRequested === true
+                            && bluetoothRuntime.safeZoneDisabled === true && bluetoothRuntime.state === 10
+                            && parkedBluetooth.departureOnly === true) {
+                        detail = tr('safe_zones_bluetooth_disabled_walk_away_detail', "The walk-away is confirmed and OverDrive's parked Bluetooth keep-alive radio is off. The radio is restored if a door opens, the vehicle starts, or this location is no longer confirmed.");
+                    } else if (parkedBluetooth.safeZoneDisableRequested === true
                             && bluetoothRuntime.safeZoneDisabled === true && bluetoothRuntime.state === 10) {
                         detail = tr('safe_zones_bluetooth_disabled_detail', "The walk-away lock is confirmed and OverDrive's parked Bluetooth keep-alive radio is off. The radio is restored if the vehicle is unlocked, a door opens, the vehicle starts, or this location is no longer confirmed.");
                     } else if (parkedBluetooth.safeZoneDisableRequested === true
                             && bluetoothRuntime.bluetoothEnabled === true && bluetoothRuntime.radioOwned !== true) {
-                        detail = tr('safe_zones_bluetooth_owner_detail', "The walk-away lock is confirmed, but Bluetooth was enabled outside OverDrive's radio lease, so it remains on.");
+                        detail = tr('safe_zones_bluetooth_owner_detail', "The walk-away is confirmed, but Bluetooth was enabled outside OverDrive's radio lease, so it remains on.");
                     } else if (parkedBluetooth.safeZoneDisableRequested !== true
                             && bluetoothRuntime.safeZoneDisabled === true) {
                         detail = tr('safe_zones_bluetooth_restore_detail', 'The safe-zone override has cleared; Bluetooth restoration is pending.');
                     } else if (parkedBluetooth.walkAwayLockConfirmed !== true) {
-                        detail = tr('safe_zones_bluetooth_waiting_lock_detail', 'Bluetooth remains available until OverDrive confirms the phone walk-away lock.');
+                        detail = tr('safe_zones_bluetooth_waiting_lock_detail', 'Bluetooth remains available until OverDrive confirms the phone walk-away.');
                     } else {
-                        detail = tr('safe_zones_bluetooth_waiting_detail', 'The lock is confirmed, but OverDrive is waiting for current vehicle and radio state to allow the safe-zone override.');
+                        detail = tr('safe_zones_bluetooth_waiting_detail', 'The walk-away is confirmed, but OverDrive is waiting for current vehicle and radio state to allow the safe-zone override.');
                     }
                     if (restrictLock || restrictUnlock)
                         detail = actions + ' ' + tr('safe_zones_paused_suffix', 'paused by your saved restrictions.') + ' ' + detail;

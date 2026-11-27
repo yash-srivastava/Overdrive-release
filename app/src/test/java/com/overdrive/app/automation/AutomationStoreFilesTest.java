@@ -34,7 +34,7 @@ public class AutomationStoreFilesTest {
         assertTrue(AutomationStoreFiles.save(scratch, live, backup, newBytes, file -> {
             assertTrue(scratch.isFile());
             assertEquals(live, file);
-            return true;
+            return AutomationStoreFiles.isParseable(file, "action-group", errors::add);
         }, "test", errors::add));
 
         assertTrue(errors.isEmpty());
@@ -90,6 +90,28 @@ public class AutomationStoreFilesTest {
                 "test", errors::add));
         assertArrayEquals(oldBackup, Files.readAllBytes(backup.toPath()));
         assertArrayEquals(bytes, Files.readAllBytes(live.toPath()));
+        assertTrue(errors.isEmpty());
+    }
+
+    @Test
+    public void corruptLiveJsonDoesNotReplaceValidBackup() throws Exception {
+        File live = folder.newFile("live.json");
+        File scratch = new File(folder.getRoot(), "live.tmp");
+        File backup = folder.newFile("live.bak");
+        byte[] oldBackup = "{\"group\":{}}".getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = "{}".getBytes(StandardCharsets.UTF_8);
+        Files.write(backup.toPath(), oldBackup);
+        Files.write(live.toPath(), "{".getBytes(StandardCharsets.UTF_8));
+        List<String> warnings = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
+
+        assertTrue(AutomationStoreFiles.save(scratch, live, backup, bytes,
+                file -> AutomationStoreFiles.isParseable(file, "action-group", warnings::add),
+                "action-groups", errors::add));
+        assertArrayEquals(oldBackup, Files.readAllBytes(backup.toPath()));
+        assertArrayEquals(bytes, Files.readAllBytes(live.toPath()));
+        assertEquals(java.util.Collections.singletonList(
+                "Live action-group config is unparseable — keeping the existing backup"), warnings);
         assertTrue(errors.isEmpty());
     }
 

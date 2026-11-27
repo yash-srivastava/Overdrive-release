@@ -579,6 +579,22 @@
                 android:paddingHorizontal="@dimen/od_space_16"
                 android:paddingBottom="@dimen/od_space_24">
 
+                <!-- Sealion 7 Full HDMI opt-in: only shown once the daemon reports support. Its own card,
+                     ahead of the others, because it stays relevant on AAOS where the standard cards hide. -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/projectionSealion7HdmiRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="@dimen/od_space_12"
+                    android:visibility="gone"
+                    app:cardBackgroundColor="?attr/colorSurfaceContainer"
+                    app:cardCornerRadius="@dimen/od_radius_card"
+                    app:cardElevation="0dp"
+                    app:contentPadding="@dimen/od_space_16">
+
+                    <include layout="@layout/projection_sealion7_hdmi_setting" />
+                </com.google.android.material.card.MaterialCardView>
+
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/projectionEditableWindowCard"
                     android:layout_width="match_parent"

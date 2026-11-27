@@ -6,11 +6,9 @@
     HERO ROW   : "System diagnostics" + status pill ("All clear")
     HEALTH grid: 2×2 health tiles (Network, Storage, Camera, Battery)
     TOOLS grid : 2×2 outlined tool cards (Traffic, Camera probe, ADB, Battery)
-    LOGS card  : surface-container card hosting LogsPanelFragment, fills
-                 remaining vertical space (layout_weight=1).
 
   IDs preserved (DiagnosticsFragment.kt findViewById targets):
-    cardAdb, cardTraffic, cardCameraProbe, cardBattery, logsPanelContainer
+    cardAdb, cardTraffic, cardCameraProbe, cardBattery
 
   Health-tile IDs (DiagnosticsFragment.kt findViewById targets):
     Network : tvNetworkValue / viewNetworkTunnelDot / tvNetworkTunnelState

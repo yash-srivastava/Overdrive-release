@@ -18,12 +18,10 @@ object PreferencesManager {
     private const val PREFS_NAME = "overdrive_prefs"
     private const val KEY_ENABLED_DAEMONS = "enabled_daemons"
     private const val KEY_THEME_MODE = "theme_mode"
-    private const val KEY_SELECTED_CAMERAS = "selected_cameras"
     private const val KEY_LAST_TUNNEL_URL = "last_tunnel_url"
     private const val KEY_LAST_ZROK_URL = "last_zrok_url"
     private const val KEY_ZROK_UNIQUE_NAME = "zrok_unique_name"
     private const val KEY_ZROK_ENABLE_TOKEN = "zrok_enable_token"
-    private const val KEY_LOGS_EXPANDED = "logs_expanded"
     private const val KEY_NAVIGATION_VISIBLE_V1 = "navigation_visible_v1"
     /** Rail keys the user has already been offered, so a NEW one can default to
      *  visible without un-hiding something they deliberately switched off. */
@@ -146,28 +144,6 @@ object PreferencesManager {
         return type in getEnabledDaemons()
     }
     
-    // Selected Cameras
-    fun getSelectedCameras(): Set<Int> {
-        val strings = requirePrefs().getStringSet(KEY_SELECTED_CAMERAS, setOf("1")) ?: setOf("1")
-        return strings.mapNotNull { it.toIntOrNull() }.toSet()
-    }
-    
-    fun setSelectedCameras(cameras: Set<Int>) {
-        val strings = cameras.map { it.toString() }.toSet()
-        requirePrefs().edit().putStringSet(KEY_SELECTED_CAMERAS, strings).apply()
-    }
-    
-    fun toggleCamera(cameraId: Int): Set<Int> {
-        val current = getSelectedCameras().toMutableSet()
-        if (cameraId in current) {
-            current.remove(cameraId)
-        } else {
-            current.add(cameraId)
-        }
-        setSelectedCameras(current)
-        return current
-    }
-    
     // Tunnel URL
     fun getLastTunnelUrl(): String? {
         return requirePrefs().getString(KEY_LAST_TUNNEL_URL, null)
@@ -222,15 +198,6 @@ object PreferencesManager {
         requirePrefs().edit().remove(KEY_ZROK_ENABLE_TOKEN).commit()
     }
     
-    // Logs Panel State
-    fun isLogsExpanded(): Boolean {
-        return requirePrefs().getBoolean(KEY_LOGS_EXPANDED, false)
-    }
-    
-    fun setLogsExpanded(expanded: Boolean) {
-        requirePrefs().edit().putBoolean(KEY_LOGS_EXPANDED, expanded).apply()
-    }
-
     /**
      * Missing preference means the complete current catalog, preserving the
      * navigation users had before customization existed. Once customized, new

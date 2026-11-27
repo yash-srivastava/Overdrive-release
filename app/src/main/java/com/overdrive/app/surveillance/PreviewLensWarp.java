@@ -2,8 +2,8 @@ package com.overdrive.app.surveillance;
 
 /** Immutable radial sampling geometry shared by raw-clip still previews. */
 final class PreviewLensWarp {
-    // At most 1 MiB of double coordinates retained, independent of clip count.
-    static final int MAX_CACHED_PIXELS = 64 * 1024;
+    // Fit a 640x480 scrub frame (320x240 per tile), at most 1200 KiB of coordinate payload.
+    static final int MAX_CACHED_PIXELS = 320 * 240;
     private static final Object CACHE_LOCK = new Object();
     private static volatile PreviewLensWarp cached;
 

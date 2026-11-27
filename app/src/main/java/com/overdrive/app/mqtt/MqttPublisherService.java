@@ -55,8 +55,8 @@ public class MqttPublisherService implements MqttCallback {
     private final String deviceId;
 
     // Paho MQTT client. Volatile: mutated only under the instance lock (connect/
-    // disconnect), but read unsynchronized by status/IPC threads via isConnected()
-    // and getStatus() — those must see a current reference, and must read it ONCE
+    // disconnect), but read unsynchronized by status/IPC threads via getStatus().
+    // That method must see a current reference, and must read it ONCE
     // into a local (two reads can NPE if disconnect() nulls the field in between).
     private volatile MqttClient client;
     private volatile boolean running = false;
@@ -612,15 +612,6 @@ public class MqttPublisherService implements MqttCallback {
         differ.markAllSent(snapshot, now);
         differ.markFullSync(now);
         return true;
-    }
-
-    /**
-     * Publish a JSON payload to the configured topic (backward-compatible helper —
-     * no change gating). Prefer {@link #publishTelemetry(JSONObject)}.
-     */
-    public synchronized boolean publish(JSONObject payload) {
-        if (!running) return false;
-        return publishString(config.topic, payload.toString(), config.retainMessages, config.qos);
     }
 
     /**
@@ -1182,14 +1173,5 @@ public class MqttPublisherService implements MqttCallback {
     // ==================== GETTERS ====================
 
     public MqttConnectionConfig getConfig() { return config; }
-    /** Single volatile read into a local — see the note on {@link #client}. */
-    public boolean isConnected() {
-        MqttClient c = client;
-        return connected && c != null && c.isConnected();
-    }
     public boolean isRunning() { return running; }
-    public long getTotalPublishes() { return totalPublishes; }
-    public long getFailedPublishes() { return failedPublishes; }
-    public long getLastPublishTime() { return lastPublishTime; }
-    public String getLastError() { return lastError; }
 }

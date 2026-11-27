@@ -220,10 +220,9 @@ public final class UpdateLifecycle {
                 // Stale daemon-log cleanup: only when the NEWLY-INSTALLED build
                 // does NOT capture logs (BuildConfig.LOG_CAPTURE is false — i.e.
                 // a braveheart→alpha/stable downgrade). braveheart keeps file
-                // logging on for every tag, and NOTHING ages those *.log files
-                // out (DaemonLogger.cleanupOldLogs has no callers; the Kotlin
-                // LogCleaner only touches the app cache dir), so after a
-                // downgrade they'd linger forever. We must NOT run this on a
+                // logging on for every tag. LogCleaner only touches the app cache
+                // dir, so stale daemon logs need this downgrade cleanup.
+                // We must NOT run this on a
                 // braveheart→braveheart update or we'd wipe the very logs the
                 // user wants to send. Excludes the install log + sentinels.
                 (com.overdrive.app.BuildConfig.LOG_CAPTURE ? "" :

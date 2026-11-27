@@ -951,7 +951,7 @@ public class Actions {
         addAction(new VehicleControlAction(
                 new Label("target_soc", "automation.set_target_soc"),
                 "automation.set_target_soc_description",
-                new IntType(new Label("payload", "automation.percent"),
+                new DynamicIntType(new Label("payload", "automation.percent"),
                         com.overdrive.app.byd.BydDataCollector.SOC_TARGET_MIN,
                         com.overdrive.app.byd.BydDataCollector.SOC_TARGET_MAX)));
         addAction(new VehicleControlAction(

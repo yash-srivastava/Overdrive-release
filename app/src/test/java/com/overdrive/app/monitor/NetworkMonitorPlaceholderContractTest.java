@@ -103,6 +103,19 @@ public class NetworkMonitorPlaceholderContractTest {
     }
 
     @Test
+    public void dashboardWifiGetReadsThroughTheCacheBeforeCheckingConnection() throws IOException {
+        String handler = read("app/src/main/java/com/overdrive/app/server/WifiClientApiHandler.java");
+        int get = handler.indexOf("if (\"GET\".equals(method))");
+        int post = handler.indexOf("if (\"POST\".equals(method))");
+        assertTrue(get >= 0 && post > get);
+        String body = handler.substring(get, post);
+        int refresh = body.indexOf("NetworkMonitor.getNetworkInfo();");
+        int connected = body.indexOf("NetworkMonitor.getNetworkType()");
+        assertTrue(refresh >= 0 && connected > refresh);
+        assertFalse(body.contains("NetworkMonitor.refresh()"));
+    }
+
+    @Test
     public void statusJsonIsAdditiveAndMeteredHintIsTriState() throws IOException {
         String nm = read(MONITOR);
         int start = nm.indexOf("public static JSONObject getNetworkInfo()");

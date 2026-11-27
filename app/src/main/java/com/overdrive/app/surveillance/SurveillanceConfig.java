@@ -112,31 +112,13 @@ public class SurveillanceConfig {
     private int temporalFrames = 3;
     private boolean useChroma = false;
     
-    // Camera calibration (for accurate distance estimation)
-    // NOTE: These are defaults - per-camera calibration is used in estimateDistance()
-    private float cameraHeightM = 0.8f;      // Default (overridden per quadrant)
+    // Camera calibration values retained for configuration serialization.
+    private float cameraHeightM = 0.8f;
     private float cameraTiltDeg = 0.0f;      // Zero tilt for 360 fish-eye cameras
     private float verticalFovDeg = 110.0f;   // Wide angle for 360 fish-eye cameras
     private int frameWidth = 640;            // Frame width in pixels
     private int frameHeight = 480;           // Frame height in pixels
     private boolean isMosaic = true;         // True for 2x2 camera grid
-    
-    // Edge Clamping: If motion is within this many pixels of quadrant bottom,
-    // assume feet are cut off by FOV and force "Very Close" distance
-    private static final int EDGE_BUFFER_PX = 5;
-    
-    // ========================================================================
-    // Per-Camera Calibration (360 System / Fish-Eye Profile)
-    // ========================================================================
-    // 360 cameras are located lower on the car body
-    private static final float HEIGHT_FRONT = 0.8f;   // Grille / Logo height
-    private static final float HEIGHT_REAR  = 0.9f;   // Trunk Handle / Plate
-    private static final float HEIGHT_SIDE  = 1.1f;   // Side Mirrors
-    
-    // Fish-eye cameras look straight out (0 tilt) but have WIDE FOV to see ground
-    // Standard 360 cameras have ~100-120 degree vertical FOV
-    private static final float TILT_ZERO = 0.0f;
-    private static final float FOV_WIDE  = 110.0f;    // KEY FIX for 360 systems
     
     // Object detection
     private float aiConfidence = 0.25f;
@@ -509,163 +491,6 @@ public class SurveillanceConfig {
     
     public int getFrameWidth() {
         return frameWidth;
-    }
-    
-    // ========================================================================
-    // Distance Estimation (360 Fish-Eye / Wide Angle - Mosaic Aware)
-    // ========================================================================
-    
-    /**
-     * Estimates real-world distance from pixel Y coordinate.
-     * Optimized for 360° surround view systems with fish-eye (wide angle) cameras.
-     * 
-     * Mosaic Layout (640x480):
-     * [ Front (0,0)    ][ Right (320,0)   ]   <- Top row: Y = 0 to 239
-     * [ Rear  (0,240)  ][ Left  (320,240) ]   <- Bottom row: Y = 240 to 479
-     * 
-     * KEY INSIGHT: In each quadrant, Y=0 is the TOP (horizon/sky), Y=239 is BOTTOM (ground/close).
-     * Objects with feet near the bottom of a quadrant are CLOSE.
-     * Objects with feet near the middle of a quadrant are FAR.
-     * 
-     * @param globalY Y coordinate in full mosaic frame (0 = top, frameHeight = bottom)
-     * @return Estimated distance in meters
-     */
-    public float estimateDistance(int globalY) {
-        return estimateDistance(-1, globalY);
-    }
-
-    /**
-     * Quadrant-aware variant. When {@code quadrant} is in [0,3], picks the
-     * camera-height calibration per camera (FRONT/SIDE/REAR/SIDE) instead of
-     * inferring from mosaic row. Side cameras (Q1=right, Q3=left) are
-     * mirror-mounted at HEIGHT_SIDE which is materially taller than the front
-     * grille / rear plate; using the wrong height under-reports distance by
-     * ~20-30%.
-     */
-    public float estimateDistanceForQuadrant(int quadrant, int globalY) {
-        return estimateDistance(quadrant, globalY);
-    }
-
-    private float estimateDistance(int quadrant, int globalY) {
-        if (globalY <= 0) return 999.0f;
-
-        // Per-camera calibration
-        float currentCamHeight;
-        float currentCamTilt = TILT_ZERO;   // All 360 cameras: zero tilt
-        float currentFov = FOV_WIDE;        // All 360 cameras: wide angle
-
-        double localY;
-        double quadrantHeight;
-
-        if (isMosaic) {
-            int halfH = frameHeight / 2;  // 240 for 480p
-
-            if (globalY < halfH) {
-                localY = globalY;           // 0-239 within top quadrant
-                quadrantHeight = halfH;     // 240
-            } else {
-                localY = globalY - halfH;   // Convert to local: 240->0, 479->239
-                quadrantHeight = halfH;     // 240
-            }
-
-            // Quadrant order: Q0=front, Q1=right, Q2=rear, Q3=left
-            switch (quadrant) {
-                case 1:
-                case 3:
-                    currentCamHeight = HEIGHT_SIDE;
-                    break;
-                case 2:
-                    currentCamHeight = HEIGHT_REAR;
-                    break;
-                case 0:
-                    currentCamHeight = HEIGHT_FRONT;
-                    break;
-                default:
-                    // Legacy callers without a quadrant: fall back to
-                    // top-row=FRONT, bottom-row=REAR (the historic behavior).
-                    currentCamHeight = (globalY < halfH) ? HEIGHT_FRONT : HEIGHT_REAR;
-                    break;
-            }
-        } else {
-            // Single camera view
-            currentCamHeight = HEIGHT_FRONT;
-            localY = globalY;
-            quadrantHeight = frameHeight;
-        }
-        
-        // EDGE CLAMPING: If feet touch bottom of quadrant, person is very close
-        if (localY >= (quadrantHeight - EDGE_BUFFER_PX)) {
-            return 0.5f;  // Very close - feet at edge of FOV
-        }
-        
-        // OPTICAL MATH for Fish-Eye / Wide Angle Camera
-        // 
-        // The optical center (horizon) is at the TOP of each quadrant (localY=0)
-        // because 360° cameras point outward from the car, and the top of the
-        // image shows the horizon while the bottom shows the ground near the car.
-        //
-        // With 110° vertical FOV:
-        // - localY=0 (top) = horizon = infinite distance
-        // - localY=120 (middle) = 55° down = ~1.5m for 0.9m camera height
-        // - localY=239 (bottom) = 110° down = very close (~0.3m)
-        
-        // Focal length in pixels
-        double fy = (quadrantHeight / 2.0) / Math.tan(Math.toRadians(currentFov / 2.0));
-        
-        // Pixel deviation from horizon (top of quadrant)
-        // localY=0 → v=0 (horizon), localY=239 → v=239 (max down angle)
-        double v = localY;
-        
-        // Calculate angle below horizon
-        double angleFromHorizon = Math.atan(v / fy);
-        
-        // Total angle from horizontal (tilt + pixel angle)
-        double totalAngle = Math.toRadians(currentCamTilt) + angleFromHorizon;
-        
-        // If looking at/above horizon, return far distance
-        if (totalAngle <= 0.02) return 999.0f;
-        
-        // Distance = Camera Height / tan(angle)
-        // As angle increases (looking more downward), distance decreases
-        float distance = (float)(currentCamHeight / Math.tan(totalAngle));
-        
-        // Clamp to reasonable range
-        if (distance < 0.3f) return 0.3f;
-        if (distance > 50.0f) return 50.0f;
-        
-        return distance;
-    }
-    
-    /**
-     * Calculates expected pixel height for an object at given distance.
-     * 
-     * @param realHeightM Real-world height of object (e.g., 1.7m for person)
-     * @param distanceM Distance to object in meters
-     * @return Expected height in pixels
-     */
-    public int expectedPixelHeight(float realHeightM, float distanceM) {
-        if (distanceM <= 0) return frameHeight;
-        
-        double cy = frameHeight / 2.0;
-        double fy = cy / Math.tan(Math.toRadians(verticalFovDeg / 2.0));
-        
-        return (int)((fy * realHeightM) / distanceM);
-    }
-    
-    /**
-     * Validates if object size makes sense for the estimated distance.
-     * 
-     * @param distanceM Estimated distance
-     * @param heightPx Object height in pixels
-     * @return true if size is valid for distance
-     */
-    public boolean isValidSizeForDistance(float distanceM, int heightPx) {
-        // Expected height of a 1.7m human at this distance
-        int expectedHumanHeight = expectedPixelHeight(1.7f, distanceM);
-        
-        // Allow 20% to 300% of human size (catches cars, bikes, etc.)
-        return heightPx > (expectedHumanHeight * 0.2f) && 
-               heightPx < (expectedHumanHeight * 3.0f);
     }
     
     // ========================================================================

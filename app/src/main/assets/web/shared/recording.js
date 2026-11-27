@@ -36,6 +36,11 @@ BYD.recording = {
         // Hydrated by loadOemDashcam() and committed via the oem-tab branch
         // in saveSettings() so the picker waits for Apply, not the click.
         oemRecordingMode: 'off',
+        // OEM DVR frame rate: 'follow' (the recording fps) | 'fixed' at oemFps;
+        // oemProximityIdle = opt-in low-rate pre-roll while Proximity Guard waits.
+        oemFpsMode: 'fixed',
+        oemFps: 30,
+        oemProximityIdle: false,
         // Lens-dewarp strength (Fitzgibbon division model). 0..100, 0=off.
         // Shared with surveillance page via UnifiedConfigManager
         // recording.rectifyStrength. Default 0 here so the dirty-diff
@@ -1373,7 +1378,7 @@ BYD.recording = {
     _recTabFieldMap: {
         capture: ['recordingMode', 'proximityGuard'],
         quality: ['recordingQuality', 'recordingCodec', 'cameraFps', 'rectifyStrength', 'segmentDurationMinutes'],
-        oem:     ['oemRecordingMode']
+        oem:     ['oemRecordingMode', 'oemFpsMode', 'oemFps', 'oemProximityIdle']
     },
 
     _tabDirty: function () {
@@ -1949,12 +1954,24 @@ BYD.recording = {
                 }
             } else if (activeTab === 'oem') {
                 const oemMode = this.config.oemRecordingMode || 'off';
+                const oemBody = { recordingMode: oemMode };
+                // Frame-rate fields only when the user changed them, so an untouched
+                // stored value (e.g. 25) is never rewritten.
+                const sc = this.savedConfig;
+                if (this._oemFpsLoaded && sc && (this.config.oemFpsMode !== sc.oemFpsMode
+                        || this.config.oemFps !== sc.oemFps)) {
+                    oemBody.fpsMode = this.config.oemFpsMode;
+                    if (this.config.oemFpsMode !== 'follow') oemBody.fps = this.config.oemFps;
+                }
+                if (this._oemFpsLoaded && sc && this.config.oemProximityIdle !== sc.oemProximityIdle) {
+                    oemBody.proximityIdleThrottle = !!this.config.oemProximityIdle;
+                }
                 let oemErr = null;
                 try {
                     const oemResp = await fetch('/api/oem-dashcam/config', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ recordingMode: oemMode })
+                        body: JSON.stringify(oemBody)
                     });
                     const oemData = await oemResp.json();
                     if (!oemResp.ok || !oemData || oemData.success !== true) {
@@ -1969,7 +1986,12 @@ BYD.recording = {
                 // this, a rejected mode change leaves the picker showing a
                 // value the server refused to accept.
                 // A rejected pick is dropped, so no later load can keep showing it.
-                if (oemErr && this.savedConfig) this.config.oemRecordingMode = this.savedConfig.oemRecordingMode;
+                if (oemErr && this.savedConfig) {
+                    this.config.oemRecordingMode = this.savedConfig.oemRecordingMode;
+                    this.config.oemFpsMode = this.savedConfig.oemFpsMode;
+                    this.config.oemFps = this.savedConfig.oemFps;
+                    this.config.oemProximityIdle = this.savedConfig.oemProximityIdle;
+                }
                 if (!oemErr && oemMode !== 'off') this._pollOemDashcamUntilSettled();
                 else { try { await this.loadOemDashcam(true); } catch (_) {} }
                 if (oemErr) throw oemErr;
@@ -2560,6 +2582,12 @@ BYD.recording = {
             [modeRow, modeSelector, telRow, statusRow].forEach(el => {
                 if (el) el.style.display = idUnset ? 'none' : '';
             });
+            if (idUnset) {
+                ['oemFpsRow', 'oemProximityIdleRow'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = 'none';
+                });
+            }
             // Native DVR card hides when there's no OEM camera id — the
             // factory dashcam disable is meaningless without an OEM
             // pipeline to take its place.
@@ -2607,6 +2635,7 @@ BYD.recording = {
                 const card = r.closest('.mode-option').querySelector('.mode-card');
                 if (card) card.classList.toggle('mode-card-active', r.checked);
             });
+            this._hydrateOemFps(sdata, forceServerMode);
             // Hydrated — drop the dim/busy state.
             const selector = card.querySelector('.mode-selector');
             if (selector) {
@@ -2885,6 +2914,84 @@ BYD.recording = {
             const card = r.closest('.mode-option').querySelector('.mode-card');
             if (card) card.classList.toggle('mode-card-active', r.value === mode);
         });
+        this._renderOemFps();
+        this.markChanged();
+    },
+
+    /** Hydrate the OEM frame-rate fields; an unsaved pick survives a reload. */
+    _hydrateOemFps(sdata, forceServerMode) {
+        if (!sdata || (sdata.fpsMode !== 'follow' && sdata.fpsMode !== 'fixed')) {
+            this._renderOemFps();
+            return;
+        }
+        this._oemFollowEncodeFps = typeof sdata.followEncodeFps === 'number' ? sdata.followEncodeFps : null;
+        this._oemFollowEncodeFpsParked = typeof sdata.followEncodeFpsParked === 'number'
+            ? sdata.followEncodeFpsParked : null;
+        const server = {
+            oemFpsMode: sdata.fpsMode,
+            oemFps: typeof sdata.fps === 'number' ? sdata.fps : 30,
+            oemProximityIdle: !!sdata.proximityIdleThrottle
+        };
+        const sc = this.savedConfig;
+        let pending = false;
+        Object.keys(server).forEach(k => {
+            const keep = !forceServerMode && !!sc && this._oemFpsLoaded && this.config[k] !== sc[k];
+            if (sc) sc[k] = server[k];
+            if (keep) pending = true;
+            else this.config[k] = server[k];
+        });
+        this._oemFpsLoaded = true;
+        if (pending) this.markChanged();
+        this._renderOemFps();
+    },
+
+    _renderOemFps() {
+        const row = document.getElementById('oemFpsRow');
+        const proxRow = document.getElementById('oemProximityIdleRow');
+        const show = !!this._oemFpsLoaded && this._oemIdUnset !== true;
+        if (row) row.style.display = show ? '' : 'none';
+        if (proxRow) proxRow.style.display = show && this.config.oemRecordingMode === 'smart' ? '' : 'none';
+        const val = this.config.oemFpsMode === 'follow' ? 'follow' : String(this.config.oemFps);
+        document.querySelectorAll('#oemFpsBtns .btn-toggle').forEach(btn =>
+            btn.classList.toggle('active', btn.dataset.value === val));
+        const note = document.getElementById('oemFpsFollowNote');
+        if (note) {
+            const n = this._oemFollowEncodeFps;
+            const p = this._oemFollowEncodeFpsParked;
+            note.style.display = n ? '' : 'none';
+            if (n) {
+                const split = p && p !== n;
+                const key = split ? 'oem_dashcam.fps_follow_note_split' : 'oem_dashcam.fps_follow_note';
+                let t = BYD.i18n && BYD.i18n.t ? BYD.i18n.t(key, { n: n, p: p }) : null;
+                if (!t || t === key) {
+                    t = 'Follow recording frame rate (currently ' + n + ' fps'
+                        + (split ? ' driving, ' + p + ' fps parked' : '') + ')';
+                }
+                note.textContent = t;
+            }
+        }
+        const cb = document.getElementById('oemProximityIdle');
+        if (cb) cb.checked = !!this.config.oemProximityIdle;
+    },
+
+    setOemFps(v) {
+        if (!this._oemFpsLoaded) return;
+        if (v === 'follow') {
+            this.config.oemFpsMode = 'follow';
+        } else {
+            const f = parseInt(v, 10);
+            if (f !== 15 && f !== 30) return;
+            this.config.oemFpsMode = 'fixed';
+            this.config.oemFps = f;
+        }
+        this._renderOemFps();
+        this.markChanged();
+    },
+
+    setOemProximityIdle(on) {
+        if (!this._oemFpsLoaded) return;
+        this.config.oemProximityIdle = !!on;
+        this._renderOemFps();
         this.markChanged();
     },
 

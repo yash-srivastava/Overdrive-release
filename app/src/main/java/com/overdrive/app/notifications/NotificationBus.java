@@ -5,8 +5,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * In-process pub/sub for {@link NotificationEvent}s. Mirrors the shape of
- * {@code TelegramEventBus} so the patterns line up.
+ * In-process pub/sub for {@link NotificationEvent}s.
  *
  * <p>v1 is in-process only (publishers and sinks both live in CameraDaemon).
  * If a future emit source lives in another process, an
@@ -137,7 +136,7 @@ public final class NotificationBus {
                 }
             });
         } catch (Throwable t) {
-            // RejectedExecutionException at shutdown — same defensive style as TelegramEventBus
+            // RejectedExecutionException at shutdown
             System.err.println("NotificationBus: publish failed: " + t.getMessage());
         }
     }
