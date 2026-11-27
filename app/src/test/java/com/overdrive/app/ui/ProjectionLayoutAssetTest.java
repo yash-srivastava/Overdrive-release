@@ -30,7 +30,9 @@ public class ProjectionLayoutAssetTest {
             "projectionStandardSettings", "projectionEditableWindowCard",
             "projectionTransportStatus", "projectionFullscreenButton", "projectionScroll",
             "projectionContent", "projectionMirrorCard", "projectionDock", "projectionSettings",
-            "projectionHud", "projectionEmptyState",
+            "projectionHud", "projectionEmptyState", "projectionClusterKeys",
+            "projectionKeyBack", "projectionKeyHome", "projectionKeyVolumeDown",
+            "projectionKeyVolumeUp",
     };
 
     /** ProjectionFragment does not branch on orientation, so both files must carry every ID. */
@@ -253,6 +255,32 @@ public class ProjectionLayoutAssetTest {
         assertTrue(stage >= 0 && spinner > stage && settings > spinner);
         int settingsEnd = land.indexOf(">", settings);
         assertTrue(land.substring(settings, settingsEnd).contains("android:orientation=\"horizontal\""));
+    }
+
+    /** Back, Home and Volume are 56dp dock buttons under the mirror, not a ⋮ dialog. */
+    @Test
+    public void clusterKeysAreVisibleDockButtons() throws IOException {
+        for (String path : new String[] {PORTRAIT, LAND}) {
+            String xml = readRepositoryFile(path);
+            int stage = xml.indexOf("@+id/projectionStage\"");
+            int dock = xml.indexOf("@+id/projectionDock");
+            int keys = xml.indexOf("@+id/projectionClusterKeys");
+            int settings = xml.indexOf("@+id/projectionSettings\"");
+            assertTrue(path, stage >= 0 && dock > stage && keys > dock && settings > keys);
+            for (String id : new String[] {"projectionKeyBack", "projectionKeyHome",
+                    "projectionKeyVolumeDown", "projectionKeyVolumeUp"}) {
+                int at = xml.indexOf("@+id/" + id + "\"");
+                String tag = xml.substring(xml.lastIndexOf("<", at), xml.indexOf(">", at));
+                assertTrue(path + " " + id,
+                        tag.contains("android:layout_height=\"@dimen/od_touch_standard\""));
+            }
+            assertTrue(path, xml.contains("app:icon=\"@drawable/ic_saved_home\""));
+            assertTrue(path, xml.contains("app:icon=\"@drawable/ic_volume_on\""));
+        }
+        String fragment = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/fragment/ProjectionFragment.kt");
+        assertTrue(fragment.contains("R.id.projectionKeyBack to KeyEvent.KEYCODE_BACK"));
+        assertFalse(fragment.contains(".setItems(labels)"));
     }
 
     private static String readRepositoryFile(String relativePath) throws IOException {
