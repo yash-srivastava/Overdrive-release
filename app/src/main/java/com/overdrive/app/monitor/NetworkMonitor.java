@@ -69,6 +69,8 @@ public class NetworkMonitor {
     private static volatile int rssiDbm = Integer.MIN_VALUE;
     // Cache age must not depend on GPS/NTP wall-clock corrections.
     private static volatile long lastUpdateElapsed = -1L;
+    // Serialize expensive probes, independently of the auto-update route/metering lock.
+    private static final NetworkRefreshGate REFRESH_GATE = new NetworkRefreshGate();
     private static volatile Context appContext;
     private static volatile boolean shellFallbackLogged = false;
     private static volatile boolean wifiServiceReadLogged = false;
@@ -96,6 +98,10 @@ public class NetworkMonitor {
      * per 10 s. Bounded: every shell command returns within {@link #SHELL_DEADLINE_MS}.
      */
     public static void refresh() {
+        REFRESH_GATE.force(NetworkMonitor::refreshNow);
+    }
+
+    private static void refreshNow() {
         // Try Android APIs first
         if (appContext != null && tryAndroidApis()) {
             return;
@@ -450,21 +456,22 @@ public class NetworkMonitor {
      * {@code meteredHintKnown} (whether that flag could be read at all).
      */
     public static JSONObject getNetworkInfo() {
-        if (needsNetworkRefresh(lastUpdateElapsed, SystemClock.elapsedRealtime())) {
-            refresh();
-        }
-        JSONObject net = new JSONObject();
-        try {
-            net.put("type", networkType);
-            net.put("ssid", wifiSsid);
-            net.put("ip", ipAddress);
-            net.put("signal", signalPercent);
-            net.put("meteredHint", wifiMeteredHint);
-            net.put("meteredHintKnown", wifiMeteredHintKnown);
-            int rssi = rssiDbm;
-            if ("wifi".equals(networkType) && rssi != Integer.MIN_VALUE) net.put("rssiDbm", rssi);
-        } catch (Exception ignored) {}
-        return net;
+        return REFRESH_GATE.read(
+                () -> needsNetworkRefresh(lastUpdateElapsed, SystemClock.elapsedRealtime()),
+                NetworkMonitor::refreshNow, () -> {
+                    JSONObject net = new JSONObject();
+                    try {
+                        net.put("type", networkType);
+                        net.put("ssid", wifiSsid);
+                        net.put("ip", ipAddress);
+                        net.put("signal", signalPercent);
+                        net.put("meteredHint", wifiMeteredHint);
+                        net.put("meteredHintKnown", wifiMeteredHintKnown);
+                        int rssi = rssiDbm;
+                        if ("wifi".equals(networkType) && rssi != Integer.MIN_VALUE) net.put("rssiDbm", rssi);
+                    } catch (Exception ignored) {}
+                    return net;
+                });
     }
 
     /**
