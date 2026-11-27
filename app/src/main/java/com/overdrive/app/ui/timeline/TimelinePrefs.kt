@@ -105,9 +105,15 @@ object TimelineLinks {
         val mm = time.substring(2, 4).toInt()
         val ss = time.substring(4, 6).toInt()
         if (month !in 1..12 || day !in 1..31 || hh > 23 || mm > 59 || ss > 59) return null
-        // Lenient after the range check so a DST-gap stamp still resolves.
+        // Validate the calendar date in UTC, independently of local DST gaps.
+        val dateCheck = SimpleDateFormat("yyyyMMdd", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+            isLenient = false
+        }
+        // Keep the local timestamp lenient so a DST-gap stamp still resolves.
         val fmt = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).apply { timeZone = tz }
         val ts = try {
+            if (dateCheck.parse(date) == null) return null
             fmt.parse(date + "_" + time)?.time
         } catch (_: Exception) {
             null
