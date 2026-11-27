@@ -1098,22 +1098,22 @@ public class SocHistoryDatabaseChargingAccountingContractTest {
                 "private static long dayEpoch");
 
         assertTrue(openIdentity.contains(
-                "if (!reconcilePendingActiveChargingReplacement()) return -1L"));
+                "if (!reconcilePendingChargingMaintenanceIntent(null)) return -1L"));
         assertTrue(durableOpen.contains(
-                "if (!reconcilePendingActiveChargingReplacement())"));
+                "if (!reconcilePendingChargingMaintenanceIntent(null))"));
         assertTrue(durableOpen.contains("throw new java.sql.SQLException"));
         assertEquals(2, occurrences(closeTarget,
-                "if (!reconcilePendingActiveChargingReplacement())"));
+                "if (!reconcilePendingChargingMaintenanceIntent(null))"));
         assertTrue(closeSatisfied.contains(
-                "if (!reconcilePendingActiveChargingReplacement()) return false"));
+                "if (!reconcilePendingChargingMaintenanceIntent(null)) return false"));
         assertTrue(closeSatisfied.contains(
                 "sessionStart = resolveChargingCloseTargetStart(sessionStart)"));
         assertTrue(deferredStart.contains(
-                "if (!reconcilePendingActiveChargingReplacement()) return false"));
+                "if (!reconcilePendingChargingMaintenanceIntent(null)) return false"));
         assertTrue(deferredStop.contains(
-                "if (!reconcilePendingActiveChargingReplacement()) return false"));
+                "if (!reconcilePendingChargingMaintenanceIntent(null)) return false"));
         assertTrue(staleSweep.contains(
-                "if (!reconcilePendingActiveChargingReplacement()) return false"));
+                "if (!reconcilePendingChargingMaintenanceIntent(null)) return false"));
     }
 
     @Test
@@ -1180,17 +1180,18 @@ public class SocHistoryDatabaseChargingAccountingContractTest {
             throws IOException {
         String source = databaseSource();
         String reconcile = between(source,
-                "private ActiveChargingReplacement reconcileActiveChargingReplacement",
+                "private ChargingMaintenanceOutcome reconcileChargingMaintenanceOutcome",
                 "private void publishActiveChargingReplacement");
         String samples = between(source,
                 "public synchronized boolean recordChargingSample",
                 "/** Start time of the currently-open charging session");
 
-        assertTrue(reconcile.contains("pendingActiveReplacement = expected"));
-        assertTrue(reconcile.contains("isDurablyOpenSession(previousStart)"));
-        assertTrue(reconcile.contains("private boolean reconcilePendingActiveChargingReplacement()"));
-        assertTrue(reconcile.contains("publishActiveChargingReplacement(durable)"));
-        assertTrue(samples.contains("if (!reconcilePendingActiveChargingReplacement()) return false"));
+        assertTrue(reconcile.contains("ChargingMaintenanceIntent intent = pendingChargingMaintenanceIntent"));
+        assertTrue(reconcile.contains("isDurablyOpenSession(intent.previousStartTime)"));
+        assertTrue(reconcile.contains("publishCommittedChargingMaintenance(intent, durable)"));
+        assertTrue(reconcile.contains("cancelRolledBackChargingMaintenance()"));
+        assertTrue(reconcile.contains("return ChargingMaintenanceOutcome.UNKNOWN"));
+        assertTrue(samples.contains("if (!reconcilePendingChargingMaintenanceIntent(null)) return false"));
     }
 
     @Test
@@ -1753,7 +1754,7 @@ public class SocHistoryDatabaseChargingAccountingContractTest {
         String source = databaseSource();
         String replay = between(source,
                 "public synchronized void replayPendingChargingPostCommitMetadata",
-                "private String getCurrencySymbol");
+                "private interface SqlTransactionWork");
         String tracking = between(source,
                 "private boolean trackChargingSession", "Exact-row reconciliation");
         String estimator = readRepositoryFile(
@@ -1796,7 +1797,7 @@ public class SocHistoryDatabaseChargingAccountingContractTest {
                 "Clean up stale lock files");
         String replay = between(source,
                 "public synchronized void replayPendingChargingPostCommitMetadata",
-                "private String getCurrencySymbol");
+                "private interface SqlTransactionWork");
 
         assertTrue(source.contains(
                 "\"soh_calibration_nominal_identity VARCHAR(192) DEFAULT NULL\""));
@@ -1956,7 +1957,7 @@ public class SocHistoryDatabaseChargingAccountingContractTest {
         String source = databaseSource();
         String replay = between(source,
                 "public synchronized void replayPendingChargingPostCommitMetadata",
-                "private String getCurrencySymbol");
+                "private interface SqlTransactionWork");
         String reprice = between(source,
                 "public synchronized int repriceSessionsForTariff",
                 "The per-kWh rate the most recent completed charge");
@@ -1991,7 +1992,7 @@ public class SocHistoryDatabaseChargingAccountingContractTest {
             throws IOException {
         String replay = between(databaseSource(),
                 "public synchronized void replayPendingChargingPostCommitMetadata",
-                "private String getCurrencySymbol");
+                "private interface SqlTransactionWork");
 
         int tariffManager = replay.indexOf(
                 "TariffManager tariffManager =");
@@ -2019,7 +2020,7 @@ public class SocHistoryDatabaseChargingAccountingContractTest {
                 "Remove an intent only after");
         String replay = between(source,
                 "public synchronized void replayPendingChargingPostCommitMetadata",
-                "private String getCurrencySymbol");
+                "private interface SqlTransactionWork");
 
         int queueCall = publicReprice.indexOf(
                 "queuePendingTariffReprice(tariffId)");
@@ -2651,7 +2652,7 @@ public class SocHistoryDatabaseChargingAccountingContractTest {
                 "/** Capture the endpoint");
         String adoption = between(source,
                 "private void consumeDeferredPhysicalSessionAfterStart",
-                "private void discardDeferredPhysicalSessions");
+                "private boolean hasJournaledChargingLifecycle");
 
         assertTrue(writeAhead.indexOf("preSessionCounterAtMs = 0L")
                 < writeAhead.indexOf("persistChargingLifecycleJournal()"));
