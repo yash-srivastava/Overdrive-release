@@ -2,6 +2,7 @@ package com.overdrive.app.safekeep;
 
 import com.overdrive.app.storage.removable.RemovableStorageFs;
 
+import com.overdrive.app.trips.TelemetrySample;
 import com.overdrive.app.trips.TripRecord;
 
 import org.json.JSONObject;
@@ -130,8 +131,8 @@ public final class TripExporter {
                 } catch (Exception e) {
                     continue;
                 }
-                double lat = j.optDouble("la", 0), lon = j.optDouble("lo", 0);
-                if ((lat == 0 && lon == 0) || Double.isNaN(lat) || Double.isNaN(lon)) continue;
+                double lat = j.optDouble("la", Double.NaN), lon = j.optDouble("lo", Double.NaN);
+                if (!TelemetrySample.hasGpsFix(lat, lon)) continue;
                 double alt = j.has("al") ? j.optDouble("al", Double.NaN) : Double.NaN;
                 // The recorder writes 0.0 when the fix has no altitude; an exact 0 is "unknown", not sea level.
                 if (alt == 0.0) alt = Double.NaN;

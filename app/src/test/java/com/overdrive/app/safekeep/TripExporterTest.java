@@ -63,6 +63,39 @@ public class TripExporterTest {
         }
     }
 
+    @Test
+    public void routeExportsSkipInvalidFixesButKeepValidZeroCoordinatesAndBoundaries() throws Exception {
+        File file = journal("{\"la\":0,\"lo\":12}\n"
+                + "{\"la\":91,\"lo\":12}\n"
+                + "{\"la\":-91,\"lo\":12}\n"
+                + "{\"la\":12,\"lo\":181}\n"
+                + "{\"la\":12,\"lo\":-181}\n"
+                + "{\"la\":\"Infinity\",\"lo\":12}\n"
+                + "{\"la\":12,\"lo\":\"-Infinity\"}\n"
+                + "{\"la\":\"NaN\",\"lo\":12}\n"
+                + "{\"la\":12,\"lo\":\"invalid\"}\n"
+                + "{\"la\":12,\"lo\":null}\n"
+                + "{\"lo\":23}\n{\"la\":23}\n{\"la\":0,\"lo\":0}\n"
+                + "{\"la\":12,\"lo\":0}\n"
+                + "{\"la\":90,\"lo\":180}\n"
+                + "{\"la\":-90,\"lo\":-180}\n");
+        try {
+            TripRecord trip = new TripRecord();
+            String gpx = TripExporter.gpx(trip, file);
+            int start = gpx.indexOf("<trkseg>") + "<trkseg>\n".length();
+            assertEquals("  <trkpt lat=\"0.000000\" lon=\"12.000000\"><time>1970-01-01T00:00:00Z</time></trkpt>\n"
+                    + "  <trkpt lat=\"12.000000\" lon=\"0.000000\"><time>1970-01-01T00:00:00Z</time></trkpt>\n"
+                    + "  <trkpt lat=\"90.000000\" lon=\"180.000000\"><time>1970-01-01T00:00:00Z</time></trkpt>\n"
+                    + "  <trkpt lat=\"-90.000000\" lon=\"-180.000000\"><time>1970-01-01T00:00:00Z</time></trkpt>\n ",
+                    gpx.substring(start, gpx.indexOf("</trkseg>")));
+            String kml = TripExporter.kml(trip, file);
+            assertTrue(kml.contains("<coordinates>12.000000,0.000000,0 0.000000,12.000000,0 "
+                    + "180.000000,90.000000,0 -180.000000,-90.000000,0</coordinates>"));
+        } finally {
+            file.delete();
+        }
+    }
+
     private static File journal(String lines) throws Exception {
         File file = File.createTempFile("trip-export", ".jsonl.gz");
         try (GZIPOutputStream out = new GZIPOutputStream(new FileOutputStream(file))) {
