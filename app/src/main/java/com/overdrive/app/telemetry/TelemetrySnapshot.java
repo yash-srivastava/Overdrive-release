@@ -29,49 +29,6 @@ public class TelemetrySnapshot {
     public final boolean brakePedalPressedValid;
     public final long brakePedalPressedReadElapsedRealtimeMs;
 
-    public TelemetrySnapshot(int speedKmh, int accelPedalPercent, int brakePedalPercent,
-                             boolean brakePedalPressed, int gearMode,
-                             boolean leftTurnSignal, boolean rightTurnSignal,
-                             boolean[] seatbeltBuckled, long timestampMs) {
-        this(
-                speedKmh, accelPedalPercent, brakePedalPercent,
-                brakePedalPressed, gearMode, leftTurnSignal,
-                rightTurnSignal, seatbeltBuckled, timestampMs,
-                SystemClock.elapsedRealtime(),
-                true, SystemClock.elapsedRealtime(),
-                true, SystemClock.elapsedRealtime(),
-                true, SystemClock.elapsedRealtime(),
-                true, SystemClock.elapsedRealtime());
-    }
-
-    public TelemetrySnapshot(
-                             int speedKmh, int accelPedalPercent,
-                             int brakePedalPercent,
-                             boolean brakePedalPressed, int gearMode,
-                             boolean leftTurnSignal, boolean rightTurnSignal,
-                             boolean[] seatbeltBuckled, long timestampMs,
-                             long elapsedRealtimeMs,
-                             boolean speedValid,
-                             long speedReadElapsedRealtimeMs,
-                             boolean accelPedalValid,
-                             long accelPedalReadElapsedRealtimeMs,
-                             boolean brakePedalValid,
-                             long brakePedalReadElapsedRealtimeMs,
-                             boolean brakePedalPressedValid,
-                             long brakePedalPressedReadElapsedRealtimeMs) {
-        this(
-                speedKmh, accelPedalPercent, brakePedalPercent,
-                brakePedalPressed, gearMode, leftTurnSignal,
-                rightTurnSignal, seatbeltBuckled, timestampMs,
-                elapsedRealtimeMs,
-                speedValid, speedReadElapsedRealtimeMs,
-                accelPedalValid, accelPedalReadElapsedRealtimeMs,
-                brakePedalValid, brakePedalReadElapsedRealtimeMs,
-                brakePedalPressedValid,
-                brakePedalPressedReadElapsedRealtimeMs,
-                isValidGearMode(gearMode), elapsedRealtimeMs);
-    }
-
     public TelemetrySnapshot(
                              int speedKmh, int accelPedalPercent,
                              int brakePedalPercent,
@@ -139,24 +96,9 @@ public class TelemetrySnapshot {
     }
 
     /**
-     * Returns the color for the current gear mode (dark colors for white background).
-     * R→red, D→green, P→gray, N→blue, S→orange, M→purple, others→black
-     */
-    public int getGearColor() {
-        switch (gearMode) {
-            case 1: return 0xFF666666; // P → dark gray
-            case 2: return 0xFFCC0000; // R → dark red
-            case 3: return 0xFF0066CC; // N → blue
-            case 4: return 0xFF008800; // D → dark green
-            case 5: return 0xFF8800CC; // M → purple
-            case 6: return 0xFFCC6600; // S → orange
-            default: return 0xFF000000; // unknown → black
-        }
-    }
-
-    /**
      * Creates a default snapshot with safe values:
-     * speed=0, gear=P, signals off, belts buckled.
+     * speed=0, nominal gear=P, signals off, belts unbuckled.
+     * Speed, pedals and gear are marked invalid until real readings arrive.
      */
     public static TelemetrySnapshot createDefault() {
         return new TelemetrySnapshot(

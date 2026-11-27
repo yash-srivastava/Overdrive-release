@@ -312,7 +312,7 @@ public class OverlayBitmapRenderer {
         workerCollector = null;
     }
 
-    public boolean renderFrame(TelemetrySnapshot snap, int fc) {
+    private void renderFrame(TelemetrySnapshot snap, int fc) {
         try {
             final TelemetryFields fields = activeFields;
             Bitmap bmp = doubleBuffer.getBackForWriting();
@@ -473,10 +473,8 @@ public class OverlayBitmapRenderer {
             if (saveCount >= 0) c.restoreToCount(saveCount);
 
             doubleBuffer.markBackReady();
-            return true;
         } catch (Exception e) {
             logger.error("Overlay render error", e);
-            return false;
         }
     }
 
