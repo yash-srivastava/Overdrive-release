@@ -73,6 +73,9 @@ public final class GlassWidgetsApiHandler {
         return false;
     }
 
+    /** One 10 Hz cluster-feed read interval plus jitter: while such a reader runs, its readings serve these. */
+    private static final long SHARED_READ_MAX_AGE_MS = 150L;
+
     /**
      * One reading for the live widgets while they show, once a second (live drive) to four times
      * ([dynamics]: also the pedals and motor speeds). The blind-spot zones ride along, so they light
@@ -92,16 +95,16 @@ public final class GlassWidgetsApiHandler {
             com.overdrive.app.byd.BydDataCollector.FastDynamics fd = dynamics ? c.getFastDynamics() : null;
             boolean fresh = fd != null && Math.abs(System.currentTimeMillis() - fd.timestamp) < 1000L;
             double speed = fresh && fd.speedKmh >= 0 ? fd.speedKmh
-                    : dynamics ? c.readSpeedNowKmh() : vd != null ? vd.speedKmh : Double.NaN;
+                    : dynamics ? c.readSpeedNowKmh(SHARED_READ_MAX_AGE_MS) : vd != null ? vd.speedKmh : Double.NaN;
             if (Double.isNaN(speed) && vd != null) speed = vd.speedKmh;
             if (!Double.isNaN(speed) && speed >= 0) kmh = Math.round(speed * 10.0) / 10.0;
-            double power = c.readDrivePowerNowKw();
+            double power = c.readDrivePowerNowKw(SHARED_READ_MAX_AGE_MS);
             if (!Double.isNaN(power)) kw = Math.round(power * 10.0) / 10.0;
-            double hybrid = drive ? c.readHybridDrivePowerNowKw() : Double.NaN;
+            double hybrid = drive ? c.readHybridDrivePowerNowKw(SHARED_READ_MAX_AGE_MS) : Double.NaN;
             if (!Double.isNaN(hybrid)) driveKw = Math.round(hybrid * 10.0) / 10.0;
             if (dynamics) {
                 o.put("accelPct", pedal(fresh ? fd.accelPercent : c.readAccelNow()));
-                o.put("brakePct", pedal(fresh ? fd.brakePercent : c.readBrakeNow()));
+                o.put("brakePct", pedal(fresh ? fd.brakePercent : c.readBrakeNow(SHARED_READ_MAX_AGE_MS)));
                 o.put("frontRpm", vd == null || vd.frontMotorSpeed == com.overdrive.app.byd.BydVehicleData.UNAVAILABLE
                         ? JSONObject.NULL : (Object) vd.frontMotorSpeed);
                 o.put("rearRpm", vd == null || vd.rearMotorSpeed == com.overdrive.app.byd.BydVehicleData.UNAVAILABLE

@@ -46,6 +46,7 @@ public class BydDataCollector {
     private final AtomicReference<BydVehicleData> snapshot = new AtomicReference<>();
     private final ClusterWarningMonitor clusterWarnings =
             new ClusterWarningMonitor(this::readClusterWarnings, SystemClock::elapsedRealtime);
+    private final VehicleSignalHub signalHub = new VehicleSignalHub(SystemClock::elapsedRealtime);
     private volatile boolean clusterWarningFirmwareUnsupported;
     /**
      * Serializes BMS/gun callback publication against a poll's final snapshot write. The version
@@ -3643,8 +3644,13 @@ public class BydDataCollector {
         // cluster; the app preference can't disambiguate the raw unit).
         if (!isDiLink5Vehicle() && !hwUnitDetected) return Double.NaN;
         try {
+            double unit = getSpeedToKmhFactor();
+            long at = signalHub.now();
             double speed = readSdkSpeedKmh();
-            if (!Double.isNaN(speed)) return speed;
+            if (!Double.isNaN(speed)) {
+                signalHub.offer(VehicleSignalHub.SPEED_KMH, speed, unit, at);
+                return speed;
+            }
         } catch (Throwable ignored) {}
         if (isDiLink5Vehicle()) {
             BydVehicleData bridge = diLink5DynamicFallback();
@@ -4297,7 +4303,16 @@ public class BydDataCollector {
         }
         Object dev = engineDevice;
         if (dev == null || !accIsOn || isPhevPublic()) return Double.NaN;
-        return readEnginePowerNowKw(dev);
+        return readSharedEnginePowerNowKw(dev);
+    }
+
+    /** {@link #readDrivePowerNowKw()}, reusing a DiLink 3/4 SDK reading at most maxAgeMs old. */
+    public double readDrivePowerNowKw(long maxAgeMs) {
+        if (sharesLegacyDynamics() && engineDevice != null && accIsOn && !isPhevPublic()) {
+            double shared = signalHub.fresh(VehicleSignalHub.ENGINE_POWER_KW, 1.0, maxAgeMs);
+            if (!Double.isNaN(shared)) return shared;
+        }
+        return readDrivePowerNowKw();
     }
 
     /** A DiLink 3/4 plug-in hybrid: its ENGINE_POWER is signed drive power (+ drawing, − regen), as on a BEV. */
@@ -4309,7 +4324,23 @@ public class BydDataCollector {
     public double readHybridDrivePowerNowKw() {
         Object dev = engineDevice;
         if (dev == null || !accIsOn || !isLegacyHybridPublic()) return Double.NaN;
-        return readEnginePowerNowKw(dev);
+        return readSharedEnginePowerNowKw(dev);
+    }
+
+    /** {@link #readHybridDrivePowerNowKw()}, reusing a DiLink 3/4 SDK reading at most maxAgeMs old. */
+    public double readHybridDrivePowerNowKw(long maxAgeMs) {
+        if (sharesLegacyDynamics() && engineDevice != null && accIsOn && isLegacyHybridPublic()) {
+            double shared = signalHub.fresh(VehicleSignalHub.ENGINE_POWER_KW, 1.0, maxAgeMs);
+            if (!Double.isNaN(shared)) return shared;
+        }
+        return readHybridDrivePowerNowKw();
+    }
+
+    private double readSharedEnginePowerNowKw(Object dev) {
+        long at = signalHub.now();
+        double kw = readEnginePowerNowKw(dev);
+        signalHub.offer(VehicleSignalHub.ENGINE_POWER_KW, kw, 1.0, at);
+        return kw;
     }
 
     private double readEnginePowerNowKw(Object dev) {
@@ -4414,6 +4445,24 @@ public class BydDataCollector {
     // SDK_NOT_AVAILABLE sentinel so a miss returns NaN/UNAVAILABLE (the caller skips the
     // publish) rather than a bogus value. Only called while a matching automation exists.
 
+    /**
+     * {@link #readSpeedNowKmh()}, but a DiLink 3/4 SDK reading or speed push at most maxAgeMs old (in the
+     * current unit) is reused instead of a new binder call. For pollers that accept that age only.
+     */
+    public double readSpeedNowKmh(long maxAgeMs) {
+        if (sharesLegacyDynamics() && speedDevice != null) {
+            double shared = signalHub.fresh(
+                    VehicleSignalHub.SPEED_KMH, getSpeedToKmhFactor(), maxAgeMs);
+            if (!Double.isNaN(shared)) return shared;
+        }
+        return readSpeedNowKmh();
+    }
+
+    /** Readings from this process's own SDK handles; DiLink 5 and its bridge keep their own sources. */
+    private boolean sharesLegacyDynamics() {
+        return !isDiLink5Vehicle() && !isDiLink5BridgeConsumer();
+    }
+
     /** Live vehicle speed in canonical km/h, or NaN on a miss/sentinel. Speed uses the
      * hardware-derived factor when available: the app's distance-display override can differ from
      * the cluster's real raw-speed unit and must not scale an automation threshold by 1.6x. */
@@ -4432,8 +4481,13 @@ public class BydDataCollector {
         }
         if (speedDevice != null) {
             try {
+                double unit = getSpeedToKmhFactor();
+                long at = signalHub.now();
                 double speed = readSdkSpeedKmh();
-                if (!Double.isNaN(speed)) return speed;
+                if (!Double.isNaN(speed)) {
+                    signalHub.offer(VehicleSignalHub.SPEED_KMH, speed, unit, at);
+                    return speed;
+                }
             } catch (Throwable t) {
                 logger.debug("readSpeedNowKmh error: " + t.getMessage());
             }
@@ -4470,6 +4524,15 @@ public class BydDataCollector {
         return bridge != null ? bridge.accelPercent : BydVehicleData.UNAVAILABLE;
     }
 
+    /** {@link #readBrakeNow()}, reusing a DiLink 3/4 SDK reading at most maxAgeMs old. */
+    public int readBrakeNow(long maxAgeMs) {
+        if (sharesLegacyDynamics() && speedDevice != null) {
+            double shared = signalHub.fresh(VehicleSignalHub.BRAKE_PERCENT, 1.0, maxAgeMs);
+            if (!Double.isNaN(shared)) return (int) shared;
+        }
+        return readBrakeNow();
+    }
+
     /** Live brake deepness 0-100, or UNAVAILABLE on a miss/sentinel. */
     public int readBrakeNow() {
         if (isDiLink5BridgeConsumer()) {
@@ -4489,9 +4552,13 @@ public class BydDataCollector {
         }
         if (speedDevice != null) {
             try {
+                long at = signalHub.now();
                 Object br = BydDeviceHelper.callGetter(speedDevice, "getBrakeDeepness");
                 int value = normalizePedalPercent(br);
-                if (value != BydVehicleData.UNAVAILABLE) return value;
+                if (value != BydVehicleData.UNAVAILABLE) {
+                    signalHub.offer(VehicleSignalHub.BRAKE_PERCENT, value, 1.0, at);
+                    return value;
+                }
             } catch (Throwable t) { logger.debug("readBrakeNow error: " + t.getMessage()); }
         }
         BydVehicleData bridge = diLink5DynamicFallback();
@@ -15086,8 +15153,8 @@ public class BydDataCollector {
         if ("onSpeedChanged".equals(method) && args != null && args.length > 0) {
             try {
                 double speed = ((Number) args[0]).doubleValue();
-                double speedKmh = convertRawSpeedToKmh(
-                        speed, isDiLink5Vehicle() ? 1.0 : getSpeedToKmhFactor());
+                double unit = isDiLink5Vehicle() ? 1.0 : getSpeedToKmhFactor();
+                double speedKmh = convertRawSpeedToKmh(speed, unit);
                 if (!Double.isNaN(speedKmh)) {
                     BydVehicleData current = snapshot.get();
                     if (current != null) {
@@ -15101,6 +15168,9 @@ public class BydDataCollector {
                                     com.overdrive.app.automation.condition.BydEvent.SPEED_MPH)
                             || com.overdrive.app.automation.Automations.editorSeedActive())) {
                         com.overdrive.app.automation.condition.BydEvent.publishSpeedKmh(speedKmh);
+                    }
+                    if (!isDiLink5Vehicle()) {
+                        signalHub.offer(VehicleSignalHub.SPEED_KMH, speedKmh, unit, signalHub.now());
                     }
                 }
             } catch (Exception e) { /* ignore */ }
