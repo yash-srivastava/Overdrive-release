@@ -10,6 +10,8 @@ object RoadFrameTap : GpuDownscaler.RoadFrameSink {
     @JvmField @Volatile var active = false
     @JvmStatic fun noteFrame(stageNs: Long, supersededTotal: Long, detectionLane: Boolean) {}
     @JvmStatic fun noteUnsupported() {}
+    @JvmStatic fun noteSource(strip: Boolean, cpuReader: Boolean, gpuView: Boolean, tileW: Int, tileH: Int) {}
+    @JvmStatic fun noteDvrFrame(workNs: Long, droppedTotal: Long) {}
     @JvmStatic fun wanted(): Boolean = false
     @JvmStatic fun gpuSpec(): FloatArray? = null
     @JvmStatic fun claim(): Boolean = false
