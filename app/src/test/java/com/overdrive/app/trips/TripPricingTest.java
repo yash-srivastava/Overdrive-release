@@ -27,6 +27,40 @@ public class TripPricingTest {
     }
 
     @Test
+    public void invalidConfiguredRatesDoNotPoisonTripPricingOrConfigJson() throws Exception {
+        for (double invalid : new double[]{Double.NaN, Double.POSITIVE_INFINITY,
+                Double.NEGATIVE_INFINITY, -1, 0, 100000, Double.MAX_VALUE}) {
+            config.setElectricityRate(0.30);
+            config.setElectricityRate(invalid);
+            assertEquals(0, config.getElectricityRate(), 0);
+            JSONObject json = config.toJson();
+            assertEquals(0, json.getDouble("electricityRate"), 0);
+            assertEquals("€", json.getString("currency"));
+
+            TripPricing.apply(trip, 2, config, null);
+            assertEquals("config", trip.rateSource);
+            assertEquals(0, trip.electricityRate, 0);
+            assertEquals(0, trip.electricCost, 0);
+            assertEquals(0, trip.tripCost, 0);
+        }
+    }
+
+    @Test
+    public void validConfiguredRatesAndRecordedTariffsRemainUsable() throws Exception {
+        for (double valid : new double[]{0.001, 0.30, 99999.99}) {
+            config.setElectricityRate(valid);
+            assertEquals(valid, config.getElectricityRate(), 0);
+            TripPricing.apply(trip, 2, config, null);
+            assertEquals(2 * valid, trip.tripCost, 0.000001);
+        }
+        config.setElectricityRate(Double.POSITIVE_INFINITY);
+        JSONObject charge = new JSONObject().put("rate", 0.11).put("currency", "€");
+        TripPricing.apply(trip, 2, config, charge);
+        assertEquals("charge", trip.rateSource);
+        assertEquals(0.22, trip.tripCost, 0.000001);
+    }
+
+    @Test
     public void meteredHybridFuelKeepsBothLegsInOneCurrency() throws Exception {
         trip.isPhev = true;
         trip.fuelConStart = 100;

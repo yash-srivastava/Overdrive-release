@@ -76,7 +76,7 @@ public class TripConfig {
                 // a user who turned this off must stay off). Only an ABSENT key
                 // falls back to the new default.
                 enabled = section.optBoolean("enabled", DEFAULT_ENABLED);
-                electricityRate = section.optDouble("electricityRate", 0);
+                setElectricityRate(section.optDouble("electricityRate", 0));
                 currency = section.optString("currency", "");
                 distanceUnit = section.optString("distanceUnit", "km");
                 tankCapacityL = section.optDouble("tankCapacityL", 0);
@@ -159,8 +159,9 @@ public class TripConfig {
         this.enabled = enabled;
     }
 
+    /** Use the same admissible rate range as ChargingConfig; zero means no configured rate. */
     public void setElectricityRate(double rate) {
-        this.electricityRate = rate;
+        this.electricityRate = (rate > 0 && rate < 100000) ? rate : 0;
     }
 
     public void setCurrency(String currency) {
