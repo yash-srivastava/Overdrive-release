@@ -292,15 +292,14 @@ public final class ThumbnailBuffer {
      * this observation — the caller is free to recycle their own buffer
      * immediately.
      *
+     * The motion mask enables motion-grounded staticness for hero ranking.
+     * When unavailable, pass null explicitly: every actor is treated as live.
+     *
      * @param actors  Snapshot from {@link ActorTracker#update(java.util.List, int, int, int, long, long)}
      * @param rgb     RGB byte[] (length = w*h*3) of the YOLO crop the actors were detected in
      * @param w       Width of the rgb buffer (e.g. 320 for mosaic, 640 for foveated)
      * @param h       Height of the rgb buffer
      * @param camera  Quadrant index
-     *
-     * The motion mask enables motion-grounded staticness for hero ranking.
-     * When unavailable, pass null explicitly: every actor is treated as live.
-     *
      * @param blockConf per-block confidence over the 320×240 grid, or
      *                  {@code null} when unavailable — null FAILS OPEN (all
      *                  actors treated as live, never demoted).
@@ -897,8 +896,8 @@ public final class ThumbnailBuffer {
      * <p>Returning a snapshot rather than draining inside the writer lets
      * the caller decide which executor to use AND lets the buffer be
      * cleared synchronously here — so the next recording's
-     * {@link #observe(java.util.List, byte[], int, int, int)} starts with a
-     * clean slate even if per-actor writes are still pending.
+     * {@link #observe(java.util.List, byte[], int, int, int, float[], float, float, float, float)}
+     * starts with a clean slate even if per-actor writes are still pending.
      *
      * <p>The returned slots reference the SAME {@code byte[] rgb} arrays the
      * buffer was holding (possibly shared by several slots) — caller must NOT
