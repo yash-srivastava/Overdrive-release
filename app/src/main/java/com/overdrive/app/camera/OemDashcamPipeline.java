@@ -2063,6 +2063,7 @@ public class OemDashcamPipeline {
                 consecutiveErrors = 0;
             } catch (Throwable t) {
                 consecutiveErrors++;
+                frameWorkStartNs = 0L;  // the back-off below is not DVR frame work
                 logger.warn("renderLoop iter error (" + consecutiveErrors
                     + "/" + MAX_CONSECUTIVE_RENDER_ERRORS + "): " + t.getMessage());
                 if (consecutiveErrors >= MAX_CONSECUTIVE_RENDER_ERRORS) {
