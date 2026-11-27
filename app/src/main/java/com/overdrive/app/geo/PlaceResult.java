@@ -67,13 +67,14 @@ public final class PlaceResult {
 
     /**
      * Best short label for compact UI surfaces (recording row chip, push body).
-     * Falls back through district → city → displayName so we always emit
-     * something useful.
+     * Falls back through district → city → displayName → country so we emit
+     * a useful label even for a country-only cached result.
      */
     public String shortLabel() {
         if (!district.isEmpty()) return district;
         if (!city.isEmpty())     return city;
-        return displayName;
+        if (!displayName.isEmpty()) return displayName;
+        return country;
     }
 
     /**
