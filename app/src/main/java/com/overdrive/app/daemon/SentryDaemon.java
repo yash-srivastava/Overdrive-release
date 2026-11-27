@@ -12,7 +12,7 @@ import java.lang.reflect.Method;
 
 /**
  * Sentry daemon: keeps Wi-Fi enabled (unless suppressed), monitors the location
- * sidecar, and handles lifecycle control from the privileged shell.
+ * sidecar, and handles lifecycle control. It is launched from the ADB shell.
  */
 public class SentryDaemon {
     
