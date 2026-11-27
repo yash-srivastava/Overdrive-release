@@ -48,8 +48,8 @@ final class GzipJsonLines {
         // A damaged gzip member is recoverable, but a storage read failure is not.
         // GZIPInputStream may swallow an IOException while probing a next member.
         if (source.failure != null) throw source.failure;
-        // The utility writer does not append a final newline; recovery also used
-        // to attempt parsing the last (possibly incomplete) line of a damaged file.
+        // Preserve legacy files without a final newline, including the last
+        // (possibly incomplete) line recovered from a damaged file.
         if (pending.size() != 0) onLine.accept(pending.decode());
     }
 
