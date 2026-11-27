@@ -22,3 +22,6 @@ Read CONTRIBUTING.md first; this file only adds what coding agents get wrong.
 - New daemon paths go through `ScratchRoot`, not hard-coded `/data/local/tmp` paths.
 - Translations: edit `values/strings.xml` and `web/i18n/en.json` only; other locales come from the translation sheets.
 - Keep PRs small and single-purpose, and say in the PR how you verified the change (build, tests, device).
+- One area and one kind of change per PR, about 500 changed lines at most, and at most about 10 PRs open at a time.
+- No test-only PRs: tests go with a fix or a real coverage gap. Speed-ups need a measured gain on a path that runs often.
+- Web changes: bump `?v=` on every page or loader script that loads a changed file.
