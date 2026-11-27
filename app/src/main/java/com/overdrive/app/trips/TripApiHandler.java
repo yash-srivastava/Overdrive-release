@@ -1060,6 +1060,14 @@ public class TripApiHandler {
         try {
             JSONObject bodyJson = new JSONObject(body != null ? body : "{}");
 
+            // Reject invalid rates before any settings change. Zero explicitly
+            // clears the rate; the upper bound matches TripConfig's setter.
+            boolean hasElectricityRate = bodyJson.has("electricityRate");
+            double electricityRate = bodyJson.optDouble("electricityRate", Double.NaN);
+            if (hasElectricityRate && !(electricityRate >= 0 && electricityRate < 100000)) {
+                return errorResponse("electricityRate must be at least 0 and less than 100000", 400);
+            }
+
             if (bodyJson.has("enabled")) {
                 boolean enabled = bodyJson.getBoolean("enabled");
                 manager.onConfigChanged(enabled);
@@ -1068,8 +1076,8 @@ public class TripApiHandler {
             // Electricity rate and currency
             TripConfig config = manager.getConfig();
             if (config != null) {
-                if (bodyJson.has("electricityRate")) {
-                    config.setElectricityRate(bodyJson.getDouble("electricityRate"));
+                if (hasElectricityRate) {
+                    config.setElectricityRate(electricityRate);
                 }
                 if (bodyJson.has("currency")) {
                     config.setCurrency(bodyJson.getString("currency"));
