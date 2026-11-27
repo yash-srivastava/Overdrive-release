@@ -61,7 +61,7 @@ public class NativeMotion {
     /**
      * Checks if MOG2 is available (requires OpenCV).
      * 
-     * @return true if MOG2 is available, false if only SAD is available
+     * @return true if MOG2 is available, false otherwise
      */
     public static native boolean isMog2Available();
 
@@ -117,57 +117,6 @@ public class NativeMotion {
     );
     
     /**
-     * GRAYSCALE GRID MOTION DETECTION - Deterministic Computer Vision
-     * 
-     * Replaces the complex edge-based SOTA approach with a simple, robust algorithm:
-     * 1. Convert RGB to Grayscale (eliminates color noise from LEDs, etc.)
-     * 2. Grid-based block comparison (32x32 blocks)
-     * 3. Shadow Filter: Per-pixel luma threshold (ignores faint changes < shadowThreshold)
-     * 4. Light Filter: Global change rejection (ignores if >80% blocks change = light switch)
-     * 
-     * Why this works:
-     * - Grayscale eliminates color noise (LED bulb color shifts)
-     * - Per-pixel threshold eliminates shadows (shadows are faint, ~10-20 luma diff)
-     * - Real objects have HIGH contrast (>40 luma diff)
-     * - Global filter catches auto-exposure and light switches
-     * 
-     * Returns a 64-bit packed result:
-     * - Bit 63:    isFlash (1 = global light change, 0 = real motion)
-     * - Bit 48-62: temporalActiveBlocks (blocks with temporal consistency)
-     * - Bit 32-47: maxY (bottom of motion bounding box - for distance estimation)
-     * - Bit 16-31: minY (top of motion bounding box - for object size)
-     * - Bit 0-15:  rawActiveBlocks (before temporal filtering)
-     * 
-     * Parameter mapping:
-     * - sensitivity: Maps to alarmBlockThreshold (0.02=HIGH/2blocks, 0.04=MED/3blocks, 0.06=LOW/5blocks)
-     * - flashImmunity: Maps to shadowThreshold (0=30, 1=40, 2=50, 3=60)
-     * - temporalFrames: Required consecutive frames (0=disabled, 3=recommended)
-     * - useChroma: IGNORED in grayscale mode (kept for API compatibility)
-     * 
-     * @param currentFrame Direct ByteBuffer containing current frame RGB data
-     * @param referenceFrame Direct ByteBuffer containing reference frame RGB data (N-3 from ring buffer)
-     * @param width Frame width
-     * @param height Frame height
-     * @param blockSize Size of each grid block (8/16/32/64)
-     * @param sensitivity Per-block sensitivity threshold (0.0-1.0, typically 0.04)
-     * @param flashImmunity Shadow rejection level (0=OFF, 1=NORMAL, 2=STRICT, 3=MAX)
-     * @param temporalFrames Required consecutive frames (0=disabled, 3=recommended)
-     * @param useChroma IGNORED - kept for API compatibility
-     * @return Packed long with motion data (see bit layout above)
-     */
-    public static native long computeEdgeMotionSOTA(
-        ByteBuffer currentFrame,
-        ByteBuffer referenceFrame,
-        int width,
-        int height,
-        int blockSize,
-        float sensitivity,
-        int flashImmunity,
-        int temporalFrames,
-        boolean useChroma
-    );
-    
-    /**
      * Resets the temporal history buffer.
      * 
      * Call this when:
@@ -184,8 +133,8 @@ public class NativeMotion {
     /**
      * UNIFIED GRAYSCALE GRID MOTION DETECTION
      * 
-     * This is the production API that accepts explicit thresholds.
-     * The Java layer maps a single "Sensitivity" slider (0-100%) to these params.
+     * Legacy grid API accepting explicit thresholds. The active motion pipeline
+     * uses {@link #processFrameV2} instead.
      * 
      * @param currentFrame Direct ByteBuffer containing current frame RGB data
      * @param referenceFrame Direct ByteBuffer containing reference frame RGB data
@@ -200,7 +149,9 @@ public class NativeMotion {
      * @param alarmBlockThreshold Blocks needed to trigger alarm (1-5)
      *                            Lower = more sensitive (1 block = any motion)
      *                            Higher = needs larger object
-     * @return Packed long with motion data (same format as computeEdgeMotionSOTA)
+     * @return Packed motion data: bit 63 = flash flag, bits 48-62 = temporal
+     *         active blocks, bits 32-47 = maxY, bits 16-31 = minY,
+     *         bits 0-15 = raw active blocks
      */
     public static native long computeGrayscaleGrid(
         ByteBuffer currentFrame,
@@ -211,66 +162,6 @@ public class NativeMotion {
         int densityThreshold,
         int alarmBlockThreshold
     );
-    
-    // ========================================================================
-    // SOTA Result Unpacking Helpers
-    // ========================================================================
-    
-    /**
-     * Unpacks the isFlash flag from SOTA result.
-     * @param result Result from computeEdgeMotionSOTA
-     * @return true if flash was detected
-     */
-    public static boolean unpackIsFlash(long result) {
-        return (result >>> 63) != 0;
-    }
-    
-    /**
-     * Unpacks the temporal active blocks count from SOTA result.
-     * @param result Result from computeEdgeMotionSOTA
-     * @return Number of blocks with temporal consistency
-     */
-    public static int unpackTemporalBlocks(long result) {
-        return (int)((result >>> 48) & 0x7FFF);
-    }
-    
-    /**
-     * Unpacks the maxY (bottom of motion) from SOTA result.
-     * @param result Result from computeEdgeMotionSOTA
-     * @return Y coordinate of bottom of motion bounding box
-     */
-    public static int unpackMaxY(long result) {
-        return (int)((result >>> 32) & 0xFFFF);
-    }
-    
-    /**
-     * Unpacks the minY (top of motion) from SOTA result.
-     * @param result Result from computeEdgeMotionSOTA
-     * @return Y coordinate of top of motion bounding box
-     */
-    public static int unpackMinY(long result) {
-        return (int)((result >>> 16) & 0xFFFF);
-    }
-    
-    /**
-     * Unpacks the raw active blocks count from SOTA result.
-     * @param result Result from computeEdgeMotionSOTA
-     * @return Number of blocks active in current frame (before temporal filtering)
-     */
-    public static int unpackRawBlocks(long result) {
-        return (int)(result & 0xFFFF);
-    }
-    
-    /**
-     * Calculates motion height in pixels from SOTA result.
-     * @param result Result from computeEdgeMotionSOTA
-     * @return Height of motion bounding box in pixels
-     */
-    public static int unpackMotionHeight(long result) {
-        int maxY = unpackMaxY(result);
-        int minY = unpackMinY(result);
-        return maxY - minY;
-    }
     
     // ========================================================================
     // Pipeline V2: Per-Quadrant 6-Stage Motion Detection
