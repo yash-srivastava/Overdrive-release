@@ -918,7 +918,6 @@ public class PanoramicCameraGpu {
                     cameraObj = null;
                     if (cameraCoordinator != null) {
                         cameraCoordinator.resetEventCallbackState();
-                        cameraCoordinator.notifyPosCloseCamera();
                     }
                 }
                 attemptReacquireOnGlThread();
@@ -988,7 +987,6 @@ public class PanoramicCameraGpu {
                 cameraObj = null;
                 if (cameraCoordinator != null) {
                     cameraCoordinator.resetEventCallbackState();
-                    cameraCoordinator.notifyPosCloseCamera();
                 }
                 lastRealFrameTimeSt = 0L;
                 lastFrameTime = 0L;
@@ -2060,9 +2058,6 @@ public class PanoramicCameraGpu {
                             Object toClose = cameraObj;
                             cameraObj = null;
                             closeCameraForPath(toClose);
-                            if (cameraCoordinator != null) {
-                                cameraCoordinator.notifyPosCloseCamera();
-                            }
                         }
                     } catch (Throwable t) {
                         logger.warn("start: late camera close errored: " + t.getMessage());
@@ -4275,7 +4270,6 @@ public class PanoramicCameraGpu {
             cameraObj = null;
             if (cameraCoordinator != null) {
                 cameraCoordinator.resetEventCallbackState();
-                cameraCoordinator.notifyPosCloseCamera();
             }
             dilink4SoftRecoveryEpoch.incrementAndGet();
             dilink4SoftRecoveryInFlight.set(false);
@@ -5753,11 +5747,6 @@ public class PanoramicCameraGpu {
             cameraOpenSeq++;
             logger.info("Camera started (" + width + "x" + height +
                 ", id=" + cameraId + ", surfaceMode=" + cameraSurfaceMode + ")");
-
-            // Update coordinator with actual camera ID
-            if (cameraCoordinator != null) {
-                cameraCoordinator.setActiveCameraId(cameraId);
-            }
         } finally {
             if (legacyOpen) {
                 legacyCameraOpenInFlight.set(false);
@@ -5853,10 +5842,6 @@ public class PanoramicCameraGpu {
         // The cold-open warmup gate is centralized in startCamera(), before
         // any caller can reach this reflection boundary.
 
-        // Notify camera service we're about to open
-        if (cameraCoordinator != null) {
-            cameraCoordinator.notifyPreOpenCamera();
-        }
         requireCurrentStartEpoch(activeStartEpoch, "AVM pre-open");
 
         // oem-parity: tell the BYDAutoManager Panorama device (1031) to switch
@@ -9243,7 +9228,7 @@ public class PanoramicCameraGpu {
      * then does a clean camera close.
      * 
      * The GL render loop continues running but skips frame processing while yielded.
-     * Camera is re-acquired when onCloseCamera fires from IBYDCameraService.
+     * Camera is re-acquired when the polling coordinator detects release.
      */
     private void yieldCameraInternal() {
         yieldCameraInternal(false);
@@ -9337,9 +9322,8 @@ public class PanoramicCameraGpu {
             cameraObj = null;
             if (cameraCoordinator != null) {
                 cameraCoordinator.resetEventCallbackState();
-                cameraCoordinator.notifyPosCloseCamera();
             }
-            logger.info("Camera yielded — GL pipeline idle, waiting for onCloseCamera");
+            logger.info("Camera yielded — GL pipeline idle, waiting for native camera release");
         }
         if (!cameraClosed) return false;
         
@@ -10389,13 +10373,12 @@ public class PanoramicCameraGpu {
                 return;
             }
 
-            // Close with proper cleanup + notify service
+            // Close with proper cleanup
             if (cameraObj != null) {
                 closeCameraForPath(cameraObj);
                 cameraObj = null;
                 if (cameraCoordinator != null) {
                     cameraCoordinator.resetEventCallbackState();
-                    cameraCoordinator.notifyPosCloseCamera();
                 }
             }
 
@@ -10878,19 +10861,13 @@ public class PanoramicCameraGpu {
         
         boolean stopClean = true;
 
-        // Close camera with proper cleanup + notify service
+        // Close camera with proper cleanup
         if (cameraObj != null) {
             stopClean = closeCameraForPath(cameraObj);
             cameraObj = null;
-            if (cameraCoordinator != null) {
-                cameraCoordinator.notifyPosCloseCamera();
-            }
         }
         
-        // Unregister from IBYDCameraService AFTER notifying posCloseCamera.
-        // Must keep the service proxy alive until the close notification is sent,
-        // otherwise the native camera app never receives the "camera released" signal
-        // and hangs waiting for it.
+        // Clear the legacy polling coordinator after closing the camera.
         if (cameraCoordinator != null) {
             cameraCoordinator.unregister();
         }
@@ -11082,21 +11059,6 @@ public class PanoramicCameraGpu {
                 warmupThread.start();
                 logger.info("Started AVC HAL warmup alongside camera handoff");
             }
-
-            // registerCameraUser is DISABLED — the event-driven branch below is
-            // dead. Kept for reference; do NOT re-enable without re-validating
-            // the IBYDCameraUser yield/reacquire path end-to-end.
-            // if (cameraCoordinator != null && cameraCoordinator.isRegisteredAsUser()) {
-            //     logger.info("Registered as camera user — waiting for onCloseCamera callback");
-            //     Thread.sleep(3000);
-            //     if (!cameraCoordinator.isCameraYielded()) {
-            //         startCamera();
-            //         if (cameraCoordinator != null && cameraObj != null) {
-            //             cameraCoordinator.setupEventCallback(cameraObj);
-            //         }
-            //     }
-            //     return;
-            // }
 
             // Polling path — the only live path. Wait long enough for the BYD
             // native AVM app to claim the primary camera slot, then reopen as
