@@ -39,8 +39,6 @@ class LogManager private constructor(@Volatile private var config: LogConfig) {
         fun setLogListener(listener: LogListener?) {
             logListener = listener
         }
-        
-        fun getLogListener(): LogListener? = logListener
     }
     
     private val writers = ConcurrentHashMap<String, PrintWriter>()
@@ -217,22 +215,6 @@ class LogManager private constructor(@Volatile private var config: LogConfig) {
     
     fun getConfig(): LogConfig = config
     
-    // Cleanup stats
-    @Volatile
-    private var cleanupStats = CleanupStats(0, 0, 0)
-    
-    /**
-     * Get cleanup statistics.
-     */
-    fun getCleanupStats(): CleanupStats = cleanupStats
-    
-    /**
-     * Update cleanup statistics (called by LogCleaner).
-     */
-    internal fun updateCleanupStats(stats: CleanupStats) {
-        this.cleanupStats = stats
-    }
-    
     fun stop() {
         synchronized(writeLock) {
             writers.values.forEach { it.close() }
@@ -241,9 +223,3 @@ class LogManager private constructor(@Volatile private var config: LogConfig) {
         }
     }
 }
-
-data class CleanupStats(
-    val lastCleanupTime: Long,
-    val filesDeleted: Int,
-    val spaceFreeKB: Long
-)
