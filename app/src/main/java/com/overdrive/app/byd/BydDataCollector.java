@@ -21001,7 +21001,7 @@ public class BydDataCollector {
                     + " switch was set but the level is whatever the car already had");
             return false;
         }
-        logger.info("SOC hold " + label + ": setSocSaveSwitch(" + mode + ")=true setSOCTarget("
+        logger.info("SOC hold " + label + ": setSocSaveSwitch(" + mode + ")=accepted setSOCTarget("
                 + target + ")=" + targetOk);
         return targetOk.booleanValue();
     }
@@ -21072,7 +21072,9 @@ public class BydDataCollector {
 
     /**
      * SOC-hold enable: BYDAutoChargingDevice.setSocSaveSwitch(mode) — 0=off,
-     * 1=city hold, 2=long-distance hold. Returns null when the method is absent.
+     * 1=city hold, 2=long-distance hold. Returns null when the method is absent,
+     * FALSE when refused or read back as a different mode, and TRUE when accepted
+     * (confirmed, or unconfirmed where the firmware has no readable getter).
      */
     private Boolean trySetSocSaveSwitch(int mode) {
         // DiLink 5's setSocSaveSwitch and getSocSaveSwitch are constant 0: treat as absent.
@@ -21096,7 +21098,9 @@ public class BydDataCollector {
         } catch (Exception e) {
             logger.debug("getSocSaveSwitch readback failed: " + e.getMessage());
         }
-        return Boolean.FALSE;
+        // Most firmware has no getSocSaveSwitch: an accepted write stays unconfirmed.
+        logger.info("setSocSaveSwitch(" + mode + ") accepted; no readback on this firmware");
+        return Boolean.TRUE;
     }
 
     /** Generic charge-stop master switch with direct readback confirmation. */
