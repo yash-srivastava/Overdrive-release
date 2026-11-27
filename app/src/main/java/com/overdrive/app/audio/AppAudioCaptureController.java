@@ -163,8 +163,14 @@ public class AppAudioCaptureController {
     // typically <1500 bytes (4-8 ms × 64 kbps mono ≈ 32-64 bytes for data,
     // plus ADTS header). Allocating a fresh byte[info.size] per packet at
     // ~50 Hz (20 ms AAC frames) churned ~3 KB/s through GC. Grows on the
-    // rare oversized frame, never shrinks.
+    // rare oversized frame, never shrinks. Holds the whole wire frame (header +
+    // AAC) so drainLoop sends it in one write.
     private byte[] drainScratch;
+    // Same for listener PCM frames (capture thread, under the same monitor).
+    private byte[] listenerScratch;
+    // Wire header sizes: [4 totalLength][4 msgType] then [8 ptsUs] for AAC data.
+    private static final int DATA_HEADER_BYTES = 16;
+    private static final int PCM_HEADER_BYTES = 8;
 
     // ---- Sample-accurate audio PTS (drain thread only) ----------------------
     // AAC-LC emits a FIXED 1024 samples per frame; at SAMPLE_RATE that is a
@@ -921,10 +927,30 @@ public class AppAudioCaptureController {
         synchronized (this) {
             DataOutputStream o = out;
             if (o == null) throw new IOException("ingest socket unavailable");
-            o.writeInt(4 + length);
-            o.writeInt(MSG_PCM);
-            o.write(pcm, 0, length);
+            // One write per frame, like the AAC frames in drainLoop.
+            int frameBytes = PCM_HEADER_BYTES + length;
+            if (listenerScratch == null || frameBytes > listenerScratch.length) {
+                listenerScratch = new byte[frameBytes];
+            }
+            putIntBE(listenerScratch, 0, 4 + length);
+            putIntBE(listenerScratch, 4, MSG_PCM);
+            System.arraycopy(pcm, 0, listenerScratch, PCM_HEADER_BYTES, length);
+            o.write(listenerScratch, 0, frameBytes);
         }
+    }
+
+    /** Big-endian int, the byte order DataOutputStream.writeInt puts on the wire. */
+    static void putIntBE(byte[] b, int off, int v) {
+        b[off] = (byte) (v >>> 24);
+        b[off + 1] = (byte) (v >>> 16);
+        b[off + 2] = (byte) (v >>> 8);
+        b[off + 3] = (byte) v;
+    }
+
+    /** Big-endian long, as DataOutputStream.writeLong. */
+    static void putLongBE(byte[] b, int off, long v) {
+        putIntBE(b, off, (int) (v >>> 32));
+        putIntBE(b, off + 4, (int) v);
     }
 
     // ==================== DRAIN LOOP ====================
@@ -1027,26 +1053,19 @@ public class AppAudioCaptureController {
                 synchronized (this) {
                     DataOutputStream o = out;
                     if (o == null) break;
-                    o.writeInt(totalLength);
-                    o.writeInt(MSG_DATA);
-                    o.writeLong(ptsUs);
-                    // FIX H3: reuse drainScratch instead of `new byte[info.size]`.
-                    // AAC frames are <1500 bytes; the scratch starts at 8 KB
-                    // and only grows on the rare oversize frame.
-                    if (drainScratch == null || info.size > drainScratch.length) {
-                        drainScratch = new byte[info.size];
+                    // One write per frame. DataOutputStream does not buffer and the
+                    // socket has TCP_NODELAY, so every write() is its own loopback
+                    // segment and wakes the daemon: header and payload go together.
+                    // FIX H3: the scratch is reused; AAC frames are <1500 bytes.
+                    int frameBytes = DATA_HEADER_BYTES + info.size;
+                    if (drainScratch == null || frameBytes > drainScratch.length) {
+                        drainScratch = new byte[Math.max(frameBytes, 2048)];
                     }
-                    outBuf.get(drainScratch, 0, info.size);
-                    o.write(drainScratch, 0, info.size);
-                    // FIX M1: drop per-frame flush(). The socket already has
-                    // TCP_NODELAY set in initIngestSocket(), so the kernel
-                    // emits the segment immediately on every write() — the
-                    // explicit flush() was halving syscall throughput by
-                    // forcing an extra round through DataOutputStream's
-                    // (already empty) buffer drain at AAC frame rate
-                    // (~50 Hz). Recovery from a half-shipped frame is
-                    // identical with or without the flush; the receiver's
-                    // length-prefixed framer handles partial sends.
+                    putIntBE(drainScratch, 0, totalLength);
+                    putIntBE(drainScratch, 4, MSG_DATA);
+                    putLongBE(drainScratch, 8, ptsUs);
+                    outBuf.get(drainScratch, DATA_HEADER_BYTES, info.size);
+                    o.write(drainScratch, 0, frameBytes);
                 }
 
                 aacEncoder.releaseOutputBuffer(outputIndex, false);
