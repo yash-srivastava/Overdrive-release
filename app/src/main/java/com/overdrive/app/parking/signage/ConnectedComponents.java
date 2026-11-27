@@ -1,7 +1,6 @@
 package com.overdrive.app.parking.signage;
 
 import java.util.ArrayList;
-import java.util.BitSet;
 import java.util.List;
 
 /**
@@ -39,10 +38,7 @@ public final class ConnectedComponents {
         int pixels = w * h;
         // Classify once; a set bit is a foreground pixel not yet queued.
         // Keep the original < test (NaN scores also count as foreground).
-        BitSet remaining = new BitSet(pixels);
-        for (int i = 0; i < pixels; i++) {
-            if (!(score[i] < thresh)) remaining.set(i);
-        }
+        Foreground remaining = new Foreground(score, pixels, thresh);
         int start = remaining.nextSetBit(0);
         if (start < 0) return out;
         // Only pending pixels need queue storage, not the entire component or map.
@@ -55,30 +51,76 @@ public final class ConnectedComponents {
             remaining.clear(start);
             while (!queue.isEmpty()) {
                 int idx = queue.remove();
-                int x = idx % w, y = idx / w;
+                int y = idx / w, x = idx - y * w;
                 c.area++;
                 c.scoreSum += score[idx];
                 if (x < c.minX) c.minX = x;
                 if (x > c.maxX) c.maxX = x;
                 if (y < c.minY) c.minY = y;
                 if (y > c.maxY) c.maxY = y;
-                for (int dy = -1; dy <= 1; dy++) {
-                    int ny = y + dy;
-                    if (ny < 0 || ny >= h) continue;
-                    for (int dx = -1; dx <= 1; dx++) {
-                        if (dx == 0 && dy == 0) continue;
-                        int nx = x + dx;
-                        if (nx < 0 || nx >= w) continue;
-                        int n = ny * w + nx;
-                        if (!remaining.get(n)) continue;
-                        remaining.clear(n);
-                        queue.add(n);
-                    }
-                }
+                // Claim each neighboring row as a bit range (at most three
+                // pixels). The center bit was cleared when queued, so including
+                // it is harmless. Top-to-bottom, left-to-right enqueue order
+                // remains identical to the original eight-neighbor BFS.
+                int left = x > 0 ? 1 : 0;
+                int right = x + 1 < w ? 1 : 0;
+                int first = idx - left;
+                int count = left + 1 + right;
+                if (y > 0) remaining.enqueue(first - w, count, queue);
+                remaining.enqueue(first, count, queue);
+                if (y + 1 < h) remaining.enqueue(first + w, count, queue);
             }
             if (c.area >= minArea) out.add(c);
         }
         return out;
+    }
+
+    /** One bit per pixel. Claim short row spans a word at a time, rather than
+     * checking and clearing each neighbor separately. */
+    private static final class Foreground {
+        private final long[] words;
+
+        Foreground(float[] score, int pixels, float threshold) {
+            words = new long[((pixels - 1) >>> 6) + 1];
+            for (int i = 0; i < pixels; i++) {
+                if (!(score[i] < threshold)) words[i >>> 6] |= 1L << (i & 63);
+            }
+        }
+
+        int nextSetBit(int from) {
+            int word = from >>> 6;
+            if (word >= words.length) return -1;
+            long bits = words[word] & (-1L << (from & 63));
+            while (bits == 0) {
+                if (++word == words.length) return -1;
+                bits = words[word];
+            }
+            return (word << 6) + Long.numberOfTrailingZeros(bits);
+        }
+
+        void clear(int pixel) {
+            words[pixel >>> 6] &= ~(1L << (pixel & 63));
+        }
+
+        void enqueue(int first, int count, PixelQueue queue) {
+            int word = first >>> 6;
+            int shift = first & 63;
+            long mask = (1L << count) - 1;
+            enqueueWord(word, mask << shift, queue);
+            // A three-pixel span can cross a 64-bit word boundary.
+            if (shift + count > 64) enqueueWord(word + 1, mask >>> (64 - shift), queue);
+        }
+
+        private void enqueueWord(int word, long mask, PixelQueue queue) {
+            long bits = words[word] & mask;
+            if (bits == 0) return;
+            words[word] ^= bits;
+            int base = word << 6;
+            do {
+                queue.add(base + Long.numberOfTrailingZeros(bits));
+                bits &= bits - 1;
+            } while (bits != 0);
+        }
     }
 
     /** FIFO ring, reused across components and grown only for the live frontier. */

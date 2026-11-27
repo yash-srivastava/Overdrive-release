@@ -127,6 +127,34 @@ public class ConnectedComponentsTest {
         compare(scores, w, h, 0.3f, 8);
     }
 
+    @Test public void everyThreeByThreeMaskPreservesBreadthFirstOrder() {
+        // Different magnitudes make a changed summation order observable.
+        float[] values = {1e20f, -1e20f, 1f, 2f, 3f, 1e-10f, 4f, 5f, 6f};
+        for (int mask = 0; mask < (1 << 9); mask++) {
+            float[] scores = new float[9];
+            for (int i = 0; i < scores.length; i++) {
+                scores[i] = (mask & (1 << i)) != 0 ? values[i] : Float.NEGATIVE_INFINITY;
+            }
+            compare(scores, 3, 3, -1e21f, 1);
+        }
+    }
+
+    @Test public void wordSpansAtRowEdgesMatchOriginal() {
+        Random random = new Random(41289);
+        for (int w : new int[]{1, 2, 3, 31, 32, 33, 62, 63, 64, 65, 66, 127, 128, 129}) {
+            for (int h : new int[]{1, 2, 3, 65}) {
+                for (int density : new int[]{1, 10, 50, 90, 100}) {
+                    float[] scores = new float[w * h];
+                    for (int i = 0; i < scores.length; i++) {
+                        scores[i] = random.nextInt(100) < density
+                                ? Math.scalb(random.nextFloat(), random.nextInt(80) - 40) : -1f;
+                    }
+                    compare(scores, w, h, 0f, 1);
+                }
+            }
+        }
+    }
+
     @Test public void invalidDimensionsReturnEmpty() {
         assertTrue(ConnectedComponents.label(null, 1, 1, 0.3f, 1).isEmpty());
         assertTrue(ConnectedComponents.label(new float[1], 0, 1, 0.3f, 1).isEmpty());
