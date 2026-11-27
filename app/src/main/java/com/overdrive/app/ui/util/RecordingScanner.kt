@@ -5,6 +5,7 @@ import android.util.Log
 import com.overdrive.app.ui.model.RecordingFile
 import java.io.File
 import java.util.Calendar
+import java.util.Locale
 
 /**
  * Recording scanner — thin client over the daemon's H2 RecordingsIndex
@@ -134,8 +135,15 @@ object RecordingScanner {
 
     // ==================== Date-based Queries ====================
 
+    // Index keys are ASCII yyyy-MM-dd, regardless of the display locale.
+    internal fun dateKey(year: Int, month: Int, day: Int): String =
+        String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, day)
+
+    internal fun monthPrefix(year: Int, month: Int): String =
+        String.format(Locale.US, "%04d-%02d-", year, month + 1)
+
     fun getRecordingsForDate(context: Context, year: Int, month: Int, day: Int): List<RecordingFile> {
-        val ymd = String.format("%04d-%02d-%02d", year, month + 1, day)
+        val ymd = dateKey(year, month, day)
         val apiResult = RecordingsApiClient.fetchAllRecordings(
             RecordingsApiClient.Filter(date = ymd))
         if (apiResult != null) return apiResult
@@ -170,7 +178,7 @@ object RecordingScanner {
         val buckets = RecordingsApiClient.fetchDates()
         if (buckets != null) {
             val out = HashMap<Int, Int>()
-            val prefix = String.format("%04d-%02d-", year, month + 1)
+            val prefix = monthPrefix(year, month)
             for (b in buckets) {
                 if (!b.date.startsWith(prefix)) continue
                 val day = b.date.substring(prefix.length).toIntOrNull() ?: continue
