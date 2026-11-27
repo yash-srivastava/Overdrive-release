@@ -114,9 +114,6 @@ public final class DaemonLogConfig {
     /** EventTimeline - event timeline collector */
     public static final boolean EVENT_TIMELINE = false;
     
-    /** ModeTransition - mode transition manager */
-    public static final boolean MODE_TRANSITION = false;
-    
     /** SafeLocationManager - geofence/safe zone logic (logs via CameraDaemon.log) */
     public static final boolean SAFE_LOCATION = false;
     
@@ -251,7 +248,7 @@ public final class DaemonLogConfig {
         || GPU_MOSAIC_RECORDER || GPU_DOWNSCALER || GPU_STREAM_SCALER
         || HW_ENCODER || ADAPTIVE_BITRATE || H264_CIRCULAR_BUFFER
         || GPU_PIPELINE_FACTORY || SURVEILLANCE_ENGINE || EVENT_TIMELINE
-        || MODE_TRANSITION || SAFE_LOCATION || SURVEILLANCE_CONFIG
+        || SAFE_LOCATION || SURVEILLANCE_CONFIG
         || RECORDING_MODE_MANAGER || PROXIMITY_GUARD_CONTROLLER
         || PROXIMITY_RADAR_MONITOR || PROXIMITY_RECORDING_HANDLER
         || PROXIMITY_GUARD_CONFIG || GEAR_MONITOR || VEHICLE_DATA_MONITOR
@@ -295,7 +292,6 @@ public final class DaemonLogConfig {
             if (GPU_PIPELINE_FACTORY)       ENABLED_TAGS.add("GpuPipelineFactory");
             if (SURVEILLANCE_ENGINE)        ENABLED_TAGS.add("SurveillanceEngineGpu");
             if (EVENT_TIMELINE)             ENABLED_TAGS.add("EventTimeline");
-            if (MODE_TRANSITION)            ENABLED_TAGS.add("ModeTransition");
             if (SAFE_LOCATION)              ENABLED_TAGS.add("SafeLocation");
             if (RECORDING_MODE_MANAGER)     ENABLED_TAGS.add("RecordingModeManager");
             if (PROXIMITY_GUARD_CONTROLLER) ENABLED_TAGS.add("ProximityGuardController");

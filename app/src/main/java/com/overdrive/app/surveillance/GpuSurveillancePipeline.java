@@ -17,7 +17,7 @@ import java.io.File;
  * - GpuMosaicRecorder: GPU composition → Encoder
  * - GpuDownscaler: GPU thumbnail → CPU
  * - SurveillanceEngineGpu: Motion detection & AI
- * - AdaptiveBitrateController: Quality optimization
+ * - AdaptiveBitrateController: Explicit runtime bitrate changes
  * 
  * Achieves <10% CPU usage through GPU zero-copy architecture.
  */
@@ -2224,21 +2224,8 @@ public class GpuSurveillancePipeline {
             }
         }
         
-        // Update bitrate controller. Release the OLD one before replacing it:
-        // AdaptiveBitrateController holds a hard reference to the encoder it was
-        // constructed against, and its ramp animator calls encoder.setBitrate()
-        // from a callback. Dropping the reference without release() leaves a
-        // running animator driving the encoder we just tore down above — a
-        // use-after-release on the stale MediaCodec, not merely a leaked object.
-        // release() only cancels the animator (no encoder interaction), so it is
-        // safe to call unconditionally here. Mirrors the correct teardown at
-        // stop() and the start()-rollback path.
+        // The controller caches bitrate for a particular encoder; discard the old cache.
         if (bitrateController != null) {
-            try {
-                bitrateController.release();
-            } catch (Throwable t) {
-                logger.warn("Stale bitrateController release failed: " + t.getMessage());
-            }
             bitrateController = new AdaptiveBitrateController(encoder, bitrate);
         }
 
@@ -2708,18 +2695,7 @@ public class GpuSurveillancePipeline {
             }
         }
 
-        // 6. Create adaptive bitrate controller. Defensive release of any
-        // pre-existing instance for the same reason as the reinit path above:
-        // a surviving animator would keep driving a prior encoder. Normally
-        // null here (stop() clears it), but a start() that follows a partial
-        // teardown can reach this with a stale controller still set.
-        if (bitrateController != null) {
-            try {
-                bitrateController.release();
-            } catch (Throwable t) {
-                logger.warn("Stale bitrateController release failed (init): " + t.getMessage());
-            }
-        }
+        // 6. Create a fresh bitrate controller for this encoder.
         bitrateController = new AdaptiveBitrateController(encoder, 6_000_000);
 
         // Register a single config-change listener that pushes rectifyStrength
@@ -3403,20 +3379,8 @@ public class GpuSurveillancePipeline {
                 recorder = null;
                 encoder = null;
             }
-            // FIX (audit R7): release the AdaptiveBitrateController that init()
-            // allocated at line 1489. Without this, every start()-failure cycle
-            // leaks the prior controller's handler thread, and the next init()
-            // overwrites the field reference. Self-healing today via repeated
-            // start failures, so logged as warn — explicit cleanup is cheap.
-            try {
-                if (bitrateController != null) {
-                    logger.warn("start() rollback: releasing bitrateController");
-                    try { bitrateController.release(); } catch (Throwable t) {
-                        logger.warn("start() rollback: bitrateController.release failed: " + t.getMessage());
-                    }
-                    bitrateController = null;
-                }
-            } catch (Throwable ignored) {}
+            // Drop the cache associated with the released or abandoned encoder.
+            bitrateController = null;
             initialized = false;
             // FIX (audit R4, Finding 4): clear pending/active recording state
             // so an orphan request doesn't survive into the next start() with
@@ -3808,10 +3772,7 @@ public class GpuSurveillancePipeline {
             rectifyConfigListener = null;
         }
 
-        if (bitrateController != null) {
-            bitrateController.release();
-            bitrateController = null;
-        }
+        bitrateController = null;
 
         if (recorder != null) {
             recorder.release();
@@ -10735,15 +10696,6 @@ public class GpuSurveillancePipeline {
         return recorder;
     }
 
-    /**
-     * Gets the adaptive bitrate controller.
-     * 
-     * @return AdaptiveBitrateController instance
-     */
-    public AdaptiveBitrateController getBitrateController() {
-        return bitrateController;
-    }
-    
     /**
      * Checks if surveillance mode is active.
      * 
