@@ -22,6 +22,7 @@ final class WifiClientApiHandler {
     static boolean handle(String method, String path, String body, OutputStream out) throws Exception {
         if (!"/api/network/wifi".equals(path)) return false;
         if ("GET".equals(method)) {
+            NetworkMonitor.getNetworkInfo(); // Refresh stale cache before reading the network type.
             boolean connected = "wifi".equals(NetworkMonitor.getNetworkType());
             Boolean enabled = connected ? Boolean.TRUE : readWifiOn();
             HttpResponse.sendJsonNoCors(out, new JSONObject()
