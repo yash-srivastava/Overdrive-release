@@ -142,13 +142,33 @@
       "tyre_fl": "Front-left tyre",
       "tyre_fr": "Front-right tyre",
       "tyre_rl": "Rear-left tyre",
-      "tyre_rr": "Rear-right tyre"
+      "tyre_rr": "Rear-right tyre",
+      "trip_avg_kwh100": "Average consumption",
+      "recovered_kwh": "Recovered energy",
+      "trip_a_km": "Trip A",
+      "trip_b_km": "Trip B",
+      "odo_km": "Odometer",
+      "heading_deg": "Compass",
+      "outside_c": "Outside temperature",
+      "cabin_c": "Cabin temperature"
     },
     "signalGroups": {
       "energy": "Energy & range",
       "driving": "Driving",
       "trip": "Trip",
+      "meters": "Car meters",
+      "climate": "Climate",
       "tyres": "Tyres"
+    },
+    "cardinals": {
+      "n": "N",
+      "ne": "NE",
+      "e": "E",
+      "se": "SE",
+      "s": "S",
+      "sw": "SW",
+      "w": "W",
+      "nw": "NW"
     },
     "regen": "Regen",
     "battery": "Battery",
