@@ -42,8 +42,15 @@ std::pair<int, int> exhaustive(const Samples& samples, const Reference& ref, int
 }
 
 void check(const Samples& samples, const Reference& ref, int height) {
+    constexpr int GrayStride = Width + 5;
+    std::array<uint8_t, GrayStride * Width> gray{};
+    for (int y = 0; y < Width; ++y) {
+        for (int x = 0; x < Width; ++x) {
+            gray[y * GrayStride + x] = luma(ref.data() + y * Stride + x * 3);
+        }
+    }
     int dx, dy;
-    motion_flow::bestDisplacement<Radius>(samples.data(), ref.data(), Stride, height, dx, dy);
+    motion_flow::bestDisplacement<Radius>(samples.data(), gray.data(), GrayStride, height, dx, dy);
     if (std::make_pair(dx, dy) != exhaustive(samples, ref, height)) {
         std::cerr << "SAD displacement mismatch at height " << height << '\n';
         std::exit(1);

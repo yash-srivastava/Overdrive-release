@@ -8,25 +8,6 @@
 
 namespace motion_flow {
 
-// Convert a contiguous RGB row using the exact integer luma formula used by
-// the motion filters. The final samples are scalar; no read past the row.
-inline void fillLumaRow(const uint8_t* rgb, uint8_t* luma, int width) {
-    int x = 0;
-#if defined(__ARM_NEON) || defined(__ARM_NEON__)
-    for (; x + 8 <= width; x += 8) {
-        const uint8x8x3_t pixels = vld3_u8(rgb + x * 3);
-        uint16x8_t sum = vaddl_u8(pixels.val[0], pixels.val[2]);
-        sum = vaddw_u8(sum, pixels.val[1]);
-        sum = vaddw_u8(sum, pixels.val[1]);
-        vst1_u8(luma + x, vshrn_n_u16(sum, 2));
-    }
-#endif
-    for (; x < width; ++x) {
-        const uint8_t* p = rgb + x * 3;
-        luma[x] = (p[0] + 2 * p[1] + p[2]) >> 2;
-    }
-}
-
 // Exactly eight stride-4 samples from a 32-pixel reference row. The caller
 // provides the full row including the three unused pixels after sample 7.
 inline int sadRow(const uint8_t* current, const uint8_t* reference) {
@@ -46,16 +27,12 @@ inline int sadRow(const uint8_t* current, const uint8_t* reference) {
 #endif
 }
 
-// Reference starts at the upper-left corner of the padded search window.
-// Rows are converted on first use, not per candidate/sample. Early exits are
-// checked after a row instead of after each pixel: SAD terms are nonnegative,
-// so this preserves the strict first-minimum tie rule and zero-SAD exit.
+// Reference starts at the upper-left corner of the padded luma search window.
+// SAD terms are nonnegative, so row pruning preserves the strict first-minimum
+// tie rule and zero-SAD exit.
 template<int Radius>
 inline void bestDisplacement(const uint8_t* current, const uint8_t* reference,
-                             int rgbStride, int patchHeight, int& bestDx, int& bestDy) {
-    constexpr int Width = 32 + 2 * Radius;
-    uint8_t luma[Width][Width];
-    bool ready[Width] = {};
+                             int lumaStride, int patchHeight, int& bestDx, int& bestDy) {
     int bestSad = -1;
     bestDx = bestDy = 0;
     for (int dy = -Radius; dy <= Radius && bestSad != 0; ++dy) {
@@ -63,11 +40,8 @@ inline void bestDisplacement(const uint8_t* current, const uint8_t* reference,
             int sad = 0;
             for (int y = 0; y < patchHeight; y += 4) {
                 const int row = y + dy + Radius;
-                if (!ready[row]) {
-                    fillLumaRow(reference + row * rgbStride, luma[row], Width);
-                    ready[row] = true;
-                }
-                sad += sadRow(current + (y / 4) * 8, luma[row] + (dx + Radius));
+                sad += sadRow(current + (y / 4) * 8,
+                              reference + row * lumaStride + dx + Radius);
                 if (bestSad >= 0 && sad >= bestSad) break;
             }
             if (bestSad < 0 || sad < bestSad) {
