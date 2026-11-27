@@ -39,13 +39,39 @@ public class OcrPixelNormalizerTest {
         }
     }
 
+    @Test public void boundedSpansAndReusedScratchMatchOriginal() {
+        OcrPixelNormalizer normalizer = new OcrPixelNormalizer();
+        Random rng = new Random(29);
+        for (int width : new int[] {1023, 1024, 1025, 3071, 3072, 3073, 4097}) {
+            int height = 4;
+            int[] pixels = new int[width * height];
+            for (int i = 0; i < pixels.length; i++) pixels[i] = rng.nextInt();
+            for (boolean nchw : new boolean[] {false, true}) {
+                for (ByteOrder order : new ByteOrder[] {ByteOrder.LITTLE_ENDIAN, ByteOrder.BIG_ENDIAN}) {
+                    ByteBuffer buffer = ByteBuffer.allocateDirect(width * height * 3 * 4).order(order);
+                    check(normalizer, buffer, pixels, width, width, height, width, height, nchw, false);
+                    check(normalizer, buffer, pixels, width, width - 1, 2, width, height, nchw, false);
+                    check(normalizer, buffer, pixels, width, 1, 1, width, height, nchw, false);
+                    check(normalizer, buffer, pixels, width, width, height, width, height, nchw, true);
+                }
+            }
+        }
+    }
+
     private static void check(int[] pixels, int stride, int cw, int ch,
                               int w, int h, boolean nchw, boolean signed) {
         ByteBuffer buffer = ByteBuffer.allocateDirect(w * h * 3 * 4).order(ByteOrder.nativeOrder());
+        check(new OcrPixelNormalizer(), buffer, pixels, stride, cw, ch, w, h, nchw, signed);
+    }
+
+    private static void check(OcrPixelNormalizer normalizer, ByteBuffer buffer,
+                              int[] pixels, int stride, int cw, int ch,
+                              int w, int h, boolean nchw, boolean signed) {
+        buffer.rewind();
         // A reused buffer must overwrite both content and padding.
         for (int i = 0; i < w * h * 3; i++) buffer.putFloat(Float.NaN);
-        if (signed) OcrPixelNormalizer.recognizer(pixels, cw, h, buffer, nchw, w);
-        else OcrPixelNormalizer.detector(pixels, stride, cw, ch, buffer, nchw, w, h);
+        if (signed) normalizer.recognizer(pixels, cw, h, buffer, nchw, w);
+        else normalizer.detector(pixels, stride, cw, ch, buffer, nchw, w, h);
         assertEquals(buffer.capacity(), buffer.position());
         assertEquals(buffer.capacity(), buffer.limit());
         for (int y = 0; y < h; y++) {
