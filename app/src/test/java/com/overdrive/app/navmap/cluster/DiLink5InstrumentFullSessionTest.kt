@@ -194,7 +194,8 @@ class DiLink5InstrumentFullSessionTest {
             io.nextReply = answered(RESULT_SENT, expectedCount)
             assertTrue(Lifecycle(io).release(null, "next-boot"))
             assertEquals(listOf(closing, closing), io.commands)
-            assertEquals(listOf(closing, null), io.writes)
+            assertEquals(listOf(closing, closing.copy(savedOffPending = true), null), io.writes)
+            assertEquals(1, io.mode)
             assertNull(io.marker)
         }
     }
@@ -214,32 +215,87 @@ class DiLink5InstrumentFullSessionTest {
 
     @Test
     fun shutdownBroadcastFailureSurvivesEarlyOffUntilReadyFullThenRestoresExactlyOnce() {
-        var modeReads = 0
-        var savedMode = 1
-        val io = FakeIo { modeReads++; savedMode }.apply {
-            marker = owner
-            nextReply = Reply(false, false, -1, "", 0, "broadcast_failed")
-        }
+        val io = FakeIo()
+        assertTrue(Lifecycle(io).start(owner.generation, owner.bootId) { true })
+        assertTrue(Lifecycle(io).isSelectionCurrent(owner.generation))
+        io.mode = -1 // settings became unavailable during daemon shutdown
+        io.nextReply = Reply(false, false, -1, "", 0, "broadcast_failed")
         assertFalse(Lifecycle(io).release(owner.generation, owner.bootId))
         val pending = owner.copy(closing = true, closeNotSent = true)
         assertEquals(pending, io.marker)
         io.marker = Owner.decode(pending.encode())
-        val readsAtShutdown = modeReads
+        val readsAtShutdown = io.modeReads
+        io.mode = 1
 
         io.acc = false
         assertFalse(Lifecycle(io).release(null, "new-boot"))
-        assertEquals(readsAtShutdown, modeReads)
+        assertEquals(readsAtShutdown, io.modeReads)
         assertEquals(pending, io.marker)
 
         io.acc = true
         io.mode = 4
-        savedMode = 4
         io.nextReply = answered(RESULT_SENT, 4)
         assertTrue(Lifecycle(io).release(null, "new-boot"))
         assertTrue(Lifecycle(io).release(null, "new-boot"))
         val restore = owner.copy(bootId = "new-boot", closing = true, rebootRestore = true)
-        assertEquals(listOf(owner.copy(closing = true), restore), io.commands)
-        assertEquals(listOf(owner.copy(closing = true), pending, restore, null), io.writes)
+        assertEquals(listOf(owner, owner.copy(closing = true), restore), io.commands)
+        assertEquals(listOf(owner, owner.copy(closing = true), pending, restore, restore.copy(savedOffPending = true), null), io.writes)
+        assertEquals(1, io.mode)
+        assertEquals(1, io.savedOffAttempts)
+    }
+
+    @Test
+    fun observedDriverSelectionSurvivesLaterUnreadableShutdown() {
+        for (selected in 2..4) {
+            val io = FakeIo()
+            val lifecycle = Lifecycle(io)
+            assertTrue(lifecycle.start(owner.generation, owner.bootId) { true })
+            io.mode = selected
+            assertFalse(lifecycle.isSelectionCurrent(owner.generation))
+            io.mode = -1
+            assertTrue(lifecycle.release(null, owner.bootId))
+            io.mode = 4
+            assertTrue(lifecycle.release(null, "new-boot"))
+            assertEquals(listOf(owner), io.commands)
+            assertEquals(0, io.savedOffAttempts)
+        }
+    }
+
+    @Test
+    fun rebootSavedModeRetriesOnlyThePreferenceAfterUnconfirmedReadback() {
+        val io = FakeIo().apply { marker = owner; mode = 4; modeAfterPut = 4 }
+        assertFalse(Lifecycle(io).release(null, "new-boot"))
+        val pending = owner.copy(bootId = "new-boot", closing = true, rebootRestore = true, savedOffPending = true)
+        assertEquals(pending, io.marker)
+        io.marker = Owner.decode(pending.encode())
+        io.mode = -1
+        assertFalse(Lifecycle(io).release(null, "new-boot"))
+        io.mode = 4
+        io.acc = false
+        assertFalse(Lifecycle(io).release(null, "new-boot"))
+        assertEquals(1, io.savedOffAttempts)
+        io.acc = true
+        io.modeAfterPut = 1
+        assertTrue(Lifecycle(io).release(null, "new-boot"))
+        assertEquals(2, io.savedOffAttempts)
+        assertEquals(1, io.commands.size)
+        assertNull(io.marker)
+    }
+
+    @Test
+    fun confirmedHardwareCloseHonorsAnInterveningSelectionAndExpiresAtAnotherBoot() {
+        for (selected in listOf(1, 2, 3, 4)) {
+            val io = FakeIo().apply {
+                marker = owner.copy(closing = true, rebootRestore = true, savedOffPending = true)
+                mode = selected
+            }
+            val bootId = if (selected == 4) "another-boot" else owner.bootId
+            assertTrue(Lifecycle(io).release(null, bootId))
+            assertNull(io.marker)
+            assertTrue(io.commands.isEmpty())
+            assertEquals(0, io.savedOffAttempts)
+            assertEquals(selected, io.mode)
+        }
     }
 
     @Test
@@ -347,6 +403,8 @@ class DiLink5InstrumentFullSessionTest {
         assertFalse(Owner.decode(owner.encode()) == close)
         assertNull(Owner.decode(owner.copy(rebootRestore = true).encode()))
         assertNull(Owner.decode(owner.copy(closeNotSent = true).encode()))
+        assertNull(Owner.decode(close.copy(savedOffPending = true).encode()))
+        assertNull(Owner.decode(close.copy(rebootRestore = true, savedOffPending = true, closeNotSent = true).encode()))
         assertEquals(close, Owner.decode("""{"generation":42,"bootId":"boot-id","closing":true,"legacyMapFocus":false}"""))
         assertNull(Owner.decode("""{"generation":42,"bootId":"boot-id"}"""))
     }
@@ -373,6 +431,9 @@ class DiLink5InstrumentFullSessionTest {
     private class FakeIo(private val shellMode: (() -> Int)? = null) : DiLink5InstrumentFullSession.Io {
         var marker: Owner? = null
         var mode = 1
+        var modeReads = 0
+        var savedOffAttempts = 0
+        var modeAfterPut = 1
         var acc = true
         var canWrite = true
         var writeAllowed: (Owner?) -> Boolean = { true }
@@ -390,7 +451,18 @@ class DiLink5InstrumentFullSessionTest {
             return true
         }
 
-        override fun readMode() = shellMode?.invoke() ?: mode
+        override fun readMode(): Int {
+            modeReads++
+            return shellMode?.invoke() ?: mode
+        }
+
+        override fun restoreSavedOffIfFull(): Boolean {
+            assertEquals(true, marker?.savedOffPending)
+            assertEquals(4, mode)
+            savedOffAttempts++
+            mode = modeAfterPut
+            return true
+        }
 
         override fun accOn() = acc
 

@@ -28,6 +28,7 @@ internal object DiLink5InstrumentFullSession {
     private const val REQUEST_MS = 4_000L
     private const val UNKNOWN = -1
     private const val OFF = 1
+    private const val SIMPLE = 2
     private const val FULL = 4
     private val lock = Any()
     private val logger by lazy { DaemonLogger.getInstance("DiLink5InstrumentFull") }
@@ -40,6 +41,7 @@ internal object DiLink5InstrumentFullSession {
         val rebootRestore: Boolean = false,
         // Only set after a close is known not to have reached the OEM service.
         val closeNotSent: Boolean = false,
+        val savedOffPending: Boolean = false,
     ) {
         val expectedCommandCount: Int get() = commandBuilders(this).size
 
@@ -50,6 +52,7 @@ internal object DiLink5InstrumentFullSession {
             .put("legacyMapFocus", legacyMapFocus)
             .put("rebootRestore", rebootRestore)
             .put("closeNotSent", closeNotSent)
+            .put("savedOffPending", savedOffPending)
             .toString()
 
         companion object {
@@ -62,8 +65,11 @@ internal object DiLink5InstrumentFullSession {
                 val legacyMapFocus = !json.has("legacyMapFocus") || json.getBoolean("legacyMapFocus")
                 val rebootRestore = json.has("rebootRestore") && json.getBoolean("rebootRestore")
                 val closeNotSent = json.has("closeNotSent") && json.getBoolean("closeNotSent")
-                if (generation > 0 && bootId.isNotBlank() && (closing || !rebootRestore && !closeNotSent)) {
-                    Owner(generation, bootId, closing, legacyMapFocus, rebootRestore, closeNotSent)
+                val savedOffPending = json.has("savedOffPending") && json.getBoolean("savedOffPending")
+                if (generation > 0 && bootId.isNotBlank() && (closing || !rebootRestore && !closeNotSent) &&
+                    (!savedOffPending || closing && rebootRestore && !closeNotSent)
+                ) {
+                    Owner(generation, bootId, closing, legacyMapFocus, rebootRestore, closeNotSent, savedOffPending)
                 } else null
             } catch (_: Exception) {
                 null
@@ -76,6 +82,7 @@ internal object DiLink5InstrumentFullSession {
         fun readOwner(): Owner?
         fun writeOwner(owner: Owner?): Boolean
         fun readMode(): Int
+        fun restoreSavedOffIfFull(): Boolean
         fun accOn(): Boolean
         fun dispatch(owner: Owner): Reply
     }
@@ -116,10 +123,11 @@ internal object DiLink5InstrumentFullSession {
                 if (previousBoot) log("$event waiting for authoritative ACC on after reboot")
                 return false
             }
+            if (owner.savedOffPending) return finishSavedOff(owner)
             val mode = io.readMode()
             if (previousBoot) {
                 log("$event recovering previous boot owner closeNotSent=${owner.closeNotSent} mode=$mode")
-                if (mode <= 0) return false
+                if (mode !in OFF..FULL) return false
                 if (mode != FULL) return io.writeOwner(null)
             }
             // Invalidate any late open and consume retry permission before dispatch. A lost
@@ -133,13 +141,19 @@ internal object DiLink5InstrumentFullSession {
             val expected = closing.expectedCommandCount
             val complete = reply.ok() && reply.sent == expected
             val superseded = reply.answered && reply.code == RESULT_INSTRUMENT_MODE_CHANGED
-            val currentSelection = savedModeDisposition(mode, closing) == null
+            // Only an Off-start owns a temporary Full. A failed shutdown read doesn't
+            // supersede that ownership when the close is known to have sent nothing.
+            val selectionAllowsRetry = mode == UNKNOWN || savedModeDisposition(mode, closing) == null
             val knownUnsent = !reply.dispatched || reply.answered && reply.sent == 0 &&
                 (reply.definitive() || reply.code == RESULT_BIND_TIMEOUT || reply.code == RESULT_EXPIRED)
             log("$event previousBoot=$previousBoot mode=$mode " +
                 "result=${reply.name()} sent=${reply.sent}/$expected")
+            if (complete && closing.rebootRestore) {
+                val pending = closing.copy(savedOffPending = true)
+                return io.writeOwner(pending) && finishSavedOff(pending)
+            }
             if (complete || superseded) return io.writeOwner(null)
-            if (retryAcrossBoot && currentSelection && knownUnsent &&
+            if (retryAcrossBoot && selectionAllowsRetry && knownUnsent &&
                 io.writeOwner(closing.copy(closeNotSent = true))
             ) {
                 log("$event confirmed unsent, retained for reboot recovery")
@@ -147,11 +161,32 @@ internal object DiLink5InstrumentFullSession {
             return false
         }
 
+        // The OEM acknowledgement covers the cluster messages. Verify the Android
+        // preference separately, so a settings retry need not send the batch again.
+        private fun finishSavedOff(owner: Owner): Boolean {
+            if (io.readOwner() != owner || !io.accOn()) return false
+            val before = io.readMode()
+            if (before in OFF until FULL) return io.writeOwner(null)
+            if (before != FULL) return false
+            val written = io.restoreSavedOffIfFull()
+            val after = io.readMode()
+            log("Instrument Full saved Off recovery generation=${owner.generation} " +
+                "before=$before write=$written readback=$after")
+            return after in OFF until FULL && io.writeOwner(null)
+        }
+
         fun isSelectionCurrent(generation: Long): Boolean {
             val owner = io.readOwner()
             val mode = io.readMode()
             if (owner == null) return mode == FULL
-            return owner.generation == generation && !owner.closing && mode == OFF
+            if (owner.generation != generation || owner.closing) return false
+            if (mode in SIMPLE..FULL) {
+                // Remember an observed driver override before a subsequent shutdown
+                // makes the setting unreadable.
+                io.writeOwner(null)
+                return false
+            }
+            return mode == OFF
         }
 
         private fun definitelyNotSent(reply: Reply): Boolean {
@@ -173,7 +208,7 @@ internal object DiLink5InstrumentFullSession {
     }
 
     fun isSelectionCurrent(context: Context, generation: Long): Boolean =
-        attempt { Lifecycle(RuntimeIo(context)).isSelectionCurrent(generation) }
+        synchronized(lock) { attempt { Lifecycle(RuntimeIo(context)).isSelectionCurrent(generation) } }
 
     fun start(context: Context, generation: Long, bootId: String, current: () -> Boolean = { true }): Boolean {
         if (!Sealion7HdmiProjection.isTestedFirmware()) return false
@@ -227,6 +262,16 @@ internal object DiLink5InstrumentFullSession {
 
         override fun readMode(): Int = readDaemonSavedMode()
 
+        override fun restoreSavedOffIfFull(): Boolean {
+            val key = ClusterCommContract.INSTRUMENT_MODE_SETTING
+            // Recheck in the writing shell to narrow the race with the vehicle settings UI.
+            val settings = "/system/bin/settings"
+            return BoundedShell.run(
+                """[ "$($settings get global $key)" = "$FULL" ] && exec $settings put global $key $OFF""",
+                BoundedShell.DEFAULT_DEADLINE_MS,
+            ).ok()
+        }
+
         override fun accOn(): Boolean = AccMonitor.isAccStateAuthoritative() && AccMonitor.isAccOn()
 
         override fun dispatch(owner: Owner): Reply =
@@ -271,7 +316,7 @@ internal object DiLink5InstrumentFullSession {
     /** Validate the journal and driver selection in the app process just before dispatch. */
     @JvmStatic
     fun beforeWire(context: Context, owner: Owner): Int? = try {
-        if (!Sealion7HdmiProjection.isTestedFirmware() || owner.closeNotSent || loadOwner() != owner ||
+        if (!Sealion7HdmiProjection.isTestedFirmware() || owner.closeNotSent || owner.savedOffPending || loadOwner() != owner ||
             !owner.closing && (owner.legacyMapFocus || !Sealion7HdmiProjection.isEnabled(context))
         ) {
             RESULT_INSTRUMENT_GUARD_FAILED
