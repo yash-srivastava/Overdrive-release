@@ -10,6 +10,8 @@ final class SampleRangeCopier {
     static final int COPY_BUFFER = 64 * 1024;
     // Read at most 4 KiB of unselected bytes per batch (e.g. interleaved AAC).
     static final int MAX_GAP_BYTES = 4 * 1024;
+    // Large runs are cheaper to stream directly than to move again in memory.
+    private static final int MAX_AVERAGE_COMPACT_RUN = 4 * 1024;
 
     interface Reader {
         int read(ByteBuffer buffer, long position) throws IOException;
@@ -33,6 +35,7 @@ final class SampleRangeCopier {
             long end = offsets[i - 1] + sizes[i - 1];
             int firstRunEnd = i;
             long gapBytes = 0;
+            int runs = 1;
             // Keep large contiguous runs on the original streaming path. Never
             // bridge backwards/overlapping offsets or extend beyond the last selected run.
             while (i < to && end > start && end - start < COPY_BUFFER) {
@@ -48,21 +51,35 @@ final class SampleRangeCopier {
                 gapBytes = totalGap;
                 end = nextEnd;
                 i = nextRunEnd;
+                runs++;
             }
             if (i == firstRunEnd) {
                 copyRange(start, end - start);
             } else {
-                // Fill the entire bounded window before emitting only selected
-                // contiguous runs. Gap bytes never leave the server.
+                // Coalesce small writes in the existing scratch buffer. Keep
+                // larger runs on the original path to avoid extra bulk copies.
+                boolean compact = end - start - gapBytes <= (long) runs * MAX_AVERAGE_COMPACT_RUN;
                 readFully(start, (int) (end - start));
+                byte[] bytes = buffer.array();
+                int written = 0;
                 for (int j = first; j < i; ) {
                     long runStart = offsets[j];
                     j = contiguousEnd(offsets, sizes, j, i);
-                    long runEnd = offsets[j - 1] + sizes[j - 1];
-                    if (runEnd > runStart) {
-                        out.write(buffer.array(), (int) (runStart - start), (int) (runEnd - runStart));
+                    int length = (int) (offsets[j - 1] + sizes[j - 1] - runStart);
+                    if (length <= 0) continue;
+                    int source = (int) (runStart - start);
+                    if (compact) {
+                        // The destination ends at or before this run's end;
+                        // arraycopy handles overlap and cannot touch later runs.
+                        if (source != written) {
+                            System.arraycopy(bytes, source, bytes, written, length);
+                        }
+                        written += length;
+                    } else {
+                        out.write(bytes, source, length);
                     }
                 }
+                if (written > 0) out.write(bytes, 0, written);
             }
         }
     }

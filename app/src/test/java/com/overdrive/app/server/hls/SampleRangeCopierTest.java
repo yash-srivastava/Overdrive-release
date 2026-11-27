@@ -35,13 +35,22 @@ public class SampleRangeCopierTest {
         }
     }
 
-    private static void compare(Source src, long[] offsets, int[] sizes, int from, int to)
+    private static final class Sink extends ByteArrayOutputStream {
+        int calls;
+        @Override public synchronized void write(byte[] b, int off, int len) {
+            calls++;
+            super.write(b, off, len);
+        }
+    }
+
+    private static int compare(Source src, long[] offsets, int[] sizes, int from, int to)
             throws IOException {
         ByteArrayOutputStream expected = new ByteArrayOutputStream();
         for (int i = from; i < to; i++) expected.write(src.data, (int) offsets[i], sizes[i]);
-        ByteArrayOutputStream actual = new ByteArrayOutputStream();
+        Sink actual = new Sink();
         new SampleRangeCopier(src, actual).copySamples(offsets, sizes, from, to);
         assertArrayEquals(expected.toByteArray(), actual.toByteArray());
+        return actual.calls;
     }
 
     @Test public void batchesNearbyInterleavedSamplesWithoutWritingGaps() throws IOException {
@@ -52,7 +61,7 @@ public class SampleRangeCopierTest {
             offsets[i] = i * 2250L;
             sizes[i] = 2000;
         }
-        compare(src, offsets, sizes, 0, sizes.length);
+        assertEquals(2, compare(src, offsets, sizes, 0, sizes.length));
         // 4 KiB total gap cap allows 17 samples in the first batch, 3 in the next.
         assertEquals(2, src.calls);
         assertEquals(44_500, src.bytes);
@@ -60,21 +69,29 @@ public class SampleRangeCopierTest {
 
     @Test public void doesNotReadLargeGapsOrDisproportionateGaps() throws IOException {
         Source src = new Source(100_000, Integer.MAX_VALUE);
-        compare(src, new long[] {0, 2100, 9000, 200}, new int[] {100, 100, 200, 100}, 0, 4);
+        assertEquals(4, compare(src, new long[] {0, 2100, 9000, 200}, new int[] {100, 100, 200, 100}, 0, 4));
         assertEquals(4, src.calls);
         assertEquals(500, src.bytes);
     }
 
     @Test public void largeContiguousRangesStillStreamInChunks() throws IOException {
         Source src = new Source(200_000, Integer.MAX_VALUE);
-        compare(src, new long[] {0, 80_000, 160_100}, new int[] {80_000, 80_000, 1000}, 0, 3);
+        assertEquals(4, compare(src, new long[] {0, 80_000, 160_100}, new int[] {80_000, 80_000, 1000}, 0, 3));
         assertEquals(4, src.calls);
         assertEquals(161_000, src.bytes);
     }
 
+    @Test public void largeInterleavedRunsKeepDirectWrites() throws IOException {
+        Source src = new Source(100_000, Integer.MAX_VALUE);
+        assertEquals(4, compare(src, new long[] {0, 16250, 32500, 48750},
+                new int[] {16000, 16000, 16000, 16000}, 0, 4));
+        assertEquals(1, src.calls);
+        assertEquals(64750, src.bytes);
+    }
+
     @Test public void fillsBatchAcrossShortReadsAndThrowsOnTruncation() throws IOException {
         Source src = new Source(6000, 37);
-        compare(src, new long[] {0, 2100}, new int[] {2000, 2000}, 0, 2);
+        assertEquals(1, compare(src, new long[] {0, 2100}, new int[] {2000, 2000}, 0, 2));
         assertEquals(4100, src.bytes);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try {
@@ -84,6 +101,16 @@ public class SampleRangeCopierTest {
         } catch (EOFException expected) {
             assertEquals(0, out.size());
         }
+    }
+
+    @Test public void compactsOverlappingMovesAndZeroLengthSamples() throws IOException {
+        Source src = new Source(100_000, 127);
+        // The first sample is not at offset zero; the last two runs move left
+        // by less than their length and include empty samples.
+        long[] offsets = {5, 100, 1100, 1101, 3101, 3103, 6103, 6103, 9000};
+        int[] sizes = {40, 1000, 0, 2000, 0, 3000, 0, 1000, 20};
+        assertEquals(1, compare(src, offsets, sizes, 1, 8));
+        assertEquals(7003, src.bytes);
     }
 
     @Test public void randomizedRangesMatchSampleBySampleReference() throws IOException {
