@@ -93,9 +93,7 @@ object CustomWidgetsApiHandler {
             reply { GlassWidgetsApiHandler.handle("GET", "/api/widgets/live?dyn=1&drive=1", null, it) }
                 ?.let { l -> try { GlassWidgetsFeed.live(l) } catch (t: Throwable) { null } }
         } else null
-        val roadState = try {
-            UnifiedConfigManager.loadConfig().optJSONObject("roadSense")?.optJSONObject("overlayState")
-        } catch (e: Exception) { null }
+        val roadState = com.overdrive.app.roadsense.warn.RoadSenseOverlayChannel.current()?.toJson()
         val road = GlassWidgetsFeed.road(roadState, System.currentTimeMillis())
         val calibrated = snap?.let { s -> learnedRange()?.let { GlassWidgetsFeed.calibrated(it, s.phev) } }
         val m = CustomSignals.values(snap, road, live, calibrated)

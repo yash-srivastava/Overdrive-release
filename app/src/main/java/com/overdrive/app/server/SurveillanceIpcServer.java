@@ -703,9 +703,9 @@ public class SurveillanceIpcServer implements Runnable {
                             // forceReload BEFORE merge so an app-forwarded delta
                             // merges against fresh on-disk state, preserving the
                             // forceReload-before-merge invariant the cross-UID
-                            // writers (RoadSenseOverlayService, UcmVisualSink)
-                            // rely on — ext4 mtime has 1s granularity and our
-                            // cache could otherwise hide a peer daemon's write.
+                            // writers (RoadSenseOverlayService) rely on — ext4
+                            // mtime has 1s granularity and our cache could
+                            // otherwise hide a peer daemon's write.
                             com.overdrive.app.config.UnifiedConfigManager.forceReload();
                             ok = com.overdrive.app.config.UnifiedConfigManager
                                     .updateSection(s, data);
@@ -964,6 +964,11 @@ public class SurveillanceIpcServer implements Runnable {
                     }
                     return null;
                 }
+
+                // Live overlay state for the app overlays (read-only, in-memory).
+                case com.overdrive.app.roadsense.warn.RoadSenseOverlayChannel.COMMAND: // "ROADSENSE_OVERLAY"
+                    return com.overdrive.app.roadsense.warn.RoadSenseOverlayChannel.INSTANCE
+                            .reply(request.optString("v", ""), response);
 
                 // ==================== ABRP COMMANDS ====================
                 case "SET_ABRP_CONFIG":

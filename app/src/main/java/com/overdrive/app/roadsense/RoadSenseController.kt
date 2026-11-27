@@ -155,10 +155,10 @@ class RoadSenseController @JvmOverloads constructor(
     // level reflects WHERE WE ARE, not a stale tile). @Volatile: written on the warn
     // tick, read by the visualSink supplier lambda on the same tick — kept simple.
     @Volatile private var lastCoverageLevel = 0
-    // Daemon-side visual sink publishes overlay state to UCM (D-024); calibration
-    // level for the green/orange/red dot comes from the calibrator's maturity, and
-    // route coverage (new/seen/mapped) from RouteCoverage.
-    private val visualSink = com.overdrive.app.roadsense.warn.UcmVisualSink(
+    // Daemon-side visual sink publishes overlay state to RoadSenseOverlayChannel (daemon
+    // memory, D-024); calibration level for the green/orange/red dot comes from the
+    // calibrator's maturity, and route coverage (new/seen/mapped) from RouteCoverage.
+    private val visualSink = com.overdrive.app.roadsense.warn.OverlayVisualSink(
         calibrationLevelSupplier = { calibrator.maturity },
         coverageSupplier = { lastCoverageLevel },
         clock = clock,
@@ -425,9 +425,25 @@ class RoadSenseController @JvmOverloads constructor(
                 Log.i(TAG, "RoadSenseController attached (live-toggle listener armed)")
             }
         }
+        seedOverlayFromLegacyKey()
         // Bring the running state in line with the persisted flag right now (boot thread —
         // not under the config lock, so a synchronous start() here is fine).
         reconcile()
+    }
+
+    /**
+     * The overlay showed the last state written to the old `roadSense.overlayState` key
+     * whenever this controller wasn't publishing (paused, disabled, not yet DRIVING). Seed the
+     * channel with that same state, stale (ts 0), so the pill renders exactly that Idle view.
+     */
+    private fun seedOverlayFromLegacyKey() {
+        try {
+            val o = com.overdrive.app.config.UnifiedConfigManager.loadConfig()
+                .optJSONObject(com.overdrive.app.roadsense.warn.OverlayState.SECTION)
+                ?.optJSONObject(com.overdrive.app.roadsense.warn.OverlayState.KEY) ?: return
+            val s = com.overdrive.app.roadsense.warn.OverlayState.fromJson(o) ?: return
+            com.overdrive.app.roadsense.warn.RoadSenseOverlayChannel.seedIfEmpty(s.copy(updatedMs = 0L))
+        } catch (_: Throwable) { /* no seed: start() seeds idle */ }
     }
 
     /**
@@ -507,6 +523,8 @@ class RoadSenseController @JvmOverloads constructor(
         // trip (a head unit power-cycles with the car, so without this the overlay
         // would sit at "Calibrating" forever and never reach the mature state).
         restoreCalibration()
+        com.overdrive.app.roadsense.warn.RoadSenseOverlayChannel.seedIfEmpty(
+            com.overdrive.app.roadsense.warn.OverlayState.idle(calibrator.maturity, 0, 0L))
         imuStream.setListener(this)
         // Self-driven housekeeping tick (kept out of CameraDaemon per D-023 notes):
         // ~2 Hz drives both the regime poll (gear/ACC → sidecar start/stop) and the
