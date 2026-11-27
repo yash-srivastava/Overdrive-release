@@ -45,12 +45,19 @@ public class PreviewLensWarpTest {
     }
 
     @Test public void oversizedTilesDoNotReplaceTheBoundedCache() {
-        PreviewLensWarp atLimit = PreviewLensWarp.forTile(256, 256, 0.75, 60);
-        assertSame(atLimit, PreviewLensWarp.forTile(256, 256, 0.75, 60));
-        int w = 257, h = 256;
+        // A 640x480 scrub frame has four 320x240 tiles.
+        PreviewLensWarp atLimit = PreviewLensWarp.forTile(320, 240, 0.75, 60);
+        assertSame(atLimit, PreviewLensWarp.forTile(320, 240, 0.75, 60));
+        int[] scrubInput = randomPixels(320, 240, new Random(11L));
+        int[] scrubOutput = new int[scrubInput.length];
+        for (int strip : new int[]{0, 7}) {
+            atLimit.apply(scrubInput, scrubOutput, strip);
+            assertArrayEquals(original(scrubInput, 320, 240, 0.75, 60, strip), scrubOutput);
+        }
+        int w = 321, h = 240;
         PreviewLensWarp large = PreviewLensWarp.forTile(w, h, 0.75, 60);
         assertNotSame(large, PreviewLensWarp.forTile(w, h, 0.75, 60));
-        assertSame(atLimit, PreviewLensWarp.forTile(256, 256, 0.75, 60));
+        assertSame(atLimit, PreviewLensWarp.forTile(320, 240, 0.75, 60));
         int[] input = randomPixels(w, h, new Random(10L));
         int[] actual = new int[input.length];
         large.apply(input, actual, 7);
