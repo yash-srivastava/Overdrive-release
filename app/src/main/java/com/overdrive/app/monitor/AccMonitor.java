@@ -59,6 +59,10 @@ public class AccMonitor {
             return on ? onStartedMs : offStartedMs;
         }
 
+        synchronized boolean isOn() {
+            return Boolean.TRUE.equals(lastState);
+        }
+
         synchronized long opposingEdge(boolean on, boolean parkedMarkerPresent, long nowMs) {
             if (!parkedMarkerPresent) {
                 parkMarkerFloorMs = 0L;
@@ -71,6 +75,14 @@ public class AccMonitor {
                 parkMarkerFloorMs = nowMs;
             }
             return on ? Math.max(offStartedMs, parkMarkerFloorMs) : onStartedMs;
+        }
+
+        synchronized DiLink5AccObservation resolveSealion7(
+                DiLink5AccObservation legacy, DiLink5IgnitionEvidence.Sample ignition,
+                boolean parkedMarkerPresent, long nowMs, boolean hasIndependentOff) {
+            long opposingEdge = opposingEdge(Boolean.TRUE.equals(ignition.accOn), parkedMarkerPresent, nowMs);
+            boolean currentDrive = isOn() && onStartedMs > parkMarkerFloorMs;
+            return resolveSealion7Ignition(legacy, ignition, opposingEdge, offStartedMs, hasIndependentOff, currentDrive);
         }
     }
 
@@ -846,10 +858,9 @@ public class AccMonitor {
                     accAnim, startupOn, iviAwake, powerOff, diagnostics);
             if (ignition == null) return rememberDiLink5Observation(legacy);
 
-            long opposingEdge = ignitionEdges.opposingEdge(Boolean.TRUE.equals(ignition.accOn),
-                    new java.io.File(ParkedShutdown.MARKER_PATH).isFile(), android.os.SystemClock.elapsedRealtime());
-            return rememberDiLink5Observation(resolveSealion7Ignition(
-                    legacy, ignition, opposingEdge, accAnim == 0 || powerOff));
+            return rememberDiLink5Observation(ignitionEdges.resolveSealion7(
+                    legacy, ignition, new java.io.File(ParkedShutdown.MARKER_PATH).isFile(),
+                    android.os.SystemClock.elapsedRealtime(), accAnim == 0 || powerOff));
         } catch (Throwable t) {
             return rememberDiLink5Observation(
                     DiLink5AccObservation.unknown(
@@ -861,17 +872,27 @@ public class AccMonitor {
 
     static DiLink5AccObservation resolveSealion7Ignition(
             DiLink5AccObservation legacy, DiLink5IgnitionEvidence.Sample ignition,
-            long opposingEdge, boolean hasIndependentOff) {
+            long opposingEdge, long confirmedOffEdge, boolean hasIndependentOff, boolean driveAdmitted) {
         // Strong sources and unresolved OFF conflicts retain their existing precedence.
         if (legacy.strong || hasIndependentOff) return legacy;
-        Boolean on = ignition.accOnAfter(opposingEdge);
         String detail = ignition.detail + ", " + legacy.detail;
-        if (on == null) {
-            // Preserve weak IVI + independent broadcast corroboration at the admission layer.
-            // A stale/mixed tuple contributes no ignition evidence of its own.
-            return new DiLink5AccObservation(legacy.accOn, legacy.strong, legacy.source, detail);
+        long tupleElapsedMs = ignition.newestEventNanos / 1_000_000L;
+        if (Boolean.FALSE.equals(ignition.accOnAfter(opposingEdge))) {
+            return new DiLink5AccObservation(false, true, "Sealion 7 ignition", detail, tupleElapsedMs);
         }
-        return new DiLink5AccObservation(on, true, "Sealion 7 ignition", detail, ignition.newestEventNanos / 1_000_000L);
+        if (Boolean.TRUE.equals(ignition.accOnAfter(confirmedOffEdge))) {
+            // A remote heater can raise both READY indicators. A driver can then take over
+            // without changing that tuple. The tuple must postdate a confirmed OFF, but only
+            // the brake must postdate the heuristic park floor after a daemon restart.
+            long brakeElapsedMs = ignition.brakeEvidenceAfter(opposingEdge);
+            if (driveAdmitted || brakeElapsedMs > 0L) {
+                return new DiLink5AccObservation(true, true, "Sealion 7 ignition", detail,
+                        Math.max(tupleElapsedMs, brakeElapsedMs));
+            }
+            detail += ", no recent driver brake event";
+        }
+        // Preserve weak IVI + independent broadcast corroboration at the admission layer.
+        return new DiLink5AccObservation(legacy.accOn, legacy.strong, legacy.source, detail);
     }
 
     static DiLink5AccObservation resolveDiLink5AccObservation(

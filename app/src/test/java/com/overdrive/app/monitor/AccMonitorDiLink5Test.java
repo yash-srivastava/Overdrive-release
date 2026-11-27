@@ -133,7 +133,18 @@ public class AccMonitorDiLink5Test {
     }
 
     private static DiLink5IgnitionEvidence.Sample vehicleSample(int power, int ready, int evReady, long atMs) {
-        String dump = "";
+        return vehicleSample(power, ready, evReady, atMs, "");
+    }
+
+    private static DiLink5IgnitionEvidence.Sample driverReadySample(long atMs) {
+        String brake = "event count:56, lastEvent:Property:0x21403a05,status: 0,timestamp:"
+                + (atMs * 1_000_000L) + ",zone:0x0,floatValues: [],int32Values: [1]\n";
+        return vehicleSample(3, 1, 1, atMs, brake);
+    }
+
+    private static DiLink5IgnitionEvidence.Sample vehicleSample(
+            int power, int ready, int evReady, long atMs, String brake) {
+        String dump = brake;
         String[] ids = {"0f", "65", "91"};
         int[] values = {power, ready, evReady};
         for (int i = 0; i < ids.length; i++) {
@@ -141,48 +152,44 @@ public class AccMonitorDiLink5Test {
                     + ",status: 0,timestamp:" + (atMs * 1_000_000L + i)
                     + ",zone:0x0,floatValues: [],int32Values: [" + values[i] + "]\n";
         }
-        return DiLink5IgnitionEvidence.parse(dump, atMs * 1_000_000L + 3, "10=PowerMode Display on");
+        return new DiLink5IgnitionEvidence.History().admit(
+                DiLink5IgnitionEvidence.parse(dump, atMs * 1_000_000L + 3, "10=PowerMode Display on"));
     }
 
     @Test public void parkedReadySequenceUsesExistingTransitionAdmissionEvenWhenAlreadyOnAtStart() {
         AccMonitor.IgnitionEdges edges = new AccMonitor.IgnitionEdges();
         AccMonitor.DiLink5AccObservation awake =
                 AccMonitor.resolveDiLink5AccObservation(-1, false, true, false, "display on");
-        DiLink5IgnitionEvidence.Sample initial = vehicleSample(3, 1, 1, 500);
+        DiLink5IgnitionEvidence.Sample initial = driverReadySample(500);
         assertEquals(Boolean.TRUE, AccMonitor.admitDiLink5AccObservation(
-                AccMonitor.resolveSealion7Ignition(awake, initial, edges.opposingEdge(true, false, 10_000), false),
+                edges.resolveSealion7(awake, initial, false, 10_000, false),
                 false));
-        assertEquals(500L, AccMonitor.resolveSealion7Ignition(awake, initial, 0L, false).vehicleEventMs);
+        assertEquals(500L, edges.resolveSealion7(awake, initial, false, 10_000, false).vehicleEventMs);
         edges.admit(true, 500);
         assertEquals(Boolean.FALSE, AccMonitor.admitDiLink5AccObservation(
-                AccMonitor.resolveSealion7Ignition(awake, vehicleSample(1, 0, 0, 15_100),
-                        edges.opposingEdge(false, false, 20_000), false), true));
-        long completedOffAt = AccMonitor.resolveSealion7Ignition(awake, vehicleSample(1, 0, 0, 15_100),
-                edges.opposingEdge(false, false, 20_000), false).vehicleEventMs;
+                edges.resolveSealion7(awake, vehicleSample(1, 0, 0, 15_100), false, 20_000, false), true));
+        long completedOffAt = edges.resolveSealion7(awake, vehicleSample(1, 0, 0, 15_100), false, 20_000, false).vehicleEventMs;
         edges.admit(false, completedOffAt);
         // READY completed while the OFF dump and IPC were still in flight.
         assertEquals(Boolean.TRUE, vehicleSample(3, 1, 1, 15_150)
                 .accOnAfter(edges.opposingEdge(true, false, 20_050)));
-        assertNull(AccMonitor.admitDiLink5AccObservation(AccMonitor.resolveSealion7Ignition(
-                awake, initial, edges.opposingEdge(true, true, 25_000), false), false));
+        assertNull(AccMonitor.admitDiLink5AccObservation(edges.resolveSealion7(awake, initial, true, 25_000, false), false));
 
         DiLink5IgnitionEvidence.Sample delayed = vehicleSample(3, 0, 0, 29_000);
-        AccMonitor.DiLink5AccObservation settling = AccMonitor.resolveSealion7Ignition(
-                awake, delayed, edges.opposingEdge(true, true, 30_000), false);
+        AccMonitor.DiLink5AccObservation settling = edges.resolveSealion7(awake, delayed, true, 30_000, false);
         assertFalse(settling.strong);
         assertNull(AccMonitor.admitDiLink5AccObservation(settling, false));
         // An independent, recent ACC_ON broadcast still corroborates the existing weak IVI source.
         assertEquals(Boolean.TRUE, AccMonitor.admitDiLink5AccObservation(settling, true));
 
-        DiLink5IgnitionEvidence.Sample restarted = vehicleSample(3, 1, 1, 34_000);
-        assertEquals(Boolean.TRUE, AccMonitor.admitDiLink5AccObservation(AccMonitor.resolveSealion7Ignition(
-                awake, restarted, edges.opposingEdge(true, true, 35_000), false), false));
+        DiLink5IgnitionEvidence.Sample restarted = driverReadySample(34_000);
+        assertEquals(Boolean.TRUE, AccMonitor.admitDiLink5AccObservation(edges.resolveSealion7(awake, restarted, true, 35_000, false), false));
         AccMonitor.DiLink5AccObservation stopped =
                 AccMonitor.resolveDiLink5AccObservation(0, false, true, false, "accanim=1");
-        assertEquals(Boolean.FALSE, AccMonitor.resolveSealion7Ignition(stopped, restarted, 0L, true).accOn);
+        assertEquals(Boolean.FALSE, edges.resolveSealion7(stopped, restarted, false, 35_000, true).accOn);
         AccMonitor.DiLink5AccObservation conflict =
                 AccMonitor.resolveDiLink5AccObservation(-1, false, true, true, "awake + stopped");
-        assertNull(AccMonitor.resolveSealion7Ignition(conflict, restarted, 0L, true).accOn);
+        assertNull(edges.resolveSealion7(conflict, restarted, false, 35_000, true).accOn);
     }
 
     @Test public void originalOffTimeSurvivesIpcReplayAndColdParkMarkerCannotRenewItsOwnAge() {
