@@ -216,7 +216,6 @@ public class GpuMosaicRecorder {
     private volatile int recordLayout = 0;
     private final java.util.concurrent.atomic.AtomicBoolean recordLayoutUniformDirty =
         new java.util.concurrent.atomic.AtomicBoolean(true);
-    private long lastFrameTime = 0;
     private long frameCount = 0;
     
     // Telemetry overlay texture, sampled by the mosaic shader (texture unit 1).
@@ -495,24 +494,9 @@ public class GpuMosaicRecorder {
         this(null, DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT, false);
     }
 
-    public GpuMosaicRecorder(boolean isTexture2D) {
-        this(null, DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT, isTexture2D);
-    }
-
     public GpuMosaicRecorder(boolean isTexture2D, boolean windshieldTexture2D) {
         this(null, DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT,
             isTexture2D, windshieldTexture2D);
-    }
-
-    public GpuMosaicRecorder(float[] quadrantStripOffsetX) {
-        this(quadrantStripOffsetX, DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT, false);
-    }
-
-    public GpuMosaicRecorder(
-            float[] quadrantStripOffsetX,
-            int viewportWidth,
-            int viewportHeight) {
-        this(quadrantStripOffsetX, viewportWidth, viewportHeight, false);
     }
 
     /**
@@ -831,47 +815,12 @@ public class GpuMosaicRecorder {
     }
     
     /**
-     * Draws a frame from the camera texture to the encoder surface.
-     * 
-     * This performs the GPU-based 2x2 grid composition and submits the
-     * result directly to the encoder. All processing happens in VRAM.
-     * 
-     * NOTE: In SOTA mode, this ALWAYS renders (encoder is always running).
-     * The recording flag only controls whether frames are saved to file.
-     * 
-     * @param cameraTextureId OpenGL texture ID containing camera frame
-     */
-    /**
-     * Draws a frame from the camera texture to the encoder surface.
-     * 
-     * This performs the GPU-based 2x2 grid composition and submits the
-     * result directly to the encoder. All processing happens in VRAM.
-     * 
-     * NOTE: In SOTA mode, this ALWAYS renders (encoder is always running).
-     * The recording flag only controls whether frames are saved to file.
-     * 
-     * IMPORTANT: If the encoder is backed up (eglSwapBuffers blocking due to
-     * full encoder input buffer), we skip rendering to prevent blocking the GL thread.
-     * This keeps the camera HAL's BufferQueue flowing, which prevents the BYD native
-     * parking camera app from losing video signal during prolonged recording.
-     * 
-     * @param cameraTextureId OpenGL texture ID containing camera frame
-     * @param frameTimestampNs HAL-provided sensor timestamp in nanoseconds
-     *                         (from Image.getTimestamp()). Stamped onto the
-     *                         encoder surface via eglPresentationTimeANDROID
-     *                         so MediaCodec emits PTS values that match real
-     *                         camera cadence — no smoothing, no EMA, no clamps.
-     */
-    public void drawFrame(int cameraTextureId, long frameTimestampNs) {
-        drawFrame(cameraTextureId, 0, false, frameTimestampNs);
-    }
-
-    /**
      * Render one mosaic frame, optionally compositing a dedicated windshield
      * camera into the dashcam top band. [windshieldTextureId] is an external
      * OES texture owned by the caller (PanoramicCameraGpu); it is sampled only
      * when [windshieldReady] AND the dashcam layout is active — in every other
      * case the 360 source is used and the windshield texture is ignored.
+     * The HAL sensor timestamp is passed to the encoder as presentation time.
      */
     public void drawFrame(int cameraTextureId, int windshieldTextureId,
                           boolean windshieldReady, long frameTimestampNs) {
@@ -1249,7 +1198,6 @@ public class GpuMosaicRecorder {
 
         // Update stats (only count if actually recording to file)
         if (recording) {
-            lastFrameTime = System.currentTimeMillis();
             frameCount++;
         }
 
@@ -1681,24 +1629,6 @@ public class GpuMosaicRecorder {
     }
     
     /**
-     * Gets the timestamp of the last rendered frame.
-     * 
-     * @return Timestamp in milliseconds
-     */
-    public long getLastFrameTime() {
-        return lastFrameTime;
-    }
-    
-    /**
-     * Gets the total number of frames rendered.
-     * 
-     * @return Frame count
-     */
-    public long getFrameCount() {
-        return frameCount;
-    }
-    
-    /**
      * Gets the encoder instance.
      * 
      * @return Hardware encoder
@@ -1837,39 +1767,9 @@ public class GpuMosaicRecorder {
     }
 
     /**
-     * Per-role X/Y flip flags on the DiLink 4 passthrough path. Each
-     * float[] is {xFlip, yFlip}; values >= 0.5 flip that axis within the
-     * role's 0.5×0.5 producer corner. Pass null/short arrays to leave
-     * a role's flags unchanged.
-     */
-    public void setFlipFlags(float[] front, float[] right,
-                             float[] rear, float[] left) {
-        synchronized (producerCornerMapLock) {
-            if (front != null && front.length >= 2) {
-                flipFlags[0] = front[0]; flipFlags[1] = front[1];
-            }
-            if (right != null && right.length >= 2) {
-                flipFlags[2] = right[0]; flipFlags[3] = right[1];
-            }
-            if (rear != null && rear.length >= 2) {
-                flipFlags[4] = rear[0]; flipFlags[5] = rear[1];
-            }
-            if (left != null && left.length >= 2) {
-                flipFlags[6] = left[0]; flipFlags[7] = left[1];
-            }
-            // Set dirty INSIDE the lock so the field-write happens-before
-            // the unlock; otherwise drawFrame can observe dirty=false
-            // between the unlock and the set, skipping the upload for
-            // one frame (one-frame staleness on DiLink 4 mosaic flips).
-            uniformsDirty.set(true);
-        }
-    }
-
-    /**
      * Atomic combined setter for producer corners + flip flags.
-     * Prefer this over the split pair to avoid a drawFrame landing
-     * between the two writes and rendering one frame with mismatched
-     * pair on DiLink 4. Single lock, single dirty flip.
+     * Publish both together to prevent a frame with mismatched corners and
+     * flips on DiLink 4. Single lock, single dirty flag.
      */
     public void setProducerLayout(float[] frontC, float[] rightC,
                                   float[] rearC, float[] leftC,
@@ -1903,12 +1803,6 @@ public class GpuMosaicRecorder {
             uniformsDirty.set(true);
         }
     }
-    public float[] getFlipFlags() {
-        synchronized (producerCornerMapLock) {
-            return flipFlags.clone();
-        }
-    }
-
     /** Toggle the red-overlay mask filter. When enabled, the recorder's
      *  fragment shader replaces saturated-red pixels (HAL 'calibration
      *  failed' chrome) with a small-offset neighbour sample so they
@@ -1968,7 +1862,6 @@ public class GpuMosaicRecorder {
         this.redMaskEnabled = enabled;
         this.uniformsDirty.set(true);
     }
-    public boolean isRedMaskEnabled() { return redMaskEnabled; }
 
     /**
      * Sets the recording-side dewarp strength.
@@ -2037,16 +1930,10 @@ public class GpuMosaicRecorder {
         this.uniformsDirty.set(true);
     }
 
-    /** Current primary dewarp coefficient (0.0 = off). */
-    public float getRectifyK1() { return rectifyK1; }
-    /** Current 4th-order dewarp coefficient (0.0 = off). */
-    public float getRectifyK2() { return rectifyK2; }
     /** Mosaic width in pixels. */
     public int getViewportWidth() { return viewportWidth; }
     /** Mosaic height in pixels. */
     public int getViewportHeight() { return viewportHeight; }
-    /** Per-quadrant strip-X offsets {front, right, rear, left}, 0..1. */
-    public float[] getQuadrantStripOffsetX() { return quadrantStripOffsetX.clone(); }
 
     /**
      * Sets the per-cam tile aspect ratio (tile_height / tile_width) used
@@ -2078,48 +1965,6 @@ public class GpuMosaicRecorder {
         this.uniformsDirty.set(true);
     }
 
-    /**
-     * Per-output-corner producer-corner remap for the DiLink 4 passthrough
-     * path. Each role (Front, Right, Rear, Left) reads from one of four
-     * 0.5×0.5 producer corners: TL=(0,0), TR=(0.5,0), BL=(0,0.5),
-     * BR=(0.5,0.5). Pass identity values to disable the remap; pass a
-     * permutation to fix HAL layouts that paint roles in different
-     * corners than our default.
-     *
-     * Each parameter is a {x, y} pair; null/short arrays are ignored
-     * for that role only (other roles still update).
-     */
-    public void setProducerCornerMap(float[] front, float[] right,
-                                     float[] rear, float[] left) {
-        synchronized (producerCornerMapLock) {
-            if (front != null && front.length >= 2) {
-                producerCornerMap[0] = front[0]; producerCornerMap[1] = front[1];
-            }
-            if (right != null && right.length >= 2) {
-                producerCornerMap[2] = right[0]; producerCornerMap[3] = right[1];
-            }
-            if (rear != null && rear.length >= 2) {
-                producerCornerMap[4] = rear[0]; producerCornerMap[5] = rear[1];
-            }
-            if (left != null && left.length >= 2) {
-                producerCornerMap[6] = left[0]; producerCornerMap[7] = left[1];
-            }
-            uniformsDirty.set(true);
-        }
-    }
-
-    /** Returns a copy of the current producer-corner map (8 floats:
-     *  fX,fY, rX,rY, bX,bY, lX,lY). */
-    public float[] getProducerCornerMap() {
-        synchronized (producerCornerMapLock) {
-            return producerCornerMap.clone();
-        }
-    }
-    
-    public void setApaMode(boolean apa) {
-        setCameraLayout(apa ? 1 : 0);
-    }
-    
     public boolean isOverlayEnabled() {
         return overlayEnabled;
     }
@@ -2426,7 +2271,6 @@ public class GpuMosaicRecorder {
                 long lagNs = System.nanoTime() - job.ptsNs;  // capture to encoder input
                 if (lagNs > cpuWorstLagNs) cpuWorstLagNs = lagNs;
                 if (recording) {
-                    lastFrameTime = System.currentTimeMillis();
                     frameCount++;
                 }
                 break;
