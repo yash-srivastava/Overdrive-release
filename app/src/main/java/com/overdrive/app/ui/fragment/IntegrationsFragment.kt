@@ -19,7 +19,7 @@ import androidx.navigation.fragment.findNavController
 import com.google.android.material.card.MaterialCardView
 import com.overdrive.app.R
 import com.overdrive.app.config.UnifiedConfigManager
-import com.overdrive.app.telegram.impl.BotTokenConfig
+import com.overdrive.app.telegram.config.UnifiedTelegramConfig
 import com.overdrive.app.ui.util.navigateDrillDown
 import com.overdrive.app.util.DaemonHttpClient
 import org.json.JSONArray
@@ -37,8 +37,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * any of the native or web settings surfaces.
  *
  * Per-card status row reflects live state:
- *   - Telegram  → BotTokenConfig#hasToken (encrypted SharedPreferences in this
- *                 process — fast and correct).
+ *   - Telegram  → UnifiedTelegramConfig.hasBotToken (shared JSON config).
  *   - ABRP      → daemon HTTP /api/abrp/status (upload service running) — the
  *                 token and config live in the daemon, not the app.
  *   - MQTT      → daemon HTTP /api/mqtt/status (any connection currently
@@ -143,8 +142,8 @@ class IntegrationsFragment : Fragment() {
 
     private fun refreshTelegramStatus() {
         val view = view ?: return
-        val ctx = context ?: return
-        telegramConfigured = isTelegramConfigured(ctx)
+        if (context == null) return
+        telegramConfigured = isTelegramConfigured()
         bindStatus(
             view,
             pillId = R.id.pillTelegram,
@@ -163,7 +162,7 @@ class IntegrationsFragment : Fragment() {
         val inFlight = pollInFlight
         if (!inFlight.compareAndSet(false, true)) return
         val generation = pollGeneration.get()
-        val appContext = context?.applicationContext
+        val hasAppContext = context?.applicationContext != null
         val worker = executor ?: Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "IntegrationsStatus").apply { isDaemon = true }
         }.also { executor = it }
@@ -174,7 +173,7 @@ class IntegrationsFragment : Fragment() {
                     // Telegram lives in the unified config (cross-process); a
                     // forceReload before reading tracks daemon-side writes while
                     // this Fragment is visible. All probes remain off the looper.
-                    val telegram = appContext?.let { isTelegramConfigured(it) } ?: telegramConfigured
+                    val telegram = if (hasAppContext) isTelegramConfigured() else telegramConfigured
                     val abrp = fetchAbrpRunning()
                     val mqtt = fetchMqttAnyConnected()
                     val bydCloud = fetchBydCloudConfigured()
@@ -208,7 +207,7 @@ class IntegrationsFragment : Fragment() {
 
     // ============== Probes ==============
 
-    private fun isTelegramConfigured(ctx: Context): Boolean = try {
+    private fun isTelegramConfigured(): Boolean = try {
         // Force a re-read from disk before checking. The token is written by
         // the daemon process (web UI POST → /api/telegram/token → daemon
         // writes /data/local/tmp/overdrive_config.json), and this Fragment
@@ -219,7 +218,7 @@ class IntegrationsFragment : Fragment() {
         // Same pattern TelegramApiHandler.handleStatus uses for the same
         // reason. Cost: one re-parse of a small JSON file on each onResume.
         UnifiedConfigManager.forceReload()
-        BotTokenConfig(ctx.applicationContext).hasToken()
+        UnifiedTelegramConfig.hasBotToken()
     } catch (_: Throwable) {
         false
     }
