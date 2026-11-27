@@ -1722,7 +1722,9 @@ public class GpuMosaicRecorder {
     }
 
     // Wall time the 4-camera 2x2 grid composition last started or stopped (sidecar grid tag).
-    private volatile long gridChangedAtMs = System.currentTimeMillis();
+    // 0: grid since construction. A new recorder always gets a new encoder (empty pre-record
+    // ring), so no earlier frame of another layout can land in its clips.
+    private volatile long gridChangedAtMs = 0L;
 
     private void noteGridState() {
         gridChangedAtMs = System.currentTimeMillis();
