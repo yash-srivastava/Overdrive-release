@@ -7455,8 +7455,6 @@ public class AccSentryDaemon {
                 vehicleDataListener = null;
             }
 
-            // isVoltageChargingCycle = false;  // (state replaced — see V2 monitor)
-
             log("VehicleDataMonitor listener removed");
             return true;
 
@@ -10537,7 +10535,6 @@ public class AccSentryDaemon {
                     log("  Running: " + running);
                     log("  KeepAlive thread: " + (systemKeepAliveThread != null && systemKeepAliveThread.isAlive()));
                     // Charging thread replaced by BatteryVoltageMonitorV2 — handler-thread, no liveness probe needed.
-                    // log("  Charging thread: " + (mcuChargingThread != null && mcuChargingThread.isAlive()));
                     log("  Surveillance: " + surveillanceEnabled);
                     log("  Last power level: " + powerLevelToString(lastPowerLevel));
                     log("  Last MCU status: " + lastMcuStatus);
