@@ -52,6 +52,9 @@ public class BydCameraCoordinator {
         boolean onYieldCamera();
         void onReacquireCamera();
         void onCameraError(int eventType);
+        /** AVMCamera event 1008: the car's own camera view took the stream (BYD100F, #1001). */
+        default void onCarViewTookStream() {
+        }
     }
 
     private CameraYieldCallback yieldCallback;
@@ -400,6 +403,9 @@ public class BydCameraCoordinator {
             logger.warn("Camera HAL error event: " + eventType + argSuffix);
         } else if (eventType != 0 && eventType != 1001) {
             logger.info("Camera event: " + eventType + argSuffix);
+            if (eventType == CarViewStreamHold.EVENT_CAR_VIEW_TOOK_STREAM && yieldCallback != null) {
+                yieldCallback.onCarViewTookStream();
+            }
         }
     }
 

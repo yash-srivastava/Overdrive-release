@@ -592,6 +592,21 @@ public class RecordingModeManager {
             } catch (Throwable ignored) {
                 // Older/partially initialized pipeline: keep normal watchdog behavior.
             }
+            // A camera restart finalizes recording and resumes it when the camera is back.
+            // Reactivating the mode in that window starts a second recording on top of the
+            // restart (#1001), so the periodic tick skips one wedge check per restart episode;
+            // a restart still running at the next periodic tick counts. Other callers never
+            // use up the skip.
+            long cameraRestartEpisode = 0L;
+            try {
+                cameraRestartEpisode = pipeline.cameraRestartEpisode();
+            } catch (Throwable ignored) {
+                // Older/partially initialized pipeline: keep normal watchdog behavior.
+            }
+            boolean skipWedgeForCameraRestart = skipWedgeCheckForCameraRestart(
+                    "periodic".equals(reason), cameraRestartEpisode,
+                    lastCameraRestartEpisodeSkipped);
+            if (skipWedgeForCameraRestart) lastCameraRestartEpisodeSkipped = cameraRestartEpisode;
             // FIX (rmm: wedgeDetected blind to stuck pendingRecordingPrefix):
             // a stuck pendingRecordingPrefix (encoder format never available)
             // would otherwise mask a wedge forever — recordingHealthy=true
@@ -700,6 +715,7 @@ public class RecordingModeManager {
                     && (!recordingHealthy || pendingPrefixStuck || encoderStalled || diskStalled)
                     && !sourcePausedForSystemAvm
                     && !inRotationGrace
+                    && !skipWedgeForCameraRestart
                     && currentMode != Mode.PROXIMITY_GUARD;
             // Publish the wedge truth for status surfaces (overlay pill / web
             // card). This is the SAME signal that drives the wedge-retry below,
@@ -719,6 +735,10 @@ public class RecordingModeManager {
             if (sourcePausedForSystemAvm) {
                 logger.info("Wedge check skipped (" + reason + ") — DI5 camera "
                     + "source is intentionally paused for the system AVM");
+            }
+            if (skipWedgeForCameraRestart && modeActive && !recordingHealthy) {
+                logger.info("Wedge check skipped (" + reason + ") — camera restart in "
+                    + "progress; recording resumes when it completes");
             }
 
             // FIX (rmm: Resync wedgeDetected has no backoff or per-cycle cap).
@@ -1203,6 +1223,19 @@ public class RecordingModeManager {
      * slots. ACC ON edge still resets fully.
      */
     private volatile boolean lastTickWasHealthy = false;
+    /** Camera restart episode whose wedge check the periodic tick already skipped (#1001). */
+    private long lastCameraRestartEpisodeSkipped = 0L;
+
+    /**
+     * Skip this wedge check because a camera restart is running: periodic ticks only, and once
+     * per restart episode, so a restart still running at the next periodic tick is checked.
+     *
+     * @param episode running restart's episode, or 0 when none is in progress
+     */
+    static boolean skipWedgeCheckForCameraRestart(boolean periodic, long episode,
+                                                  long lastSkippedEpisode) {
+        return periodic && episode != 0L && episode != lastSkippedEpisode;
+    }
     private static final int WEDGE_RETRY_MAX_PER_CYCLE = 6;
     // Backoff schedule indexed by attempt count [0..MAX-1]; ms.
     private static final long[] WEDGE_RETRY_BACKOFF_MS = new long[] {
