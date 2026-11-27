@@ -15,8 +15,8 @@ import java.sql.Connection;
 import java.sql.Statement;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Explicit commit points for an H2 store of user records.
@@ -25,9 +25,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * life of the store, because it is the only thing that commits. {@link #wrap} raises the
  * delay to 5000 ms (housekeeping at 2 Hz) and commits writes itself: every write through
  * the returned connection schedules one MVStore commit plus fsync on a shared thread, at
- * most once per 500 ms per store. That is H2's own commit cadence at 500 ms, so a kill
- * loses no more than before, and the fsync (which H2 never does on commit) narrows the
- * power-cut window. The commit and fsync are what {@code CHECKPOINT SYNC} runs, minus the
+ * most once per 250 ms per store. H2 at 500 ms committed within 50 ms of a first write and
+ * then every 500-550 ms, so a kill loses no more than before, and the fsync (which H2
+ * never does on commit) narrows the power-cut window. The commit and fsync are what {@code CHECKPOINT SYNC} runs, minus the
  * session lock, so readers on the shared connection never wait behind the fsync.
  *
  * <p>The delay is set at runtime only (not in the URL, not persisted in the file). If any
@@ -36,8 +36,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class H2CommitPoint {
 
     static final int WRITE_DELAY_MS = 5000;
-    /** H2's default WRITE_DELAY: never commit more often than its background writer did. */
-    private static final long MIN_GAP_NANOS = TimeUnit.MILLISECONDS.toNanos(500);
+    // Half of H2's default WRITE_DELAY, so a burst never loses more than the 500-550 ms the
+    // background writer left open; bounds a sustained writer to 4 commits/s per store.
+    private static final long MIN_GAP_NANOS = TimeUnit.MILLISECONDS.toNanos(250);
+    // The 500 ms writer's wake period: how long a write inside a transaction waits.
+    private static final long TX_BACKSTOP_NANOS = TimeUnit.MILLISECONDS.toNanos(50);
 
     private static final DaemonLogger logger = DaemonLogger.getInstance("H2CommitPoint");
 
@@ -51,8 +54,10 @@ public final class H2CommitPoint {
             });
 
     private final MVStore store;
-    private final AtomicBoolean pending = new AtomicBoolean();
-    private volatile long lastFlushNanos = System.nanoTime() - MIN_GAP_NANOS;
+    // Guarded by this.
+    private ScheduledFuture<?> scheduled;
+    private long scheduledAt;
+    private long lastFlushNanos = System.nanoTime() - MIN_GAP_NANOS;
 
     private H2CommitPoint(MVStore store) {
         this.store = store;
@@ -83,28 +88,46 @@ public final class H2CommitPoint {
         return wrapped;
     }
 
-    private void onWrite() {
-        if (!pending.compareAndSet(false, true)) return;
-        long wait = Math.max(0L, lastFlushNanos + MIN_GAP_NANOS - System.nanoTime());
+    /**
+     * {@code settled} = a commit, rollback or auto-commit write: flush as soon as the gap
+     * allows. Otherwise (a write inside a transaction, which DDL may commit implicitly) a
+     * backstop flush one writer wake from now, as at 500 ms; a quick commit pulls it forward.
+     */
+    private synchronized void onWrite(boolean settled) {
+        long now = System.nanoTime();
+        long earliest = lastFlushNanos + MIN_GAP_NANOS;
+        long at = Math.max(settled ? now : now + TX_BACKSTOP_NANOS, earliest);
+        if (scheduled != null) {
+            if (scheduledAt - at <= 0) return;
+            if (!scheduled.cancel(false)) return;  // already running; it re-arms from its stamp
+        }
         try {
-            EXECUTOR.schedule(this::flush, wait, TimeUnit.NANOSECONDS);
+            scheduled = EXECUTOR.schedule(this::flush, at - now, TimeUnit.NANOSECONDS);
+            scheduledAt = at;
         } catch (RuntimeException e) {
-            pending.set(false);
+            scheduled = null;
         }
     }
 
     private void flush() {
-        // Cleared first, so a write landing during this commit schedules the next one.
-        pending.set(false);
-        long previous = lastFlushNanos;
-        lastFlushNanos = System.nanoTime();
+        long previous;
+        long started = System.nanoTime();
+        synchronized (this) {
+            // Cleared and stamped first, so a write landing during this commit schedules the
+            // next one a gap later.
+            scheduled = null;
+            previous = lastFlushNanos;
+            lastFlushNanos = started;
+        }
         try {
             if (store.isClosed()) return;
             if (store.commit() >= 0) {
                 store.sync();
             } else {
                 // Nothing was unsaved, so no chunk was written: the next write may flush at once.
-                lastFlushNanos = previous;
+                synchronized (this) {
+                    if (lastFlushNanos == started) lastFlushNanos = previous;
+                }
             }
         } catch (Throwable ignored) {
             // Closed or died meanwhile: close() already persisted, and the owner reopens a
@@ -152,7 +175,7 @@ public final class H2CommitPoint {
         public Object invoke(Object proxy, Method m, Object[] args) throws Throwable {
             if (m.getDeclaringClass() == Object.class) return objectMethod(proxy, m, args, raw);
             String name = m.getName();
-            boolean commits = name.equals("commit")
+            boolean commits = name.equals("commit") || name.equals("rollback")
                     || (name.equals("setAutoCommit") && Boolean.TRUE.equals(args[0]));
             try {
                 Object result = call(raw, m, args);
@@ -164,7 +187,7 @@ public final class H2CommitPoint {
                 }
                 return result;
             } finally {
-                if (commits) onWrite();
+                if (commits) onWrite(true);
             }
         }
     }
@@ -186,17 +209,16 @@ public final class H2CommitPoint {
             // Every execute* but a query may write; a failed batch can still have committed
             // rows, so a throw marks too. A flush with nothing unsaved is a no-op.
             if (!name.startsWith("execute") || name.equals("executeQuery")) return call(raw, m, args);
+            // Read before and after: another thread may flip auto-commit in between.
+            boolean autoBefore = autoCommit(connection);
             Object result = null;
             try {
                 result = call(raw, m, args);
                 return result;
             } finally {
                 // execute() answers true for a result set (a query such as the SELECT 1 probe).
-                // Inside a transaction the commit() marks instead, so a half-done transaction
-                // never takes the flush slot that its commit needs.
-                if (!(name.equals("execute") && Boolean.TRUE.equals(result))
-                        && autoCommit(connection)) {
-                    onWrite();
+                if (!(name.equals("execute") && Boolean.TRUE.equals(result))) {
+                    onWrite(autoBefore || autoCommit(connection));
                 }
             }
         }
