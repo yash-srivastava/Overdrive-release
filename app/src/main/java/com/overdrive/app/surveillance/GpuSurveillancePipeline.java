@@ -10659,6 +10659,12 @@ public class GpuSurveillancePipeline {
         PanoramicCameraGpu current = camera;
         return current != null && current.isCameraRestartInProgress();
     }
+
+    /** The running camera restart's episode number, or 0 when none is in progress. */
+    public long cameraRestartEpisode() {
+        PanoramicCameraGpu current = camera;
+        return current != null ? current.cameraRestartEpisode() : 0L;
+    }
     
     /**
      * Gets the surveillance engine.

@@ -1359,6 +1359,17 @@ public class PanoramicCameraGpu {
     // compareAndSet(false,true)==false and returns; only the winner runs the
     // close/open sequence and is responsible for clearing the flag.
     private final AtomicBoolean restartInProgress = new AtomicBoolean(false);
+    // Bumped each time a restart claims restartInProgress, so the recording manager can tell one
+    // restart episode from the next (#1001).
+    private final java.util.concurrent.atomic.AtomicLong restartEpisode =
+        new java.util.concurrent.atomic.AtomicLong();
+
+    /** Claims restartInProgress and starts a new restart episode; false if one already runs. */
+    private boolean claimRestart() {
+        if (!restartInProgress.compareAndSet(false, true)) return false;
+        restartEpisode.incrementAndGet();
+        return true;
+    }
     // Exact ownership fences for legacy startup/open work. AVMCamera.open() is
     // an uninterruptible vendor Binder call and publishes cameraObj before all
     // attach/start steps finish. stop() must not close that partial object or
@@ -4242,7 +4253,7 @@ public class PanoramicCameraGpu {
             logger.info("DiLink 4 " + why + ": frames still arriving — keeping the camera");
             return;
         }
-        if (!restartInProgress.compareAndSet(false, true)) {
+        if (!claimRestart()) {
             logger.info("DiLink 4 " + why + ": a restart already owns the close/reopen");
             return;
         }
@@ -7619,7 +7630,7 @@ public class PanoramicCameraGpu {
             long stageAfterAcquireNs = System.nanoTime();
             frameCounter++;
             if (byd100fRecovery) Byd100fCameraRecovery.PROCESS_BUDGET.onGenuineFrame();
-            if (carViewStreamEventMs != 0L && !carViewFramesResumed) noteFrameAfterCarView();
+            if (carViewStream.pendingWithoutFrames()) noteFrameAfterCarView();
             lastFrameTime = System.currentTimeMillis();
             if (USE_AVM_SURFACE_TEXTURE_PATH && !firstFrameReceived) {
                 logger.info("SurfaceTexture: first genuine preview frame consumed"
@@ -7970,7 +7981,7 @@ public class PanoramicCameraGpu {
                     // P1 #11: CAS so a concurrent reopenCamera (daemon thread)
                     // can't race; if another restart is already in flight,
                     // skip — it'll re-fire on the next frame.
-                    if (!restartInProgress.compareAndSet(false, true)) {
+                    if (!claimRestart()) {
                         return;
                     }
                     try {
@@ -9154,7 +9165,7 @@ public class PanoramicCameraGpu {
             }
             // Same gate as the restart it replaces: 10 s watchdog budget, no overlapping reopen.
             deadSlotResumeInFlight = true;
-            if (!restartInProgress.compareAndSet(false, true)) {
+            if (!claimRestart()) {
                 deadSlotResumeInFlight = false;
                 deadSlotResumePending = true;   // the next frame re-posts it
                 return;
@@ -9184,7 +9195,7 @@ public class PanoramicCameraGpu {
                 return false;
             }
         }
-        return !deadSlotResumeInFlight && restartInProgress.compareAndSet(false, true);
+        return !deadSlotResumeInFlight && claimRestart();
     }
 
     /** Live query (the coordinator's flag is a cache that can be stale while never-streamed). */
@@ -9981,7 +9992,7 @@ public class PanoramicCameraGpu {
      */
     private void restartCamera2Source(String reason) {
         if (!running || sCamera2DisabledReason != null) return;
-        if (!restartInProgress.compareAndSet(false, true)) {
+        if (!claimRestart()) {
             logger.info("camera2: restart already in progress (" + reason + ")");
             return;
         }
@@ -10057,14 +10068,13 @@ public class PanoramicCameraGpu {
     // BYD100F only (#1001): AVMCamera event 1008 marks the car's own camera view taking the
     // stream. Written by the event callback (and the GL thread when frames come back), read by
     // the watchdog. 0 = no event pending.
-    private volatile long carViewStreamEventMs;
-    private volatile boolean carViewFramesResumed;
+    private final CarViewStreamState carViewStream = new CarViewStreamState();
     private boolean carViewHoldLogged;
+    private long carViewErrorHoldLoggedOpenSeq = -1L;
 
     private void noteCarViewTookStream() {
         if (!byd100fRecovery) return;
-        carViewFramesResumed = false;
-        carViewStreamEventMs = Math.max(1L, android.os.SystemClock.elapsedRealtime());
+        carViewStream.publishEvent(android.os.SystemClock.elapsedRealtime());
         logger.info("Car camera view took the stream (event "
             + CarViewStreamHold.EVENT_CAR_VIEW_TOOK_STREAM
             + "): a frame stall restart will wait for it (up to "
@@ -10074,10 +10084,7 @@ public class PanoramicCameraGpu {
 
     /** GL thread, only while an event is pending: a real frame ends the car-view hold. */
     private void noteFrameAfterCarView() {
-        if (CarViewStreamHold.frameEndsHold(carViewStreamEventMs,
-                android.os.SystemClock.elapsedRealtime())) {
-            carViewFramesResumed = true;
-        }
+        carViewStream.onFrame(android.os.SystemClock.elapsedRealtime());
     }
 
     private static final int CAR_VIEW_NONE = 0;
@@ -10091,9 +10098,10 @@ public class PanoramicCameraGpu {
      * frames came back after it.
      */
     private int carViewStallDecision(long now) {
-        long eventMs = carViewStreamEventMs;
-        if (eventMs == 0L) return CAR_VIEW_NONE;
-        boolean resumed = carViewFramesResumed;
+        long seen = carViewStream.read();
+        if (seen == 0L) return CAR_VIEW_NONE;
+        long eventMs = CarViewStreamState.eventMs(seen);
+        boolean resumed = CarViewStreamState.resumed(seen);
         if (CarViewStreamHold.shouldHold(byd100fRecovery, eventMs, resumed,
                 ReverseViewCameraGate.freshGear(), now)) {
             if (!carViewHoldLogged) {
@@ -10104,7 +10112,8 @@ public class PanoramicCameraGpu {
             }
             return CAR_VIEW_HOLD;
         }
-        carViewStreamEventMs = 0L;
+        // Only the event decided on here; a newer event published meanwhile stays pending.
+        carViewStream.clear(seen);
         if (carViewHoldLogged) {
             carViewHoldLogged = false;
             logger.info("Car camera view hold over after " + (now - eventMs)
@@ -10223,6 +10232,18 @@ public class PanoramicCameraGpu {
             logger.info("HAL event 8: frames still arriving — keeping the camera");
             return;
         }
+        if (CarViewStreamHold.errorRestartHeld(byd100fRecovery, carViewStream.read(),
+                ReverseViewCameraGate.freshGear(), android.os.SystemClock.elapsedRealtime())) {
+            // The car's own view has the stream: no reopen from here. The frame-stall watchdog
+            // owns recovery and restarts once the car-view hold is over.
+            if (carViewErrorHoldLoggedOpenSeq != openSeq) {
+                carViewErrorHoldLoggedOpenSeq = openSeq;
+                logger.info("HAL error while the car's camera view has the stream (event "
+                    + CarViewStreamHold.EVENT_CAR_VIEW_TOOK_STREAM
+                    + "): no restart; the frame-stall watchdog recovers after the hold");
+            }
+            return;
+        }
         long delay = holdReopenForReverseView("camera restart after HAL error")
             ? Byd100fCameraRecovery.REVERSE_RECHECK_MS
             : deferZeroFrameReopen("camera restart after HAL error");
@@ -10273,7 +10294,7 @@ public class PanoramicCameraGpu {
         // P1 #11: CAS — only one restart can be in flight. If reopenCamera
         // (daemon thread) is already restarting, return without touching the
         // flag so its finally{set(false)} doesn't get clobbered.
-        if (!restartInProgress.compareAndSet(false, true)) {
+        if (!claimRestart()) {
             logger.info("Restart already in progress — skipping restartCameraAfterError");
             return;
         }
@@ -11064,7 +11085,7 @@ public class PanoramicCameraGpu {
         // P1 #11: CAS — only one restart can be in flight. If
         // restartCameraAfterError (GL thread) already owns the flag, return
         // without clobbering its finally{set(false)}.
-        if (!restartInProgress.compareAndSet(false, true)
+        if (!claimRestart()
                 && !awaitDeadSlotResumeThenClaimGate()) {
             logger.warn("Restart already in progress — skipping reopenCamera");
             noteDeadSlotReopenSkipped();
@@ -11623,6 +11644,12 @@ public class PanoramicCameraGpu {
      */
     public boolean isCameraRestartInProgress() {
         return restartInProgress.get();
+    }
+
+    /** The running restart's episode number, or 0 when no camera restart is in progress. */
+    public long cameraRestartEpisode() {
+        long episode = restartEpisode.get();
+        return restartInProgress.get() ? Math.max(1L, episode) : 0L;
     }
 
     /**

@@ -594,18 +594,19 @@ public class RecordingModeManager {
             }
             // A camera restart finalizes recording and resumes it when the camera is back.
             // Reactivating the mode in that window starts a second recording on top of the
-            // restart (#1001), so wait one tick; a restart still running a tick later counts.
-            boolean cameraRestarting = false;
+            // restart (#1001), so the periodic tick skips one wedge check per restart episode;
+            // a restart still running at the next periodic tick counts. Other callers never
+            // use up the skip.
+            long cameraRestartEpisode = 0L;
             try {
-                cameraRestarting = pipeline.isCameraRestartInProgress();
+                cameraRestartEpisode = pipeline.cameraRestartEpisode();
             } catch (Throwable ignored) {
                 // Older/partially initialized pipeline: keep normal watchdog behavior.
             }
             boolean skipWedgeForCameraRestart = skipWedgeCheckForCameraRestart(
-                    cameraRestarting, wedgeChecksSkippedForCameraRestart);
-            wedgeChecksSkippedForCameraRestart = skipWedgeForCameraRestart
-                    ? wedgeChecksSkippedForCameraRestart + 1
-                    : (cameraRestarting ? wedgeChecksSkippedForCameraRestart : 0);
+                    "periodic".equals(reason), cameraRestartEpisode,
+                    lastCameraRestartEpisodeSkipped);
+            if (skipWedgeForCameraRestart) lastCameraRestartEpisodeSkipped = cameraRestartEpisode;
             // FIX (rmm: wedgeDetected blind to stuck pendingRecordingPrefix):
             // a stuck pendingRecordingPrefix (encoder format never available)
             // would otherwise mask a wedge forever — recordingHealthy=true
@@ -1222,13 +1223,18 @@ public class RecordingModeManager {
      * slots. ACC ON edge still resets fully.
      */
     private volatile boolean lastTickWasHealthy = false;
-    /** Consecutive wedge checks skipped because a camera restart was running (#1001). */
-    private int wedgeChecksSkippedForCameraRestart = 0;
-    static final int MAX_WEDGE_CHECKS_SKIPPED_FOR_CAMERA_RESTART = 1;
+    /** Camera restart episode whose wedge check the periodic tick already skipped (#1001). */
+    private long lastCameraRestartEpisodeSkipped = 0L;
 
-    /** Skip this wedge check while a camera restart runs, at most a bounded number of ticks. */
-    static boolean skipWedgeCheckForCameraRestart(boolean cameraRestarting, int skippedSoFar) {
-        return cameraRestarting && skippedSoFar < MAX_WEDGE_CHECKS_SKIPPED_FOR_CAMERA_RESTART;
+    /**
+     * Skip this wedge check because a camera restart is running: periodic ticks only, and once
+     * per restart episode, so a restart still running at the next periodic tick is checked.
+     *
+     * @param episode running restart's episode, or 0 when none is in progress
+     */
+    static boolean skipWedgeCheckForCameraRestart(boolean periodic, long episode,
+                                                  long lastSkippedEpisode) {
+        return periodic && episode != 0L && episode != lastSkippedEpisode;
     }
     private static final int WEDGE_RETRY_MAX_PER_CYCLE = 6;
     // Backoff schedule indexed by attempt count [0..MAX-1]; ms.

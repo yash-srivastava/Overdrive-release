@@ -75,7 +75,12 @@ public class CarViewStreamHoldTest {
         assertTrue(note > 0 && gpu.indexOf("if (!byd100fRecovery) return;", note) > note);
         // Real frames end the hold.
         assertTrue(gpu.contains(
-                "if (carViewStreamEventMs != 0L && !carViewFramesResumed) noteFrameAfterCarView();"));
+                "if (carViewStream.pendingWithoutFrames()) noteFrameAfterCarView();"));
+        // The HAL-error reopen consults the same hold before its own reverse hold.
+        int error = gpu.indexOf("private void runByd100fErrorCheck(");
+        int errHeld = gpu.indexOf("CarViewStreamHold.errorRestartHeld(", error);
+        int errReverse = gpu.indexOf("holdReopenForReverseView(\"camera restart after HAL error\")", error);
+        assertTrue(error > 0 && errHeld > error && errReverse > errHeld);
         // The car-view decision runs first in the stall hold, and a lapsed hold restarts at once.
         int hold = gpu.indexOf("private boolean holdStallRestartForReverseView() {");
         int carView = gpu.indexOf("int carView = carViewStallDecision(now);", hold);

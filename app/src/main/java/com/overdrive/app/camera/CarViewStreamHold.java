@@ -43,6 +43,17 @@ public final class CarViewStreamHold {
         return age < cap;
     }
 
+    /**
+     * BYD100F HAL-error reopen: true to drop it because the car's own view has the stream (the
+     * same hold as the stall restart; the stall watchdog recovers when it ends).
+     *
+     * @param word a {@link CarViewStreamState} word
+     */
+    static boolean errorRestartHeld(boolean applies, long word, int freshGear, long nowMs) {
+        return word != 0L && shouldHold(applies, CarViewStreamState.eventMs(word),
+                CarViewStreamState.resumed(word), freshGear, nowMs);
+    }
+
     /** True when a frame at {@code frameMs} shows our stream came back after the event. */
     static boolean frameEndsHold(long eventMs, long frameMs) {
         return eventMs > 0L && frameMs - eventMs >= FRAME_RESUME_GRACE_MS;
