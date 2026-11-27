@@ -329,13 +329,6 @@ class AdbDaemonLauncher(private val context: Context) {
     }
     
     /**
-     * Configure and start the Location Sidecar Service via ADB shell.
-     */
-    fun startLocationSidecar(callback: LaunchCallback) {
-        serviceLauncher.grantLocationPermissions(callback.toServiceCallback())
-    }
-    
-    /**
      * Apply power settings to keep WiFi and system active.
      */
     fun applyPowerSettings() {
@@ -346,13 +339,6 @@ class AdbDaemonLauncher(private val context: Context) {
                 logManager.error(TAG, "Failed to apply power settings: $error")
             }
         })
-    }
-    
-    /**
-     * Send wake-up broadcasts to keep system active.
-     */
-    fun pokeMcuViaShell(callback: LaunchCallback? = null) {
-        serviceLauncher.sendWakeUpBroadcasts(callback?.toServiceCallback())
     }
     
     /**
@@ -381,13 +367,6 @@ class AdbDaemonLauncher(private val context: Context) {
     // ==================== SENTRY DAEMON ====================
     
     /**
-     * Check if Sentry Daemon is running.
-     */
-    fun isSentryDaemonRunning(callback: (Boolean) -> Unit) {
-        daemonLauncher.isDaemonRunning("sentry_daemon", callback)
-    }
-    
-    /**
      * Stop the Sentry Daemon.
      */
     fun stopSentryDaemon(callback: LaunchCallback) {
@@ -397,40 +376,10 @@ class AdbDaemonLauncher(private val context: Context) {
     // ==================== SENTRY PROXY ====================
     
     /**
-     * Launch the Sentry Proxy daemon (alias for launchProxyDaemon).
-     */
-    fun launchSentryProxy(callback: LaunchCallback) {
-        daemonLauncher.launchProxyDaemon(callback.toDaemonCallback())
-    }
-    
-    /**
      * Stop the Sentry Proxy and clear proxy settings.
      */
     fun stopSentryProxy(callback: LaunchCallback) {
         daemonLauncher.stopProxyDaemon(callback.toDaemonCallback())
-    }
-    
-    /**
-     * Check if Sentry Proxy is running.
-     */
-    fun isSentryProxyRunning(callback: (Boolean) -> Unit) {
-        daemonLauncher.isProxyDaemonRunning(callback)
-    }
-    
-    // ==================== LOCATION SIDECAR MANAGEMENT ====================
-    
-    /**
-     * Stop the Location Sidecar Service.
-     */
-    fun stopLocationSidecar(callback: LaunchCallback) {
-        serviceLauncher.stopLocationSidecarService(callback.toServiceCallback())
-    }
-    
-    /**
-     * Check if Location Sidecar is running.
-     */
-    fun isLocationSidecarRunning(callback: (Boolean) -> Unit) {
-        serviceLauncher.isLocationSidecarRunning(callback)
     }
     
     // ==================== LOCATION SIDECAR SERVICE ====================
@@ -501,13 +450,6 @@ class AdbDaemonLauncher(private val context: Context) {
                 callback.onError("Failed to grant Location permissions: $error")
             }
         })
-    }
-    
-    /**
-     * Stop LocationSidecarService.
-     */
-    fun stopLocationSidecarService(callback: LaunchCallback) {
-        serviceLauncher.stopLocationSidecarService(callback.toServiceCallback())
     }
     
     // ==================== SINGBOX ====================
@@ -609,12 +551,6 @@ class AdbDaemonLauncher(private val context: Context) {
         override fun onLog(message: String) = this@toDaemonCallback.onLog(message)
         override fun onLaunched() = this@toDaemonCallback.onLaunched()
         override fun onError(error: String) = this@toDaemonCallback.onError(error)
-    }
-    
-    private fun TunnelCallback.toTunnelCallback() = object : TunnelLauncher.TunnelCallback {
-        override fun onLog(message: String) = this@toTunnelCallback.onLog(message)
-        override fun onTunnelUrl(url: String) = this@toTunnelCallback.onTunnelUrl(url)
-        override fun onError(error: String) = this@toTunnelCallback.onError(error)
     }
     
     private fun LaunchCallback.toServiceCallback() = object : ServiceLauncher.LaunchCallback {

@@ -1791,46 +1791,6 @@ class DaemonLauncher(
         )
     }
     
-    /**
-     * Stop the AccSentryDaemon and its watchdog script.
-     * ps+awk+kill matches both daemon (--nice-name=acc_sentry_daemon) and
-     * watchdog shell (sh /data/local/tmp/start_acc_sentry.sh) in one pass.
-     */
-    fun stopAccSentryDaemon(callback: LaunchCallback) {
-        logManager.info(TAG, "Stopping AccSentryDaemon and watchdog...")
-        callback.onLog("Stopping AccSentryDaemon...")
-
-        // Use executeScript (tmpfile) so the calling shell's argv stays
-        // free of any pattern. Sentinel + chmod first (defense for any
-        // straggler watchdog that the kill misses), watchdog-script rm,
-        // ps+awk+kill, settle + lock-rm.
-        adbShellExecutor.executeScript(
-            scriptBody = "echo \"disabled by ui at \$(date)\" > /data/local/tmp/acc_sentry_daemon.disabled\n" +
-                "chmod 666 /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null\n" +
-                "rm -f /data/local/tmp/start_acc_sentry.sh 2>/dev/null\n" +
-                psAwkKillLine("acc_sentry") +
-                "sleep 1\n" +
-                "rm -f /data/local/tmp/acc_sentry_daemon.lock " +
-                "$ACC_SENTRY_WATCHDOG_PID_FILE 2>/dev/null\n" +
-                "rm -rf $ACC_SENTRY_WATCHDOG_LOCK_PATH 2>/dev/null\n" +
-                "echo done\n",
-            callback = object : AdbShellExecutor.ShellCallback {
-                override fun onSuccess(output: String) {
-                    logManager.info(TAG, "AccSentryDaemon stopped")
-                    callback.onLog("AccSentryDaemon stopped")
-                    callback.onLaunched()
-                }
-                
-                override fun onError(error: String) {
-                    // pkill returns error if no process found - that's fine
-                    logManager.info(TAG, "AccSentryDaemon stopped (or was not running)")
-                    callback.onLog("AccSentryDaemon stopped")
-                    callback.onLaunched()
-                }
-            }
-        )
-    }
-    
     // ==================== TELEGRAM BOT DAEMON ====================
     
     /**
@@ -2441,13 +2401,6 @@ class DaemonLauncher(
                 }
             }
         )
-    }
-    
-    /**
-     * Check if proxy daemon is running.
-     */
-    fun isProxyDaemonRunning(callback: (Boolean) -> Unit) {
-        isDaemonRunning(PROXY_DAEMON_PROCESS, callback)
     }
     
     /**

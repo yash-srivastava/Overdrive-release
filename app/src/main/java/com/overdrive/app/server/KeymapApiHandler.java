@@ -978,9 +978,8 @@ public final class KeymapApiHandler {
      *   2. {@code dumpsys activity services <component>} showing an active
      *      ServiceRecord (not {@code app=null}). AMS hosts every bound
      *      AccessibilityService as a real bound service, so a live ServiceRecord
-     *      for our component means the app-process bind has completed — the same
-     *      probe {@code ServiceLauncher.isLocationSidecarRunning} and
-     *      {@code SentryDaemon} already use for their services, run in-daemon here.
+     *      for our component means the app-process bind has completed; this
+     *      probe runs in the daemon.
      *
      * <p>Fail-safe: returns {@code false} on any read glitch or timeout (so the
      * client keeps the nudge / "enabling…" state rather than falsely hiding it),
@@ -1024,9 +1023,7 @@ public final class KeymapApiHandler {
             return false;
         }
         // Daemon path (UID 2000): an active ServiceRecord for the component proves
-        // AMS has bound it. Mirrors ServiceLauncher.isLocationSidecarRunning's
-        // "non-empty && !app=null" test. 2s ceiling so a slow dumpsys can never
-        // park the request thread; drained so the child can't wedge on a full pipe.
+        // AMS has bound it. The probe uses a 2s wait and drains the child output.
         try {
             Process p = new ProcessBuilder("sh", "-c",
                     com.overdrive.app.util.ScratchRoot.remap("dumpsys activity services " + A11Y_COMPONENT + " 2>/dev/null"))
@@ -1041,7 +1038,7 @@ public final class KeymapApiHandler {
             String dump = sb.toString();
             // A bound service shows a ServiceRecord referencing our component and a
             // non-null hosting app. "app=null" means the record exists but nothing
-            // is bound (not live) — reject it, matching the sidecar probe.
+            // is bound (not live) — reject it.
             boolean bound = dump.contains("ServiceRecord")
                     && dump.contains("KeepAliveAccessibilityService")
                     && !dump.contains("app=null");
