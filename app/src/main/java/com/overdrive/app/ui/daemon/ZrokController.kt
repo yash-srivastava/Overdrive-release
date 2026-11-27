@@ -14,11 +14,11 @@ import android.content.Context
  * 
  * Supports two modes:
  * 1. RESERVED MODE (Recommended): Permanent URL that never changes
- *    - Set reservedShareToken and uniqueName before starting
+ *    - Restore the saved reserved token and unique name during startup
  *    - URL: https://<uniqueName>.share.zrok.io
  * 
- * 2. PUBLIC MODE (Fallback): Random URL each time
- *    - Used when no reserved token is set
+ * 2. PUBLIC MODE (Fallback): Startup without a saved reserved token
+ *    - Use the launcher startup flow when no reserved token is set
  * 
  * IMPORTANT: The unique name is persisted alongside the token to prevent
  * "Not Found" errors caused by name/token mismatch (split-brain).
@@ -53,41 +53,11 @@ class ZrokController(
     }
     
     /**
-     * FIX 1: Ensure we restore the unique name from prefs when setting the token.
-     * If we don't do this, ZrokLauncher might generate a new random name on restart,
-     * breaking the URL match.
-     */
-    fun setReservedToken(token: String, customUniqueName: String? = null) {
-        ZrokLauncher.reservedShareToken = token
-        
-        // Priority:
-        // 1. Custom name passed in
-        // 2. Saved name from Prefs
-        // 3. Keep existing/generated name
-        if (customUniqueName != null) {
-            ZrokLauncher.uniqueName = customUniqueName
-            PreferencesManager.setZrokUniqueName(customUniqueName) // SAVE IT
-        } else {
-            val savedName = PreferencesManager.getZrokUniqueName()
-            if (!savedName.isNullOrEmpty()) {
-                ZrokLauncher.uniqueName = savedName // RESTORE IT
-            }
-        }
-    }
-    
-    /**
      * Get the permanent URL (only valid if using reserved mode).
      * Uses auto-generated unique name: overdrive<random>
      */
     fun getPermanentUrl(): String {
         return "https://${ZrokLauncher.uniqueName}.share.zrok.io"
-    }
-    
-    /**
-     * Get the unique name for this device.
-     */
-    fun getUniqueName(): String {
-        return ZrokLauncher.uniqueName
     }
     
     override fun start(callback: DaemonCallback) {
@@ -162,40 +132,6 @@ class ZrokController(
                 override fun onError(error: String) = callback.onError(error)
             })
         }
-    }
-    
-    /**
-     * Reserve a permanent URL (ONE-TIME setup).
-     * After this, the token is saved and will be used automatically.
-     * 
-     * @param customName Optional custom name. If null, uses auto-generated unique name (overdrive<random>)
-     */
-    fun reservePermanentUrl(customName: String? = null, callback: DaemonCallback) {
-        callback.onStatusChanged(DaemonStatus.STARTING, "Reserving permanent URL...")
-        
-        zrokLauncher.reservePermanentUrl(customName, object : ZrokLauncher.ZrokCallback {
-            override fun onLog(message: String) = callback.onStatusChanged(DaemonStatus.STARTING, message)
-            
-            override fun onTunnelUrl(url: String) {
-                _tunnelUrl.postValue(url)
-                PreferencesManager.setLastZrokUrl(url)
-                
-                // FIX 3: Save the unique name immediately after reservation
-                // This ensures the next restart uses the same name
-                PreferencesManager.setZrokUniqueName(ZrokLauncher.uniqueName)
-                
-                callback.onStatusChanged(DaemonStatus.RUNNING, "Reserved: $url")
-            }
-            
-            override fun onError(error: String) = callback.onError(error)
-        })
-    }
-    
-    /**
-     * Load any saved reserved token from device.
-     */
-    fun loadSavedReservedToken(callback: (String?) -> Unit) {
-        zrokLauncher.loadReservedToken(callback)
     }
     
     override fun stop(callback: DaemonCallback) {
