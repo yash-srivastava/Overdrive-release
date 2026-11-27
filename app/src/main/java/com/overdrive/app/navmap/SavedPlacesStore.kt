@@ -68,7 +68,7 @@ object SavedPlacesStore {
     fun save(context: Context, kind: String, result: SearchResult) {
         try {
             if (result.label.isBlank()) return
-            if (result.lat.isNaN() || result.lng.isNaN()) return
+            if (!validCoordinates(result.lat, result.lng)) return
             val current = getAll(context).toMutableList()
             when (kind) {
                 KIND_HOME, KIND_WORK ->
@@ -140,7 +140,10 @@ object SavedPlacesStore {
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    private fun parse(raw: String): List<SavedPlace> {
+    private fun validCoordinates(lat: Double, lng: Double): Boolean =
+        lat in -90.0..90.0 && lng in -180.0..180.0
+
+    internal fun parse(raw: String): List<SavedPlace> {
         val out = ArrayList<SavedPlace>()
         val arr = JSONArray(raw)
         for (i in 0 until arr.length()) {
@@ -150,7 +153,7 @@ object SavedPlacesStore {
             if (label.isBlank()) continue
             val lat = obj.optDouble(KEY_LAT, Double.NaN)
             val lng = obj.optDouble(KEY_LNG, Double.NaN)
-            if (lat.isNaN() || lng.isNaN()) continue
+            if (!validCoordinates(lat, lng)) continue
             out.add(SavedPlace(kind, RecentSearchStore.readPlace(obj, label, lat, lng)))
         }
         return out
