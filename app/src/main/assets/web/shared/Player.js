@@ -60,7 +60,7 @@ p.decode(<binary>);
 
     this.nowValue = nowValue;
 
-    this._config.workerFile = this._config.workerFile || "Decoder.js";
+    this._config.workerFile = this._config.workerFile || "Decoder.js?v=pool1";
     if (this._config.preserveDrawingBuffer){
       this._config.contextOptions = this._config.contextOptions || {};
       this._config.contextOptions.preserveDrawingBuffer = true;

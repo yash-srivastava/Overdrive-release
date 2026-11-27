@@ -660,18 +660,24 @@ var Module=typeof Module!=="undefined"?Module:{};var moduleOverrides={};var key;
     var finishDecoding;
     var timeDecoding;
 
+    // Only retain buffers for the current frame size. A late return from a
+    // previous resolution or a burst of returns must not grow idle memory.
     var memAr = [];
+    var frameBytes = 0;
+    var maxRecycledBytes = 8 * 1024 * 1024;
     var getMem = function(length){
-      if (memAr.length){
-        var u = memAr.shift();
-        while (u && u.byteLength !== length){
-          u = memAr.shift();
-        };
-        if (u){
-          return u;
-        };
-      };
-      return new ArrayBuffer(length);
+      if (frameBytes !== length){
+        memAr.length = 0;
+        frameBytes = length;
+      }
+      return memAr.length ? memAr.pop() : new ArrayBuffer(length);
+    };
+    var rememberMem = function(buffer){
+      if (buffer.byteLength === frameBytes && frameBytes > 0 &&
+          memAr.length < 3 &&
+          (memAr.length + 1) * frameBytes <= maxRecycledBytes){
+        memAr.push(buffer);
+      }
     };
 
     var copySlice = function(source, target, infoAr, width, height){
@@ -739,7 +745,7 @@ var Module=typeof Module!=="undefined"?Module:{};var moduleOverrides={};var key;
       if (isWorker){
         if (reuseMemory){
           if (e.data.reuse){
-            memAr.push(e.data.reuse);
+            rememberMem(e.data.reuse);
           };
         };
         if (e.data.buf){

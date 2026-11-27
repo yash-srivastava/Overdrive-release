@@ -32,14 +32,16 @@ public class LiveViewConnectionStateAssetTest {
     }
 
     @Test
-    public void dilink5BroadwayUsesBoundedRecycledDecodePath() throws Exception {
+    public void broadwayUsesBoundedRecycledDecodePathOnAllDevices() throws Exception {
         String stream = readAsset("shared/stream.js");
         String liveView = readAsset("local/live-view.html");
 
         assertTrue(stream.contains("?decoder=broadway"));
-        assertTrue(stream.contains("reuseMemory: this.isDiLink5 === true"));
+        assertTrue(stream.contains("reuseMemory: true"));
+        assertTrue(stream.contains("Decoder.js?v=pool1"));
+        assertTrue(liveView.contains("Decoder.js?v=pool1"));
         assertTrue(stream.contains("this.isDiLink5 = data.dilink5 === true"));
-        assertTrue(liveView.contains("stream.js?v=index9"));
+        assertTrue(liveView.contains("stream.js?v=index10"));
     }
 
     @Test

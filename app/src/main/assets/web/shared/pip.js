@@ -410,7 +410,7 @@ BYD.pip = {
             
             const baseUrl = new URL('../shared/', window.location.href).href;
             const wasmUrl = baseUrl + 'avc.wasm';
-            const decoderUrl = baseUrl + 'Decoder.js';
+            const decoderUrl = baseUrl + 'Decoder.js?v=pool1';
             
             const response = await fetch(decoderUrl);
             let decoderCode = await response.text();
@@ -435,6 +435,7 @@ BYD.pip = {
                 transferMemory: true,
                 workerFile: workerUrl,
                 webgl: true,
+                reuseMemory: true,
                 size: { width: 1280, height: 960 }
             });
             

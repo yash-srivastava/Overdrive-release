@@ -74,14 +74,23 @@ const wasm = fs.readFileSync(path.join(dir, 'avc.wasm'));
 const starts = Array.from(fixture.toString('latin1').matchAll(/\x00\x00(?:\x00)?\x01/g), m => m.index);
 starts.push(fixture.length);
 
-async function decode(rgb, reuseMemory) {
+async function decode(rgb, reuseMemory, recycle = false, burst = false) {
     let listener;
     let timer;
     const frames = [];
+    let allocations = 0;
+    const frameBytes = rgb ? 64 * 48 * 4 : 64 * 48 * 3 / 2;
     const complete = new Promise((resolve, reject) => {
         timer = setTimeout(() => reject(new Error('Timed out waiting for decoded frames')), 10000);
         const ctx = {
             console, performance, setTimeout, clearTimeout,
+            // Count explicit frame-size allocations in the recycled worker path.
+            ArrayBuffer: new Proxy(ArrayBuffer, {
+                construct(target, args) {
+                    if (args[0] === frameBytes) allocations++;
+                    return new target(...args);
+                }
+            }),
             importScripts() {},
             async fetch(name) {
                 assert.equal(name, 'avc.wasm');
@@ -107,7 +116,25 @@ async function decode(rgb, reuseMemory) {
                     assert.ok(received.infos.length > 0);
                     assert.ok(Number.isInteger(received.infos[0].id));
                     assert.ok(Number.isFinite(received.infos[0].finishDecoding));
-                    frames.push(received.buf);
+                    if (recycle || burst) {
+                        frames.push(crypto.createHash('sha256')
+                            .update(new Uint8Array(received.buf)).digest('hex'));
+                        if (recycle || frames.length === 1) {
+                            const returned = structuredClone(received.buf, {transfer: [received.buf]});
+                            listener({data: {reuse: returned}});
+                            assert.equal(received.buf.byteLength, 0);
+                        }
+                        if (burst && frames.length === 1) {
+                            // Simulate a backlog of returns and a late old-size
+                            // frame. At most three current-size buffers survive.
+                            for (let j = 0; j < 4; j++) {
+                                listener({data: {reuse: new ArrayBuffer(frameBytes)}});
+                            }
+                            listener({data: {reuse: new ArrayBuffer(frameBytes + 1)}});
+                        }
+                    } else {
+                        frames.push(received.buf);
+                    }
                     if (frames.length === 6) resolve();
                 } catch (err) {
                     reject(err);
@@ -126,9 +153,14 @@ async function decode(rgb, reuseMemory) {
     try {
         await complete;
         // Check all retained buffers after decoding finishes, not just at delivery.
-        assert.deepEqual(frames.map(buf => crypto.createHash('sha256')
-            .update(new Uint8Array(buf)).digest('hex')), expected[rgb ? 'rgb' : 'yuv']);
-        console.log(`${rgb ? 'RGB' : 'YUV'} reuseMemory=${reuseMemory}: six matching transferred frames`);
+        const hashes = recycle || burst ? frames : frames.map(buf => crypto.createHash('sha256')
+            .update(new Uint8Array(buf)).digest('hex'));
+        assert.deepEqual(hashes, expected[rgb ? 'rgb' : 'yuv']);
+        if (recycle) assert.equal(allocations, 1, 'steady-size frame buffer should be reused');
+        if (burst) assert.equal(allocations, 3, 'only three returned buffers may be retained');
+        console.log(`${rgb ? 'RGB' : 'YUV'} reuseMemory=${reuseMemory}: six matching transferred frames`
+            + (recycle ? `; ${allocations} explicit frame-buffer allocation with immediate returns` : '')
+            + (burst ? '; burst return cap verified' : ''));
     } finally {
         clearTimeout(timer);
     }
@@ -137,5 +169,7 @@ async function decode(rgb, reuseMemory) {
 (async () => {
     for (const rgb of [false, true]) {
         for (const reuseMemory of [false, true]) await decode(rgb, reuseMemory);
+        await decode(rgb, true, true);
+        await decode(rgb, true, false, true);
     }
 })().catch(err => { console.error(err); process.exitCode = 1; });
