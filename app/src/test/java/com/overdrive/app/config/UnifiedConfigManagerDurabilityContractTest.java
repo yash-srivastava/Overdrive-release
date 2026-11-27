@@ -285,7 +285,7 @@ public class UnifiedConfigManagerDurabilityContractTest {
         String isolated = between(
                 source,
                 "private fun loadIsolatedConfigForMutation(): JSONObject",
-                "/**\n     * Get the config file path");
+                "/**\n     * Check if config file exists");
         String updateSection = between(
                 source,
                 "fun updateSection(section: String",

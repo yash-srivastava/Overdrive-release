@@ -2314,27 +2314,11 @@ object UnifiedConfigManager {
     }
     
     /**
-     * Get streaming config section.
-     */
-    @JvmStatic
-    fun getStreaming(): JSONObject {
-        return loadConfig().optJSONObject("streaming") ?: JSONObject()
-    }
-
-    /**
      * Get logging config section.
      */
     @JvmStatic
     fun getLogging(): JSONObject {
         return loadConfig().optJSONObject("logging") ?: JSONObject()
-    }
-
-    /**
-     * Get the active minimum log level (DEBUG, INFO, WARN, ERROR). Defaults to INFO.
-     */
-    @JvmStatic
-    fun getLogLevel(): String {
-        return getPersistedLogLevel() ?: "INFO"
     }
 
     /** The level the user saved, or null when none was ever saved (code defaults apply). */
@@ -2503,9 +2487,6 @@ object UnifiedConfigManager {
     @JvmStatic
     fun getCamViewTarget(): String = getCamView().optString("target", "head_unit")
 
-    @JvmStatic
-    fun isCamViewCluster(): Boolean = "cluster" == getCamViewTarget()
-
     /** Auto-hide timeout in seconds (0 = stay until explicitly hidden). */
     @JvmStatic
     fun getCamViewAutoHideSec(): Int = getCamView().optInt("autoHideSec", 0).coerceIn(0, 600)
@@ -2605,10 +2586,6 @@ object UnifiedConfigManager {
         } catch (t: Throwable) {
             true
         }
-
-    @JvmStatic
-    fun setWifiAutoEnableEnabled(enabled: Boolean): Boolean =
-        setWifiKeepAliveSuppressed(!enabled)
 
     /** Persist user/automation WiFi-off intent only. The hotspot owns its separate
      *  suppressedByHotspot marker. Single-key merge on the "radio" section, off the
@@ -2925,22 +2902,6 @@ object UnifiedConfigManager {
     }
     
     /**
-     * Update telegram config section.
-     */
-    @JvmStatic
-    fun setTelegram(telegram: JSONObject): Boolean {
-        return updateSection("telegram", telegram)
-    }
-    
-    /**
-     * Update proximity guard config section.
-     */
-    @JvmStatic
-    fun setProximityGuard(proximityGuard: JSONObject): Boolean {
-        return updateSection("proximityGuard", proximityGuard)
-    }
-    
-    /**
      * Update telemetry overlay config section.
      */
     @JvmStatic
@@ -3247,28 +3208,6 @@ object UnifiedConfigManager {
     }
     
     /**
-     * Get trip analytics config section.
-     * Defaults to enabled=true (matching TripConfig.DEFAULT_ENABLED and the
-     * applyDefaults seed) when the section is absent — the old `false` here
-     * disagreed with every other default and would silently disable trips for
-     * any future caller that trusted it.
-     */
-    @JvmStatic
-    fun getTripAnalytics(): JSONObject {
-        return loadConfig().optJSONObject("tripAnalytics") ?: JSONObject().apply {
-            put("enabled", true)
-        }
-    }
-    
-    /**
-     * Update trip analytics config section.
-     */
-    @JvmStatic
-    fun setTripAnalytics(tripAnalytics: JSONObject): Boolean {
-        return updateSection("tripAnalytics", tripAnalytics)
-    }
-
-    /**
      * Resolve the active update channel ("alpha" | "braveheart").
      *
      * Source of truth is the runtime-selectable "updates" section. When the
@@ -3346,11 +3285,6 @@ object UnifiedConfigManager {
         }
     }
 
-    @JvmStatic
-    fun setRemoteCommunication(remoteCommunication: JSONObject): Boolean {
-        return updateSection("remoteCommunication", remoteCommunication)
-    }
-    
     /**
      * Get BYD Cloud config section.
      * Defaults to enabled=false if section doesn't exist.
@@ -3362,14 +3296,6 @@ object UnifiedConfigManager {
         }
     }
     
-    /**
-     * Update BYD Cloud config section.
-     */
-    @JvmStatic
-    fun setBydCloud(bydCloud: JSONObject): Boolean {
-        return updateSection("bydCloud", bydCloud)
-    }
-
     /**
      * Get Cloudflared config section.
      */
@@ -4366,30 +4292,6 @@ object UnifiedConfigManager {
     // ==================== CONVENIENCE METHODS ====================
     
     /**
-     * Get a specific surveillance value.
-     */
-    @JvmStatic
-    fun getSurveillanceValue(key: String, default: Any): Any {
-        return getSurveillance().opt(key) ?: default
-    }
-    
-    /**
-     * Get a specific recording value.
-     */
-    @JvmStatic
-    fun getRecordingValue(key: String, default: Any): Any {
-        return getRecording().opt(key) ?: default
-    }
-    
-    /**
-     * Get a specific proximity guard value.
-     */
-    @JvmStatic
-    fun getProximityGuardValue(key: String, default: Any): Any {
-        return getProximityGuard().opt(key) ?: default
-    }
-    
-    /**
      * Check if surveillance is enabled in config (user preference for ACC OFF auto-start).
      */
     @JvmStatic
@@ -4881,12 +4783,6 @@ object UnifiedConfigManager {
      */
     private fun loadIsolatedConfigForMutation(): JSONObject =
         JSONObject(loadConfigFresh().toString())
-    
-    /**
-     * Get the config file path (for debugging).
-     */
-    @JvmStatic
-    fun getConfigPath(): String = CONFIG_PATH
     
     /**
      * Check if config file exists.
