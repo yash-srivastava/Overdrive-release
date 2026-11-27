@@ -41,7 +41,7 @@ inline void bestDisplacement(const uint8_t* current, const uint8_t* reference,
             for (int y = 0; y < patchHeight; y += 4) {
                 const int row = y + dy + Radius;
                 sad += sadRow(current + (y / 4) * 8,
-                              reference + row * lumaStride + dx + Radius);
+                              reference + (row * lumaStride + dx + Radius));
                 if (bestSad >= 0 && sad >= bestSad) break;
             }
             if (bestSad < 0 || sad < bestSad) {
