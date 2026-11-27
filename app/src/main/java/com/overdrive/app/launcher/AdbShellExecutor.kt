@@ -692,22 +692,6 @@ class AdbShellExecutor @JvmOverloads constructor(
         return BulkConnection(real)
     }
 
-    fun checkProcessRunning(processName: String): Int? {
-        return try {
-            val conn = acquireConnection()
-            val result = shellGuarded(conn, "pgrep -f '$processName'", DEFAULT_DEADLINE_MS, cmdSeq.incrementAndGet())
-
-            if (result.exitCode == 0 && result.allOutput.trim().isNotEmpty()) {
-                result.allOutput.trim().lines().firstOrNull()?.toIntOrNull()
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            logger.error(TAG, "Failed to check process: $processName", e)
-            null
-        }
-    }
-
     fun killProcess(processName: String): Boolean {
         return try {
             val conn = acquireConnection()
