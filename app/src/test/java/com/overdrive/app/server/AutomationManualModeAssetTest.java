@@ -36,7 +36,7 @@ public class AutomationManualModeAssetTest {
         assertTrue(css.contains(".automation-mode-select"));
         assertTrue(english.contains("\"mode_manual\": \"Manual only\""));
         assertTrue(api.contains("/api/automations/mode/"));
-        assertTrue(html.contains("automations.css?v=av56"));
+        assertTrue(html.contains("automations.css?v=av57"));
         assertTrue(html.contains("automations.js?v=av78"));
     }
 
