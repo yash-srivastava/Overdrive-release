@@ -2159,6 +2159,21 @@ public final class ClusterProjectionController {
         }
     }
 
+    /** The user's cluster size (29 = 8.8", 30 = 12.3", 31 = 10.25"), as the open sequence resolves it. */
+    public static int configuredSizeProfile() {
+        int seedDefault = fingerprintSizeProfile();
+        try {
+            org.json.JSONObject root = UnifiedConfigManager.loadConfig();
+            org.json.JSONObject surveillance = root.optJSONObject("surveillance");
+            org.json.JSONObject blindspot = root.optJSONObject("blindspot");
+            int size = surveillance != null ? surveillance.optInt("clusterSizeProfile", seedDefault) : seedDefault;
+            if (blindspot != null) size = blindspot.optInt("clusterSizeProfile", size);
+            return isKnownLegacySizeProfile(size) ? size : seedDefault;
+        } catch (Throwable failure) {
+            return seedDefault;
+        }
+    }
+
     private static boolean isKnownLegacySizeProfile(int opcode) {
         return opcode == 29 || opcode == 30 || opcode == 31;
     }
