@@ -194,12 +194,6 @@ public final class ClusterMirrorController {
 
     // ── Public API (posted onto the single exec thread) ─────────────────────────────
 
-    /** Start (or restart) the mirror into {@code rect} (head-unit screen px). Idempotent
-     *  restart: a running mirror is torn down and re-armed at the new rect. Any thread. */
-    public void start(int x, int y, int w, int h) {
-        start(x, y, w, h, scaleMode);
-    }
-
     /** Start (or restart) the mirror into {@code rect} with an explicit scaling mode
      *  (FIT/FILL/ZOOM). The mode is captured on the exec thread before arming so the
      *  first frame already uses it. Any thread. */
@@ -297,14 +291,6 @@ public final class ClusterMirrorController {
             try { capture.destroyForcibly(); } catch (Throwable ignored) {}
         }
     }
-
-    /** Snapshot of the current state for the UI status endpoint. Volatile-free read of
-     *  exec-thread state is acceptable here (status is advisory, refreshed by polling). */
-    public int currentMode() { return mode; }
-    public int currentFissionDisplayId() { return fissionDisplayId; }
-    public int panelWidth() { return panelW; }
-    public int panelHeight() { return panelH; }
-    public int currentScaleMode() { return scaleMode; }
 
     /**
      * One-shot RESIZE DIAGNOSTIC (device debugging only — no behaviour change). Resizes the
