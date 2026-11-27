@@ -120,14 +120,48 @@ class DashcamFollower(
     private var curPairRate = 0f
     // Runtime verdicts for this player instance: pairs that failed repeatedly with both decoders live.
     private val pairFailures = HashMap<String, Int>()
-    private val badPairs = HashSet<String>()
-    // Last pair this follower composed or tried; a bad one keeps the mode off until the formats change.
-    @Volatile private var lastPair: String? = null
+    private val badPairs: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    // Video format per windshield clip (probed once), and the grid decoder seen while the 360° clip led.
+    private val fmtByClip = java.util.concurrent.ConcurrentHashMap<String, VideoFmt>()
+    @Volatile private var lastFmt: VideoFmt? = null
+    private val unprobeable = HashSet<String>()
+    @Volatile private var gridCodec: CodecConfig? = null
+    @Volatile private var rateNow = 1f
 
-    /** The formats last tried can't run together here (any thread): don't switch the leader for them. */
-    fun pairBlocked(): Boolean {
-        val k = lastPair ?: return false
+    /**
+     * Any thread: the windshield clip [dvr] and the grid decoder can't run together here (capability check or
+     * repeated failures), judged per clip. A clip not probed yet is judged by the last probed format.
+     */
+    fun pairBlockedFor(dvr: TlSegment): Boolean {
+        val lead = gridCodec ?: return false
+        val f = fmtByClip[key(dvr)] ?: lastFmt ?: return false
+        val k = pairKey(lead.mime, lead.width, lead.height, LEADER_FPS, f, rateNow)
         return k in badPairs || pairs[k] == false
+    }
+
+    /** Probes [dvr]'s format once (cached block 0); follower thread. */
+    private fun formatOf(dvr: TlSegment): VideoFmt? {
+        val k = key(dvr)
+        fmtByClip[k]?.let { return it }
+        if (k in unprobeable) return null
+        val f = probeVideo(dvr)
+        if (f == null) {
+            // Not readable: tried once; opening it decides (no probe per tick).
+            unprobeable.add(k)
+            return null
+        }
+        if (fmtByClip.size > MAX_FMT_ENTRIES) fmtByClip.clear()
+        fmtByClip[k] = f
+        lastFmt = f
+        return f
+    }
+
+    /** Judges the pair for [dvr] now: probes its format and runs the (cached) capability check. */
+    private fun pairBadNow(dvr: TlSegment): Boolean {
+        val lead = gridCodec ?: return false
+        val f = formatOf(dvr) ?: return false
+        if (!canRunBoth(lead.mime, lead.width, lead.height, LEADER_FPS, f, leaderRate)) return true
+        return pairKey(lead.mime, lead.width, lead.height, LEADER_FPS, f, leaderRate) in badPairs
     }
     private val skip = HashSet<String>()
     private val params = PlaybackParams()
@@ -157,10 +191,8 @@ class DashcamFollower(
             unsynced = false
             hardSeeks = 0
             pendingSince = 0L
-            val f = curFmt
-            val lead = leader.codec()
-            if (f != null && lead != null) lastPair = pairKey(lead.mime, lead.width, lead.height, LEADER_FPS, f, rate)
         }
+        rateNow = rate
         leaderRate = rate
         skipQuiet = skipQuietOn
     }
@@ -270,7 +302,7 @@ class DashcamFollower(
         val st = when {
             unavailable -> Compose.BLOCKED
             shown -> Compose.COMPOSING
-            blocked || unsynced || pairBlocked() -> Compose.BLOCKED
+            blocked || unsynced -> Compose.BLOCKED
             leaderRate > MAX_RATE || skipQuiet -> Compose.BLOCKED
             else -> Compose.PENDING
         }
@@ -309,7 +341,9 @@ class DashcamFollower(
         // The 360° clip leads but carries no usable grid: can't compose here (sticky like a failure).
         val l = leaderSeg
         if (l != null && !PlaybackPlan.oem(l) && !leaderGrid && raw != null) blocked = true
-        if (pairBlocked()) blocked = true
+        if (l != null && !PlaybackPlan.oem(l)) leader.codec()?.let { gridCodec = it }
+        // Judged for the clip under the playhead (a later clip in another format gets its own verdict).
+        if (raw != null && !blocked && pairBadNow(raw)) blocked = true
         val dvr = if (ok) oemAt(w) else null
         if (ok && dvr == null && !blocked && !unsynced && holdAcrossSeam(w)) {
             // Index seam between windshield clips: hold the last frame rather than flash the 360° view.
@@ -357,7 +391,6 @@ class DashcamFollower(
         val f = curFmt
         val lead = leader.codec()
         if (f != null && lead != null && leaderRate != curPairRate) {
-            lastPair = pairKey(lead.mime, lead.width, lead.height, LEADER_FPS, f, leaderRate)
             if (!canRunBoth(lead.mime, lead.width, lead.height, LEADER_FPS, f, leaderRate)) {
                 block()
                 failCurrent()
@@ -661,12 +694,11 @@ class DashcamFollower(
             return
         }
         // Both decoders must fit on this unit for the formats actually being composed.
-        val fmt = probeVideo(dvr)
+        val fmt = formatOf(dvr)
         val lead = leader.codec()
         curFmt = fmt
         curPairRate = leaderRate
         curPair = if (fmt != null && lead != null) pairKey(lead.mime, lead.width, lead.height, LEADER_FPS, fmt, leaderRate) else null
-        if (curPair != null) lastPair = curPair
         if (curPair in badPairs) {
             src.close()
             skip.add(key(dvr))
@@ -909,6 +941,7 @@ class DashcamFollower(
 
         private const val PENDING_MAX_MS = 4_000L
         private const val MAX_PAIR_FAILURES = 2
+        private const val MAX_FMT_ENTRIES = 256
         private const val MAX_SURFACE_FAILURES = 3
         private const val END_SLACK_MS = 1_500L
         // MediaPlayer.MEDIA_ERROR_SYSTEM (hidden constant): codec could not be allocated.

@@ -706,7 +706,7 @@ class TimelineFragment : Fragment() {
      */
     private fun dashcamViewAt(wall: Long): Boolean {
         if (!dashcamSupported || !dashcamPref || speed > 2 || skipQuiet) return false
-        if (follower?.pairBlocked() == true) return false
+        val f = follower
         val segs = repo?.currentSnapshot?.segments ?: return false
         var mosaic = false
         var oem = false
@@ -715,8 +715,10 @@ class TimelineFragment : Fragment() {
         for (sg in segs) {
             val end = sg.end ?: continue
             if (!sg.available || wall < sg.start - seam || wall >= end + seam || sg.spanSrc != "writer") continue
-            if (com.overdrive.app.ui.timeline.player.PlaybackPlan.oem(sg)) oem = true
-            else if (specs?.cached(sg)?.grid != null) mosaic = true
+            // The pair verdict for the windshield clip at this instant only.
+            if (com.overdrive.app.ui.timeline.player.PlaybackPlan.oem(sg)) {
+                if (f == null || !f.pairBlockedFor(sg)) oem = true
+            } else if (specs?.cached(sg)?.grid != null) mosaic = true
             if (mosaic && oem) return true
         }
         return false
