@@ -60,7 +60,7 @@ public class RemoteKeyActuationWiringTest {
         int uncertain = bridge.indexOf(
                 "if (genericFrameCommand && serviceMayOwnRequest.get()) {",
                 bridge.indexOf("if (started == null) {"));
-        int shell = bridge.indexOf("startDiLink5ServiceAsShell(startContext, intent)", uncertain);
+        int shell = bridge.indexOf("startDiLink5ServiceAsShell(startContext, intent, true, serviceMayOwnRequest)", uncertain);
         assertTrue(uncertain >= 0 && shell > uncertain);
         String stop = bridge.substring(uncertain, shell);
         assertTrue(stop.contains("cancellation.cancel();"));

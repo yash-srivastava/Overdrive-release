@@ -12,6 +12,7 @@ import com.overdrive.app.byd.routing.VehicleCommandRouter.CommandResult;
 import com.overdrive.app.byd.routing.VehicleCommandRouter.VehicleCommand;
 import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.genai.GenAiRoutineLearner;
+import com.overdrive.app.launcher.dilink5.cluster.Sealion7HdmiProjection;
 import com.overdrive.app.logging.DaemonLogger;
 
 import org.json.JSONArray;
@@ -1033,6 +1034,12 @@ public class VehicleControlApiHandler {
                                 .from(projectionConfig);
                 response.put("projectionPathConfigured", di5Config.getTransport().getWire());
                 response.put("projectionTargetConfigured", di5Config.getTarget().getWire());
+                if (com.overdrive.app.camera.dilink5.ClusterTransport.AAOS_HDMI.equals(transport.transport)) {
+                    android.content.Context context = com.overdrive.app.daemon.CameraDaemon.getAppContext();
+                    response.put("sealion7FullHdmiSupported",
+                            context != null && Sealion7HdmiProjection.isSupported(context));
+                    response.put(Sealion7HdmiProjection.CONFIG_KEY, Sealion7HdmiProjection.isOptedIn(projectionConfig));
+                }
                 response.put("di5HostedWidthPercent", di5Config.getWidthPercent());
                 response.put("di5HostedHeightPercent", di5Config.getHeightPercent());
                 response.put("di5HostedXOffsetPercent", di5Config.getXOffsetPercent());

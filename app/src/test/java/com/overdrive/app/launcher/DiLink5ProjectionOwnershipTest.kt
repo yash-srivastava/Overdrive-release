@@ -32,4 +32,15 @@ class DiLink5ProjectionOwnershipTest {
         assertNotNull(restored)
         assertEquals("di5:2:resize:4", restored?.densityOwner)
     }
+
+    @Test
+    fun sealionReleaseRouteSurvivesOwnershipRecovery() {
+        val legacy = owned().toJson()
+        assertFalse(legacy.has("sealion7Hdmi"))
+        assertEquals(owned(), DiLink5ProjectionOwnership.fromJson(legacy))
+        assertEquals(owned(), DiLink5ProjectionOwnership.fromJson(legacy.put("sealion7Hdmi", "true")))
+
+        val sealion = owned().copy(sealion7Hdmi = true)
+        assertEquals(sealion, DiLink5ProjectionOwnership.fromJson(sealion.toJson()))
+    }
 }

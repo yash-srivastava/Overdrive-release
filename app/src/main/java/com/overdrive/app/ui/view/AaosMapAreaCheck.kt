@@ -35,6 +35,7 @@ class AaosMapAreaCheck(private val button: View) : DisplayManager.DisplayListene
     private val io = Executors.newSingleThreadExecutor()
     private var selectedGear: AaosSelectedGearReader? = null
     private var resumed = false
+    private var enabled = true
     private var generation = 0L
     private var lastParkSample = 0L
     private var lastMapRequest = 0L
@@ -75,6 +76,12 @@ class AaosMapAreaCheck(private val button: View) : DisplayManager.DisplayListene
         }
     }
 
+    fun setEnabled(enabled: Boolean) {
+        if (this.enabled == enabled) return
+        this.enabled = enabled
+        refresh()
+    }
+
     override fun onDisplayAdded(displayId: Int) = refresh()
     override fun onDisplayChanged(displayId: Int) = refresh()
     override fun onDisplayRemoved(displayId: Int) {
@@ -82,7 +89,9 @@ class AaosMapAreaCheck(private val button: View) : DisplayManager.DisplayListene
         refresh()
     }
 
-    private fun currentTarget(): Display? = displays?.displays?.singleOrNull { isTarget(context, it) }
+    private fun currentTarget(): Display? = if (enabled) {
+        displays?.displays?.singleOrNull { isTarget(context, it) }
+    } else null
 
     private fun refresh() {
         val selected = currentTarget()
