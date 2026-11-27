@@ -7,8 +7,7 @@ import java.util.List;
 /**
  * Distance / proximity inference for surveillance threats.
  *
- * <p><b>Why this class exists.</b> The previous geometric model
- * ({@link SurveillanceConfig#estimateDistanceForQuadrant}) computed metric
+ * <p><b>Why this class exists.</b> The retired geometric model computed metric
  * distance from the Y position of motion-block centroids assuming:
  *  <ul>
  *    <li>The image is a rectilinear pinhole projection (it isn't — BYD AVM
