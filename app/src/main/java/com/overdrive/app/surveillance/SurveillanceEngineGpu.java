@@ -1852,27 +1852,10 @@ public class SurveillanceEngineGpu {
     private int[] mosaicJpegPixelsScratch = null;
     private android.graphics.Bitmap mosaicJpegBitmapScratch = null;
 
-    // Segment-metadata executor: hero JPEG compress + per-actor JPEGs +
-    // JSON sidecar + SRT sidecar.
-    //
-    // PROBLEM IT FIXES: when called from the segment-rotation listener,
-    // flushSegmentMetadata runs on a {@code GpuSegmentFinalizer-N} thread
-    // which is what {@code waitForFinalizers} blocks on at recording-close
-    // and pipeline-shutdown. Bitmap.compress(JPEG, 85) at 640×640 takes
-    // ~50 ms on the BYD SoC; with 4 actors per segment that's 200+ ms of
-    // the close-path's 2 s budget consumed by JPEG work. Multi-segment
-    // events stack the cost across segments and can blow the budget.
-    //
-    // FIX: dispatch flushSegmentMetadata to this dedicated single-thread
-    // executor so the finalizer thread returns immediately. The JPEG
-    // writes proceed in the background and don't gate close-path or
-    // rotation cadence. The executor has an unbounded queue (we want
-    // every segment's metadata to be written eventually, never dropped),
-    // but the close-path explicitly drains it before declaring shutdown
-    // complete via {@link #drainSegmentMetadata}.
-    //
-    // Thread is BACKGROUND priority (nice +10) so its JPEG work yields to
-    // the encoder/drainer/disk-writer if they need cycles.
+    // Segment metadata JPEG writes run on a dedicated background thread so
+    // segment finalizers do not spend their close-path budget compressing images.
+    // Final-segment hero writes stay synchronous; drainSegmentMetadata waits
+    // for queued JPEG work when required by the close or discard path.
     private final java.util.concurrent.ExecutorService segmentMetadataExecutor =
         java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(() -> {
@@ -8371,7 +8354,7 @@ public class SurveillanceEngineGpu {
         // drop a peak-retained actor that was entirely gone before the final
         // segment's window began — otherwise a multi-segment event names/counts an
         // actor absent from the final clip. recordingStartTimeMs is not reset
-        // between the final flushSegmentMetadata and the publish calls, so it is
+        // between final metadata publication and the notification calls, so it is
         // the correct final-segment anchor. No-op for single-segment events (the
         // departed-close-person's lastSeenWallMs lies within the only segment).
         final long segmentStartMs = timelineCollector.getRecordingStartTimeMs();
@@ -11480,21 +11463,9 @@ public class SurveillanceEngineGpu {
     }
 
     /**
-     * Delete a just-finalized event that {@link #shouldDiscardEvent()} flagged as
-     * an empty-bright-motion false positive: the mp4 + all sidecars (.json/.srt/
-     * .jpg + per-actor thumbs) + the H2 index row. No notification is sent (the
-     * caller skips the publish/Telegram block). Called from stopRecording BEFORE
-     * flushSegmentMetadata, so the hero/JSON/SRT are usually never even written.
+     * Delete a discarded event and its sidecars/index row before final metadata
+     * publication. Use the caller's file snapshot, never a successor's live field.
      */
-    private void discardCurrentEvent() {
-        // Legacy no-arg entry: reads the live field. stopRecording no longer
-        // uses this — it passes its stop-time snapshot to the File overload
-        // (audit R8-2 / ExtC-3: the field is nulled before the tail runs).
-        discardCurrentEvent(currentEventFile);
-    }
-
-    /** File-arg variant (audit R8-2 / ExtC-3): operates on the caller's
-     *  snapshot so a successor event's currentEventFile is never read here. */
     private void discardCurrentEvent(File f) {
         if (f == null) return;
         String name = f.getName();
@@ -11727,8 +11698,8 @@ public class SurveillanceEngineGpu {
         // stopAndWrite sees the mismatch and no-ops instead of flipping the
         // successor's collection off and writing a zero-span sidecar.
         final int stoppingTimelineGen = timelineGen;
-        // Hero/thumbnail slots: drain (same drain flushSegmentMetadata used to
-        // do inside the KEEP branch — also preserves the staticness verdicts)
+        // Hero/thumbnail slots: drain before the KEEP branch (also preserves
+        // the staticness verdicts)
         // and then clear the rest so a successor event starts with an empty
         // buffer instead of having its early captures wiped seconds from now.
         final java.util.List<ThumbnailBuffer.Slot> stoppingSlots;
@@ -11762,7 +11733,7 @@ public class SurveillanceEngineGpu {
         if (stoppingFile != null && RemovableStorageFs.exists(stoppingFile) && shouldDiscardEvent()) {
             // Empty-bright-motion false positive (shadow over a parked car, etc.):
             // delete the clip + sidecars + H2 row and emit NO notification. Runs
-            // BEFORE flushSegmentMetadata so the hero/JSON/SRT are usually never
+            // BEFORE final metadata publication so the hero/JSON/SRT are usually never
             // even written. Flag-gated (default OFF) — see shouldDiscardEvent().
             //
             // Claim the same per-event dedup slot the KEEP branch uses (below):
@@ -11794,11 +11765,8 @@ public class SurveillanceEngineGpu {
             // publish — the hero is already on disk by the time the call
             // returns.
             //
-            // (audit R8-2 / ExtC-3) Call the WithSnapshot variant directly
-            // with the stop-time snapshots (file / actors / slots / segment
-            // anchor) instead of flushSegmentMetadata(currentEventFile),
-            // which read the now-cleared lastActors + thumbnailBuffer fields
-            // and would otherwise consume a successor event's state.
+            // (audit R8-2 / ExtC-3) Use the stop-time snapshots, not the
+            // live fields, so a successor event's state cannot be consumed.
             scheduleSegmentMetadataFlushWithSnapshot(stoppingFile, stoppingActors,
                     stoppingSegmentStartMs, stoppingSlots, /* syncHero = */ true,
                     /* timelineGen (audit R11-4) = */ stoppingTimelineGen);
@@ -11836,7 +11804,7 @@ public class SurveillanceEngineGpu {
             // close-up. Increasingly reachable now that pickHero returns null for an
             // all-scenery pool.
             //
-            // Taken from the flag flushSegmentMetadata set when
+            // Taken from the flag the metadata writer sets when
             // writeHeroFromSnapshot actually returned a File, NOT from
             // heroSiblingFile.exists(): existence cannot tell a hero written a
             // moment ago from an orphan .jpg an earlier run left at the same path.
@@ -11949,94 +11917,11 @@ public class SurveillanceEngineGpu {
     }
 
     /**
-     * Write hero JPEG + per-actor thumbnails + JSON timeline sidecar
-     * alongside the given .mp4 segment. Used by both stopRecording (final
-     * segment) and the rotation listener (intermediate segments). Resets
-     * {@link #thumbnailBuffer} and {@link #timelineCollector} after writing
-     * so the next segment starts with empty metadata buffers.
-     *
-     * Idempotent and exception-safe — failures are logged but never
-     * thrown to the caller, since rotation can't be aborted by a hero
-     * write failure.
-     */
-    /**
-     * Schedule the segment metadata flush (thumbnails + JSON + SRT) for
-     * the given closed segment. Snapshots all engine state needed for the
-     * write at dispatch time so the actual I/O can happen on
-     * {@link #segmentMetadataExecutor} without racing the next segment's
-     * mutations.
-     *
-     * <p>The JSON+SRT sidecar write is dispatched synchronously here (it
-     * already routes onto its own writeExecutor inside the timeline
-     * collector — cheap on this thread). The thumbnail JPEG compress
-     * (the actually-expensive part) is what runs async.
-     *
-     * <p>Called from the segment-rotation listener and from
-     * {@link #stopRecording}'s final-segment flush. The close path drains
-     * via {@link #drainSegmentMetadata} before returning.
-     */
-    /**
-     * @param syncHero  true when the caller is the publish path
-     *                  ({@link #flushSegmentMetadata} from {@link #stopRecording})
-     *                  and the hero JPEG MUST be on disk before this method
-     *                  returns. false (rotation-listener path) lets the hero
-     *                  go to {@link #segmentMetadataExecutor} so the
-     *                  GpuSegmentFinalizer thread returns immediately.
-     *                  Explicit parameter — previously a volatile flag, but
-     *                  that introduced a cross-thread race where the rotation
-     *                  listener could consume the flag intended for the
-     *                  publish path, sending the publish-segment's hero to
-     *                  the executor and re-introducing the mosaic-fallback
-     *                  symptom under multi-segment events.
-     */
-    private void scheduleSegmentMetadataFlush(File segmentMp4,
-                                              java.util.List<Actor> actorsAtRotation,
-                                              long segmentStartMs,
-                                              boolean syncHero) {
-        // Drain on caller thread, then delegate. Used ONLY by the publish
-        // path (stopRecording → flushSegmentMetadata). By the time the
-        // publish path runs, recorder.stopEventRecording has already
-        // joined the encoder drainer, so no further frames will trigger
-        // observe() — the buffer is quiescent. Stop-during-rotation: if
-        // a rotation listener fired right before stopRecording, it has
-        // ALREADY drained on its own thread (synchronized) — by the time
-        // we get here, slots map holds whatever observe() landed during
-        // the brief window between listener-release and recorder-stop.
-        // That's the FINAL segment's authentic slot set; not a race loser.
-        java.util.List<ThumbnailBuffer.Slot> snap;
-        ThumbnailBuffer buf = thumbnailBuffer;
-        if (buf != null) {
-            snap = buf.drainSnapshotForAsync();
-        } else {
-            snap = java.util.Collections.emptyList();
-        }
-        scheduleSegmentMetadataFlushWithSnapshot(segmentMp4, actorsAtRotation,
-                segmentStartMs, snap, syncHero);
-    }
-
-    /**
-     * Variant that takes a pre-drained slot snapshot. Used by the
-     * rotation-listener path so the drain happens AS THE FIRST ACT on the
-     * finalizer thread (minimizing the window during which observe() for
-     * segment N+1 can pollute the closed segment's snapshot).
-     */
-    private void scheduleSegmentMetadataFlushWithSnapshot(
-            File segmentMp4,
-            java.util.List<Actor> actorsAtRotation,
-            long segmentStartMs,
-            java.util.List<ThumbnailBuffer.Slot> snap,
-            boolean syncHero) {
-        // Legacy shape without a timeline generation — no stale-stop check
-        // (audit R11-4).
-        scheduleSegmentMetadataFlushWithSnapshot(segmentMp4, actorsAtRotation,
-                segmentStartMs, snap, syncHero, /* timelineGen = */ -1);
-    }
-
-    /**
-     * Generation-aware variant (audit R11-4 / ExtD-5): {@code timelineGenIn}
-     * is the collection generation captured when THIS segment's timeline
-     * collection started; the inline {@code stopAndWrite} no-ops if a newer
-     * collection has since begun (stale stop racing a successor).
+     * Write segment metadata from the caller's captured actors, slots and timeline
+     * generation. Rotation drains slots before handing them off; the final segment
+     * captures them before clearing live state. A stale timeline stop cannot consume
+     * a successor's collection. The final hero is synchronous; rotated heroes and
+     * per-actor JPEGs use the background executor. JSON/SRT use the timeline writer.
      */
     private void scheduleSegmentMetadataFlushWithSnapshot(
             File segmentMp4,
@@ -12469,34 +12354,6 @@ public class SurveillanceEngineGpu {
         return true;
     }
 
-    /**
-     * FINAL-segment flush in {@link #stopRecording}. Snapshots
-     * {@code lastActors} + the timeline collector's current start time, then
-     * delegates to {@link #scheduleSegmentMetadataFlush} with
-     * {@code syncHero=true} so the hero JPEG is written inline on this
-     * thread — the publish path immediately after needs the file on disk
-     * before sending notifications. The rotation-listener path passes
-     * {@code syncHero=false}; rotated segments' heroes go to the
-     * background executor so the GpuSegmentFinalizer-N thread returns fast.
-     */
-    private void flushSegmentMetadata(File segmentMp4) {
-        if (segmentMp4 == null) return;
-        // Publish path: hero MUST be on disk before stopRecording proceeds
-        // to publishMotionFinal / sendFinalTelegramNotification, so write
-        // it inline on this thread.
-        //
-        // (audit R8-2 / ExtC-3) NO LONGER CALLED by stopRecording: this
-        // helper reads the LIVE lastActors / timelineCollector fields and
-        // drains the LIVE thumbnailBuffer, which the stop path now clears
-        // before its publish tail. stopRecording calls
-        // scheduleSegmentMetadataFlushWithSnapshot directly with its
-        // stop-time snapshots. Kept for any future caller that runs while
-        // the fields are still live — do NOT reintroduce it on the stop tail.
-        scheduleSegmentMetadataFlush(segmentMp4, lastActors,
-                timelineCollector.getRecordingStartTimeMs(),
-                /* syncHero = */ true);
-    }
-    
     /**
      * Enables surveillance (starts monitoring).
      */
