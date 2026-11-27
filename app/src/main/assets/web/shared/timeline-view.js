@@ -1821,8 +1821,8 @@
         renderSpeed();
     }
     function isOem(f) { return /oem|dash/i.test(String(f || '')); }
-    // The dashcam view plays the 360° clip as the leader.
-    function effPrefer() { return V.dashOn ? null : V.prefer; }
+    // The remembered source; the player lets the 360° clip lead only while the dashcam view is offered.
+    function effPrefer() { return V.prefer; }
     function applySource() {
         if (P()) V.dashOn = call(P(), 'setDashcamView', V.dashOn, V.dashPref) === true;
         call(P(), 'setPrefer', effPrefer());
