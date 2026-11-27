@@ -106,7 +106,7 @@ data class LogConfig(
      * `maxFileSizeMB * 1024 * 1024`. Even with the Long-arithmetic fix in
      * LogManager, an absurd value (multi-GB cap) defeats rotation entirely, so
      * we clamp it to a sane 1 GB ceiling here — the gate every persist path
-     * (updateLoggingConfig / importConfig) already runs through.
+     * (updateLoggingConfig) already runs through.
      */
     fun isValid(): Boolean {
         if (enableFileLog && logDir.isEmpty()) return false
