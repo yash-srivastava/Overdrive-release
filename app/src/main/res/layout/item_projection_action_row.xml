@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One row of the per-app actions menu: icon, title, optional trailing hint. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="?attr/selectableItemBackground"
+    android:clickable="true"
+    android:focusable="true"
+    android:gravity="center_vertical"
+    android:minHeight="@dimen/od_touch_standard"
+    android:orientation="horizontal"
+    android:paddingHorizontal="@dimen/od_space_4">
+
+    <ImageView
+        android:id="@+id/projectionActionRowIcon"
+        android:layout_width="@dimen/od_icon_md"
+        android:layout_height="@dimen/od_icon_md"
+        android:importantForAccessibility="no"
+        app:tint="?attr/colorOnSurfaceVariant" />
+
+    <TextView
+        android:id="@+id/projectionActionRowTitle"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/od_space_16"
+        android:layout_weight="1"
+        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle" />
+
+    <TextView
+        android:id="@+id/projectionActionRowHint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/od_space_12"
+        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
+</LinearLayout>

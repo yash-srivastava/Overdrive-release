@@ -28,43 +28,12 @@ import java.net.URLEncoder
 
 /** Optional app tools kept outside the projection and mirror lifecycle implementation. */
 object ProjectionAppTools {
-    fun attach(fragment: Fragment, root: View, selectedPackage: () -> String?) {
-        val dock = root.findViewById<android.view.ViewGroup>(R.id.projectionDock) ?: return
-        val original = dock.getChildAt(0) as? LinearLayout ?: return
-        val ctx = root.context
-        // The landscape dock starts as a horizontal action row. Preserve its own
-        // children and parents (spinner/key-menu setup depends on them), then add
-        // tools on a second row instead of squeezing them beside Cast/Stop/Adjust.
-        val column = if (original.orientation == LinearLayout.HORIZONTAL) {
-            val outer = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(original.paddingLeft, original.paddingTop,
-                    original.paddingRight, original.paddingBottom)
-            }
-            val dockParams = original.layoutParams
-            dock.removeView(original)
-            original.setPadding(0, 0, 0, 0)
-            outer.addView(original, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-            dock.addView(outer, dockParams)
-            outer
-        } else original
-        val row = ProjectionActionRow(ctx)
-        fun button(label: Int, icon: Int, action: () -> Unit) {
-            row.addView(ProjectionToolsUi.button(ctx, label, icon = icon).apply {
-                setOnClickListener { action() }
-            }, ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        }
-        button(R.string.projection_tools_title, R.drawable.ic_settings) { toolsDialog(fragment, selectedPackage) }
-        button(R.string.cluster_layouts_title, R.drawable.ic_dashboard) { ProjectionLayoutTools.open(fragment) }
-        column.addView(row, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = (8 * ctx.resources.displayMetrics.density).toInt()
-        })
-    }
-
-    private fun toolsDialog(fragment: Fragment, selectedPackage: () -> String?) {
+    /**
+     * Open the tools dialog (app DPI, keyboard, navigation) for one app. The Projection screen
+     * opens it from that app's long-press menu, so [selectedPackage] names the app the user
+     * long-pressed rather than a global picker selection.
+     */
+    fun open(fragment: Fragment, selectedPackage: () -> String?) {
         val owner = viewOwner(fragment) ?: return
         val ctx = fragment.requireContext()
         val body = ProjectionToolsUi.body(ctx)

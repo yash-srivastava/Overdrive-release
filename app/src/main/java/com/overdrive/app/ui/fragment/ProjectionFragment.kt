@@ -22,18 +22,18 @@ import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.SeekBar
-import android.widget.Spinner
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.annotation.DrawableRes
 import androidx.fragment.app.Fragment
+import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -46,6 +46,10 @@ import com.overdrive.app.ui.view.AaosMapAreaCheck
 import com.overdrive.app.ui.view.ClusterViewMirrorClient
 import com.overdrive.app.ui.view.ProjectionBoundsGeometry
 import com.overdrive.app.ui.view.ProjectionBoundsView
+import com.overdrive.app.ui.view.ProjectionAppTile
+import com.overdrive.app.ui.view.ProjectionAppTileAdapter
+import com.overdrive.app.ui.view.ProjectionAppTools
+import com.overdrive.app.ui.view.ProjectionLayoutTools
 import com.overdrive.app.ui.widget.AppToast
 import com.overdrive.app.util.DaemonHttpClient
 import org.json.JSONObject
@@ -55,6 +59,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
@@ -63,6 +68,13 @@ import kotlin.math.roundToInt
  * Cast an installed app onto the driver-cluster ("fission") display, see a LIVE mirror of
  * it on the head unit inside a DRAGGABLE + RESIZABLE bounding rectangle, and tap/swipe the
  * mirror to control the otherwise non-touch cluster.
+ *
+ * ## Picker
+ * Apps are tiles, not a dropdown: tapping a tile casts it (replacing whatever is on the
+ * cluster), long-pressing opens that app's own menu (saved window presets, Resize, app tools,
+ * favorite). While idle the tiles lead the page; once an app is live the mirror and its dock
+ * (cluster keys, Resize, Full screen, Stop, an app strip) take over. Settings shared by every
+ * app stay on the page under the dock.
  *
  * ## How the pixels get here
  * The daemon (uid 2000) composites the cluster into a TextureView Surface owned by this
@@ -84,11 +96,37 @@ class ProjectionFragment : Fragment() {
     private val main = Handler(Looper.getMainLooper())
     private val mirrorSessionId = ClusterViewMirrorClient.newSessionId()
 
-    private var spinnerApps: Spinner? = null
-    private var btnCast: Button? = null
     private var btnStop: Button? = null
     private var btnAdjust: Button? = null
     private var clusterInputKeys: View? = null
+    // App picker (idle grid + live strip), the per-app menu it opens, and the settings panel.
+    private var pickerHero: View? = null
+    private var appPicker: View? = null
+    private var favoritesLabel: View? = null
+    private var favoriteGrid: RecyclerView? = null
+    private var allAppsLabel: View? = null
+    private var appGrid: RecyclerView? = null
+    private var appsEmpty: View? = null
+    private var appStrip: RecyclerView? = null
+    private var nowIcon: ImageView? = null
+    private var nowLabel: TextView? = null
+    private var idleNotice: View? = null
+    private var idleNoticeText: TextView? = null
+    // Idle-only blocker shown under the picker (the stage pill that carried it is hidden while
+    // idle). [idleNoticeFromMode] marks the DiLink 5 one, which the status poll clears itself.
+    private var idleNoticeMessage: String? = null
+    private var idleNoticeFromMode = false
+    private var actionsDialog: androidx.appcompat.app.AlertDialog? = null
+    private val favoriteAdapter = ProjectionAppTileAdapter(false, ::onAppTapped, ::showAppActions)
+    private val allAppsAdapter = ProjectionAppTileAdapter(false, ::onAppTapped, ::showAppActions)
+    private val stripAdapter = ProjectionAppTileAdapter(true, ::onAppTapped, ::showAppActions)
+    private val appEntries = ArrayList<ProjectionAppTile>()
+    // The app last tapped (persisted): what a cast or auto-start uses when no app is live.
+    private var selectedPkg: String? = null
+    // Resize was chosen for an app not on the cluster yet: enter adjust once its cast lands.
+    private var pendingAdjustPackage: String? = null
+    // The live package the tiles and dock were last rendered for (null = render on next pass).
+    private var renderedLivePackage: String? = null
     private var statusText: TextView? = null
     private var statusDot: View? = null
     private var appToast: AppToast? = null
@@ -97,7 +135,6 @@ class ProjectionFragment : Fragment() {
     private var bounds: ProjectionBoundsView? = null
     private var progress: ProgressBar? = null
     private var scaleGroup: MaterialButtonToggleGroup? = null
-    private var presetGroup: MaterialButtonToggleGroup? = null
     private var aspectLockSwitch: MaterialSwitch? = null
     private var autoStartSwitch: MaterialSwitch? = null
     private val speedOverlaySwitch = SurveillanceSwitch(SPEED_OVERLAY_KEY)
@@ -157,7 +194,7 @@ class ProjectionFragment : Fragment() {
     private var layoutGeneration = 0L
     @Volatile private var diLink5ModeRequired = false
     // The package ACTUALLY on the cluster, per the daemon (empty when none). The resize box acts on
-    // THIS app, not on the spinner selection — the two diverge the moment the user browses the app
+    // THIS app, not on the picked app — the two diverge the moment the user browses the app
     // list during a live cast. All geometry persistence/restore is keyed to this while casting, so a
     // drag can never reshape the cast app to a different app's remembered rect.
     @Volatile private var castPackage = ""
@@ -168,7 +205,7 @@ class ProjectionFragment : Fragment() {
     private var activeWindowBounds: IntArray? = null
     // The package the box's CURRENT rect actually describes — set by restoreWindowFor (the only
     // thing that binds a rect to an app) and read by geometryPackage(). Empty until the first bind.
-    // This is what keeps a persist from being keyed to a browsed spinner pick or to a stale
+    // This is what keeps a persist from being keyed to a browsed picked app or to a stale
     // post-Stop state while the box still shows the previous app's rect.
     @Volatile private var boxPackage = ""
 
@@ -192,7 +229,6 @@ class ProjectionFragment : Fragment() {
     // Suppress the toggle/switch change listeners while we set their state programmatically
     // (restore, conflict-dialog revert) so we don't re-fire the handler / loop the dialog.
     private var suppressScaleListener = false
-    private var suppressPresetListener = false
     private var suppressAspectListener = false
     private var suppressAutoStartListener = false
     private var suppressTransportListener = false
@@ -208,10 +244,6 @@ class ProjectionFragment : Fragment() {
     // Cached sibling state so the conflict dialog can decide without a blocking read: whether
     // RoadSense's map auto-project is currently on. Refreshed by fetchAutoStartState().
     @Volatile private var roadSenseAutoProject = false
-
-    // Swallow the next onItemSelected echo from a programmatic spinner change (adapter set
-    // or setSelection). -1 = no echo pending (pass through normally).
-    private var pendingSpinnerEcho = -1
 
     // The box rect (view px) the mirror is projected into — the daemon's projection dest.
     // Written on the main thread (wireBounds/armMirror); read off-main by postTap/postSwipe on
@@ -280,8 +312,6 @@ class ProjectionFragment : Fragment() {
         // the screen degrades (blank/idle) instead of taking the process down.
         try {
             alive = true
-            spinnerApps = view.findViewById(R.id.projectionAppSpinner)
-            btnCast = view.findViewById(R.id.projectionCastButton)
             btnStop = view.findViewById(R.id.projectionStopButton)
             btnAdjust = view.findViewById(R.id.projectionAdjustButton)
             statusText = view.findViewById(R.id.projectionStatus)
@@ -291,7 +321,6 @@ class ProjectionFragment : Fragment() {
             bounds = view.findViewById(R.id.projectionBounds)
             progress = view.findViewById(R.id.projectionProgress)
             scaleGroup = view.findViewById(R.id.projectionScaleGroup)
-            presetGroup = view.findViewById(R.id.projectionPresetGroup)
             aspectLockSwitch = view.findViewById(R.id.projectionAspectLockSwitch)
             autoStartSwitch = view.findViewById(R.id.projectionAutoStartSwitch)
             speedOverlaySwitch.bind(view.findViewById(R.id.projectionSpeedOverlaySwitch))
@@ -332,29 +361,27 @@ class ProjectionFragment : Fragment() {
                 contentPadding = intArrayOf(it.paddingLeft, it.paddingTop, it.paddingRight, it.paddingBottom)
             }
 
-            btnCast?.setOnClickListener { onCastClicked() }
             btnStop?.setOnClickListener { onStopClicked() }
             btnAdjust?.setOnClickListener { toggleAdjust() }
             btnFullscreen?.setOnClickListener { setTheater(!theater) }
             theaterBackCallback.isEnabled = false
             requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, theaterBackCallback)
-            wireAppSpinner()
+            wireAppPicker(view)
+            wireSettingsRows(view)
             wireBounds()
             wireClusterInputKeys(view)
             wireTexture()
             wireStageLayout()
             wireScaleGroup()
-            wirePresetGroup()
             wireAspectLockSwitch()
             wireAutoStartSwitch()
             wireTransportGroup()
             wireProjectionPathGroups()
             wireProjectionGeometryControls(view)
-            com.overdrive.app.ui.view.ProjectionAppTools.attach(this, view) { selectedPackage() }
             restoreScaleMode()
             clipMirrorToCard()
             updateButtons()
-            // Per-app window restore happens in loadApps() once the spinner selection settles
+            // Per-app window restore happens in loadApps() once the saved pick is restored
             // (the app list loads async in onResume, so there's no selected package yet here).
             // Seed the stage to the default panel aspect (8:3) as soon as the page is measured;
             // the status poll refines it to the real panel aspect once known.
@@ -470,13 +497,19 @@ class ProjectionFragment : Fragment() {
             theater = false
             (activity as? MainActivity)?.setContentImmersive(false)
         }
-        spinnerApps = null; btnCast = null; btnStop = null; btnAdjust = null
+        btnStop = null; btnAdjust = null
         clusterInputKeys = null
+        actionsDialog?.dismiss(); actionsDialog = null
+        favoriteGrid?.adapter = null; appGrid?.adapter = null; appStrip?.adapter = null
+        pickerHero = null; appPicker = null; favoritesLabel = null; favoriteGrid = null
+        allAppsLabel = null; appGrid = null; appsEmpty = null; appStrip = null
+        nowIcon = null; nowLabel = null
+        idleNotice = null; idleNoticeText = null
         appToast?.cancel()
         appToast = null
         lastStickyError = null
         statusText = null; statusDot = null; stage = null; bounds = null; progress = null
-        scaleGroup = null; presetGroup = null; aspectLockSwitch = null
+        scaleGroup = null; aspectLockSwitch = null
         autoStartSwitch = null; transportGroup = null; transportStatus = null
         projectionPathGroup = null; projectionTargetGroup = null; projectionPathStatus = null
         projectionPathDescription = null
@@ -495,40 +528,305 @@ class ProjectionFragment : Fragment() {
         super.onDestroy()
     }
 
-    /** Persist the user's app pick as they make it, so loadApps' adapter rebuild (every
-     *  resume) can restore it instead of snapping back to the list's first entry.
-     *
-     *  Spinner selection callbacks also fire for PROGRAMMATIC changes (new adapter /
-     *  setSelection) — asynchronously, on the next layout pass — so a suppress-flag around
-     *  the call sites (the pattern the other controls use) can't cover them. Instead
-     *  loadApps records the position it programmatically settles the spinner at
-     *  ([pendingSpinnerEcho]) and the listener swallows callbacks until that echo lands.
-     *  Without this, a resume where the daemon transiently omits the saved app would fire
-     *  onItemSelected(0) and clobber the user's persisted pick with the list's first entry. */
-    private fun wireAppSpinner() {
-        spinnerApps?.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, pos: Int, id: Long) {
-                val expected = pendingSpinnerEcho
-                if (expected != -1) {
-                    if (pos == expected) pendingSpinnerEcho = -1
-                    return   // programmatic echo, not a user pick
-                }
-                if (pos >= 0 && pos < appPackages.size) {
-                    val pkg = appPackages[pos]
-                    persistSpinnerSelection(pkg)
-                    // While a cast is LIVE the box belongs to the cast app, not to this pick.
-                    // Restoring here would push the newly-selected app's remembered rect onto the
-                    // app currently on the cluster (and later persist the drag under the wrong
-                    // key). The box rebinds when the cast target actually changes (applyStatus).
-                    if (casting && castPackage.isNotEmpty()) return
-                    // A REAL user pick: restore this app's own saved window (or FULL default) so the
-                    // box always matches the selected app — otherwise it would keep showing the
-                    // previous app's box and a later persist/onPause would write it under this
-                    // app's key (the audited cross-key bug).
-                    restoreWindowFor(pkg)
-                }
+    // ── App picker (tiles) + per-app actions ─────────────────────────────────────────
+
+    /** Tiles replace the old dropdown: the idle page shows a grid (favorites first), the live
+     *  dock a strip to switch apps in one tap. Both open the same per-app menu on long-press. */
+    private fun wireAppPicker(root: View) {
+        pickerHero = root.findViewById(R.id.projectionPickerHero)
+        appPicker = root.findViewById(R.id.projectionAppPicker)
+        favoritesLabel = root.findViewById(R.id.projectionFavoritesLabel)
+        favoriteGrid = root.findViewById(R.id.projectionFavoriteGrid)
+        allAppsLabel = root.findViewById(R.id.projectionAllAppsLabel)
+        appGrid = root.findViewById(R.id.projectionAppGrid)
+        appsEmpty = root.findViewById(R.id.projectionAppsEmpty)
+        appStrip = root.findViewById(R.id.projectionAppStrip)
+        nowIcon = root.findViewById(R.id.projectionNowIcon)
+        nowLabel = root.findViewById(R.id.projectionNowLabel)
+        idleNotice = root.findViewById(R.id.projectionIdleNotice)
+        idleNoticeText = root.findViewById(R.id.projectionIdleNoticeText)
+        idleNoticeText?.text = idleNoticeMessage
+        favoriteGrid?.let { wireTileGrid(it, favoriteAdapter) }
+        appGrid?.let { wireTileGrid(it, allAppsAdapter) }
+        appStrip?.let {
+            it.layoutManager = LinearLayoutManager(it.context, LinearLayoutManager.HORIZONTAL, false)
+            it.itemAnimator = null
+            it.adapter = stripAdapter
+        }
+        // The app on the cluster opens its own menu from the dock, like its tile does.
+        root.findViewById<View>(R.id.projectionNowPlaying)?.let { now ->
+            now.setOnClickListener {
+                castPackage.takeIf { casting && it.isNotEmpty() }?.let { showAppActions(it) }
             }
-            override fun onNothingSelected(parent: AdapterView<*>?) { /* keep last pick */ }
+            now.setOnLongClickListener { now.performClick() }
+        }
+        renderedLivePackage = null
+    }
+
+    /** A grid whose column count follows its width, so tiles keep a car-friendly size. */
+    private fun wireTileGrid(grid: RecyclerView, adapter: ProjectionAppTileAdapter) {
+        val manager = GridLayoutManager(grid.context, 4)
+        grid.layoutManager = manager
+        grid.itemAnimator = null
+        grid.adapter = adapter
+        val minTile = TILE_MIN_DP * grid.resources.displayMetrics.density
+        grid.addOnLayoutChangeListener { v, left, _, right, _, oldLeft, _, oldRight, _ ->
+            val width = right - left
+            if (width <= 0 || width == oldRight - oldLeft) return@addOnLayoutChangeListener
+            val span = (width / minTile).toInt().coerceIn(2, 8)
+            if (span != manager.spanCount) v.post { manager.spanCount = span }
+        }
+    }
+
+    private fun renderAppTiles() {
+        val favorites = loadFavorites().filter { it in appPackages }
+        val byPkg = appEntries.associateBy { it.pkg }
+        val favoriteTiles = favorites.mapNotNull { byPkg[it] }
+        val otherTiles = appEntries.filter { it.pkg !in favorites }
+        favoriteAdapter.submit(favoriteTiles)
+        allAppsAdapter.submit(otherTiles)
+        stripAdapter.submit(favoriteTiles + otherTiles)
+        val hasFavorites = favoriteTiles.isNotEmpty()
+        setVisible(favoritesLabel, hasFavorites)
+        setVisible(favoriteGrid, hasFavorites)
+        setVisible(allAppsLabel, otherTiles.isNotEmpty())
+        setVisible(appGrid, otherTiles.isNotEmpty())
+        setVisible(appsEmpty, appEntries.isEmpty())
+        renderedLivePackage = null
+        renderLiveState()
+    }
+
+    /** Idle: the picker leads. Live (or a cast in flight): the mirror and its dock take over. */
+    private fun renderLiveState() {
+        val live = casting || layoutBusy || castInFlight
+        // The dock holds the only exit from full screen (the rail is hidden too): leave it as
+        // soon as nothing is live, e.g. Stop pressed in full screen or the cast ending on its own.
+        if (!live && theater) setTheater(false)
+        setVisible(pickerHero, !live)
+        setVisible(appPicker, !live)
+        setVisible(idleNotice, !live && idleNoticeMessage != null)
+        setVisible(stageCard, live)
+        setVisible(dock, live)
+        // While a cast is in flight the dock already names the app being cast.
+        val livePkg = when {
+            casting -> castPackage
+            castInFlight -> selectedPkg.orEmpty()
+            else -> ""
+        }
+        if (livePkg == renderedLivePackage) return
+        renderedLivePackage = livePkg
+        favoriteAdapter.setLivePackage(livePkg)
+        allAppsAdapter.setLivePackage(livePkg)
+        stripAdapter.setLivePackage(livePkg)
+        val entry = appEntries.firstOrNull { it.pkg == livePkg }
+        nowLabel?.text = when {
+            entry != null -> entry.label
+            livePkg.isNotEmpty() -> livePkg
+            // A cluster layout is live, not a single app.
+            else -> getString(R.string.cluster_layouts_title)
+        }
+        val icon = entry?.icon?.constantState?.newDrawable(resources)?.mutate() ?: entry?.icon
+        if (icon != null) nowIcon?.setImageDrawable(icon)
+        else nowIcon?.setImageResource(
+            if (livePkg.isEmpty()) R.drawable.ic_dashboard else android.R.drawable.sym_def_app_icon)
+    }
+
+    /** Show (or clear, with null) the idle-only blocker under the picker. */
+    private fun setIdleNotice(message: String?, fromMode: Boolean = false) {
+        idleNoticeMessage = message
+        idleNoticeFromMode = message != null && fromMode
+        idleNoticeText?.text = message
+        renderLiveState()
+    }
+
+    private fun setVisible(v: View?, visible: Boolean) {
+        val want = if (visible) View.VISIBLE else View.GONE
+        if (v != null && v.visibility != want) v.visibility = want
+    }
+
+    /** Tap: cast that app (the daemon replaces whatever is on the cluster). Tapping the app that
+     *  is already live opens its menu instead of re-casting it. */
+    private fun onAppTapped(pkg: String) {
+        if (casting && castPackage == pkg) {
+            showAppActions(pkg)
+            return
+        }
+        castApp(pkg)
+    }
+
+    private fun castApp(pkg: String) {
+        // One request at a time, and not while the Full HDMI routing choice is being saved.
+        if (castInFlight || sealion7HdmiWriteInFlight) {
+            if (pendingAdjustPackage == pkg) pendingAdjustPackage = null
+            return
+        }
+        // A new attempt replaces any "cluster reclaimed" notice from the last one.
+        if (!idleNoticeFromMode) setIdleNotice(null)
+        if (adjusting) toggleAdjust()
+        selectedPkg = pkg
+        persistPickedPackage(pkg)
+        // Idle: bind the box to this app's saved window first, as the old picker did on selection.
+        // While another app is live, onCastClicked rebinds the box once the replacement lands.
+        if (!casting) restoreWindowFor(pkg)
+        onCastClicked()
+    }
+
+    /** Everything that belongs to ONE app: its saved window, Resize, its tools, favorite, cast/stop. */
+    private fun showAppActions(pkg: String) {
+        val ctx = context ?: return
+        if (!alive) return
+        val entry = appEntries.firstOrNull { it.pkg == pkg } ?: return
+        actionsDialog?.dismiss()
+        val v = LayoutInflater.from(ctx).inflate(R.layout.dialog_projection_app_actions, null)
+        val dialog = MaterialAlertDialogBuilder(ctx).setView(v).create()
+        val isLive = casting && castPackage == pkg
+        val canEdit = !aaosHostedMap && !layoutActive && !layoutBusy
+        v.findViewById<ImageView>(R.id.projectionActionsIcon)?.let { iv ->
+            val icon = entry.icon?.constantState?.newDrawable(iv.resources)?.mutate() ?: entry.icon
+            if (icon != null) iv.setImageDrawable(icon)
+            else iv.setImageResource(android.R.drawable.sym_def_app_icon)
+        }
+        v.findViewById<TextView>(R.id.projectionActionsTitle)?.text = entry.label
+        v.findViewById<TextView>(R.id.projectionActionsSubtitle)?.setText(
+            if (isLive) R.string.projection_now_on_cluster else R.string.projection_actions_window_saved)
+
+        v.findViewById<MaterialButtonToggleGroup>(R.id.projectionActionsPresets)?.let { group ->
+            presetButtonId(currentPresetFor(pkg))?.let { group.check(it) }
+            group.isEnabled = canEdit
+            group.addOnButtonCheckedListener { _, checkedId, isChecked ->
+                if (isChecked) applyPresetFor(pkg, presetForButton(checkedId))
+            }
+        }
+        bindActionRow(v, R.id.projectionActionsResize, R.drawable.ic_crop_free,
+            getString(R.string.projection_adjust_bounds),
+            getString(R.string.projection_actions_resize_hint), enabled = canEdit) {
+            dialog.dismiss()
+            resizeApp(pkg)
+        }
+        bindActionRow(v, R.id.projectionActionsTools, R.drawable.ic_settings,
+            getString(R.string.projection_actions_tools),
+            getString(R.string.projection_actions_tools_hint)) {
+            dialog.dismiss()
+            ProjectionAppTools.open(this) { pkg }
+        }
+        val favorite = pkg in loadFavorites()
+        bindActionRow(v, R.id.projectionActionsFavorite,
+            if (favorite) R.drawable.ic_star_filled else R.drawable.ic_star,
+            getString(if (favorite) R.string.projection_favorite_remove else R.string.projection_favorite_add),
+            null) {
+            dialog.dismiss()
+            toggleFavorite(pkg)
+        }
+        v.findViewById<MaterialButton>(R.id.projectionActionsPrimary)?.let { b ->
+            if (isLive) {
+                b.setText(R.string.projection_stop_casting)
+                b.setIconResource(R.drawable.ic_stop)
+                b.setOnClickListener { dialog.dismiss(); onStopClicked() }
+            } else {
+                b.isEnabled = !castInFlight && !diLink5ModeRequired
+                b.setOnClickListener { dialog.dismiss(); castApp(pkg) }
+            }
+        }
+        dialog.setOnDismissListener { if (actionsDialog === dialog) actionsDialog = null }
+        actionsDialog = dialog
+        dialog.show()
+    }
+
+    private fun bindActionRow(
+        root: View, rowId: Int, @DrawableRes icon: Int, title: String, hint: String?,
+        enabled: Boolean = true, action: () -> Unit,
+    ) {
+        val row = root.findViewById<View>(rowId) ?: return
+        row.findViewById<ImageView>(R.id.projectionActionRowIcon)?.setImageResource(icon)
+        row.findViewById<TextView>(R.id.projectionActionRowTitle)?.text = title
+        row.findViewById<TextView>(R.id.projectionActionRowHint)?.let {
+            it.text = hint.orEmpty()
+            it.visibility = if (hint.isNullOrEmpty()) View.GONE else View.VISIBLE
+        }
+        row.isEnabled = enabled
+        row.alpha = if (enabled) 1f else DISABLED_ALPHA
+        row.setOnClickListener { if (enabled) action() }
+    }
+
+    /** Resize the app's cluster window on the mirror; an app not on the cluster is cast first. */
+    private fun resizeApp(pkg: String) {
+        if (casting && castPackage == pkg) {
+            if (!adjusting) toggleAdjust()
+            return
+        }
+        pendingAdjustPackage = pkg
+        castApp(pkg)
+    }
+
+    /** Which preset the app's window matches (FULL when nothing is saved), or null when custom. */
+    private fun currentPresetFor(pkg: String): Int? {
+        val pw = panelW.coerceAtLeast(1).toFloat()
+        val ph = panelH.coerceAtLeast(1).toFloat()
+        val window = if (casting && castPackage == pkg) {
+            bounds?.currentWindow()?.let { w ->
+                floatArrayOf(w.left / pw, w.top / ph, w.right / pw, w.bottom / ph)
+            }
+        } else loadNormalizedWindow(pkg)
+        val n = window ?: return ProjectionBoundsGeometry.PRESET_FULL
+        return PRESETS.firstOrNull { which ->
+            val r = ProjectionBoundsGeometry.preset(which, panelW, panelH)
+            abs(r.left / pw - n[0]) < PRESET_MATCH && abs(r.top / ph - n[1]) < PRESET_MATCH &&
+                abs(r.right / pw - n[2]) < PRESET_MATCH && abs(r.bottom / ph - n[3]) < PRESET_MATCH
+        }
+    }
+
+    /** Live app: move its window now (the path the old preset buttons used). Any other app: save
+     *  the window locally and in the daemon store, so its next cast (headless too) lands there. */
+    private fun applyPresetFor(pkg: String, which: Int) {
+        if (aaosHostedMap || layoutActive || layoutBusy) return
+        // The live app, or the app the resize frame still describes (the last one used): move
+        // the frame, so the normal commit path persists it. Writing prefs behind the frame's back
+        // would be overwritten by the frame on the next onPause → persistWindow.
+        if ((casting && castPackage == pkg) || (!casting && boxPackage == pkg)) {
+            bounds?.applyPreset(which)
+            return
+        }
+        val r = ProjectionBoundsGeometry.preset(which, panelW, panelH)
+        persistWindowPrefsOnly(pkg, r.left, r.top, r.right, r.bottom)
+        if (panelW > 1 && panelH > 1) {
+            val pw = panelW.toFloat()
+            val ph = panelH.toFloat()
+            submitIo { postClusterWindow(pkg, r.left / pw, r.top / ph, r.right / pw, r.bottom / ph) }
+        }
+    }
+
+    private fun presetButtonId(which: Int?): Int? = when (which) {
+        ProjectionBoundsGeometry.PRESET_FULL -> R.id.projectionActionsPresetFull
+        ProjectionBoundsGeometry.PRESET_LEFT -> R.id.projectionActionsPresetLeft
+        ProjectionBoundsGeometry.PRESET_RIGHT -> R.id.projectionActionsPresetRight
+        ProjectionBoundsGeometry.PRESET_CENTER -> R.id.projectionActionsPresetCenter
+        else -> null
+    }
+
+    private fun presetForButton(id: Int): Int = when (id) {
+        R.id.projectionActionsPresetLeft -> ProjectionBoundsGeometry.PRESET_LEFT
+        R.id.projectionActionsPresetRight -> ProjectionBoundsGeometry.PRESET_RIGHT
+        R.id.projectionActionsPresetCenter -> ProjectionBoundsGeometry.PRESET_CENTER
+        else -> ProjectionBoundsGeometry.PRESET_FULL
+    }
+
+    private fun loadFavorites(): List<String> =
+        context?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.getString(K_FAVORITES, null)
+            ?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()
+
+    private fun toggleFavorite(pkg: String) {
+        val current = loadFavorites()
+        val next = if (pkg in current) current - pkg else current + pkg
+        context?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            ?.edit()?.putString(K_FAVORITES, next.joinToString("\n"))?.apply()
+        renderAppTiles()
+    }
+
+    // ── Settings shared by every app ─────────────────────────────────────────────────
+
+    private fun wireSettingsRows(root: View) {
+        root.findViewById<View>(R.id.projectionLayoutsRow)?.setOnClickListener {
+            ProjectionLayoutTools.open(this)
         }
     }
 
@@ -600,7 +898,7 @@ class ProjectionFragment : Fragment() {
         b.onTouchCancel = { ClusterViewMirrorClient.cancelTouch(mirrorSessionId) }
     }
 
-    /** Back, Home and Volume are dock buttons under the mirror (they were behind a ⋮ dialog).
+    /** Back, Home and Volume sit in the dock as their own buttons (they were behind a ⋮ menu).
      *  Every key follows the same live session/display as touch. */
     private fun wireClusterInputKeys(root: View) {
         clusterInputKeys = root.findViewById(R.id.projectionClusterKeys)
@@ -960,21 +1258,6 @@ class ProjectionFragment : Fragment() {
 
     // ── Cluster window presets + aspect lock ─────────────────────────────────────────
 
-    private fun wirePresetGroup() {
-        val g = presetGroup ?: return
-        g.addOnButtonCheckedListener { _, checkedId, isChecked ->
-            if (!isChecked || suppressPresetListener) return@addOnButtonCheckedListener
-            val which = when (checkedId) {
-                R.id.projectionPresetLeft -> ProjectionBoundsGeometry.PRESET_LEFT
-                R.id.projectionPresetRight -> ProjectionBoundsGeometry.PRESET_RIGHT
-                R.id.projectionPresetCenter -> ProjectionBoundsGeometry.PRESET_CENTER
-                else -> ProjectionBoundsGeometry.PRESET_FULL
-            }
-            // applyPreset commits the new preview rect (fires onWindowChanged → reproject + persist).
-            bounds?.applyPreset(which)
-        }
-    }
-
     private fun wireAspectLockSwitch() {
         val sw = aspectLockSwitch ?: return
         val locked = context?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -1208,6 +1491,8 @@ class ProjectionFragment : Fragment() {
         val standard = if (aaosHostedMap) View.GONE else View.VISIBLE
         view?.findViewById<View>(R.id.projectionEditableWindowCard)?.visibility = standard
         view?.findViewById<View>(R.id.projectionStandardSettings)?.visibility = standard
+        view?.findViewById<View>(R.id.projectionStandardSettingsCard)?.visibility = standard
+        view?.findViewById<View>(R.id.projectionTransportSettings)?.visibility = standard
         btnAdjust?.visibility = standard
         clusterInputKeys?.visibility = standard
         diLink5ProjectionControls?.visibility = if (diLink5) View.VISIBLE else View.GONE
@@ -1262,14 +1547,13 @@ class ProjectionFragment : Fragment() {
     }
 
     private fun onAutoStartEnabled() {
-        // Need a package to auto-cast. Prefer the current spinner selection; if none, refuse.
-        val idx = spinnerApps?.selectedItemPosition ?: -1
-        if (idx < 0 || idx >= appPackages.size) {
+        // Need a package to auto-cast: the app on the cluster, else the last app tapped.
+        val pkg = castPackage.takeIf { casting && it.isNotEmpty() } ?: selectedPackage()
+        if (pkg == null) {
             setAutoStartChecked(false)
             notifyToast(getString(R.string.projection_autostart_need_app), AppToast.Kind.WARNING)
             return
         }
-        val pkg = appPackages[idx]
         // Mutual exclusion: if RoadSense map auto-project is on, confirm handing over the
         // cluster (it can only show one thing on power-up).
         if (roadSenseAutoProject) {
@@ -1426,24 +1710,16 @@ class ProjectionFragment : Fragment() {
             val apps = fetchApps(pm, res, iconPx)
             postMain {
                 appPackages.clear(); appPackages.addAll(apps.map { it.pkg })
-                val ctx = context ?: return@postMain
-                // An empty list still names the field, without adding a selectable package.
-                val rows = apps.ifEmpty {
-                    listOf(AppEntry(getString(R.string.projection_pick_app), "", null))
-                }
-                spinnerApps?.adapter = AppAdapter(ctx, rows)
-                // Setting a fresh adapter resets the spinner to position 0 — restore the
-                // user's last pick (by PACKAGE, not index: the list can reorder/shrink when
-                // apps are (un)installed between loads). Without this, every tab switch /
-                // resume snapped the picker back to the first app in the daemon's list.
-                // Arm the echo filter with the position we settle at so the listener can
-                // tell this programmatic change apart from a real user pick.
-                pendingSpinnerEcho = if (appPackages.isEmpty()) -1 else restoreSpinnerSelection()
-                // Now that the spinner selection is settled, restore THAT app's saved window (the
-                // one-shot restore in onViewCreated ran before this async load populated the list,
-                // so it always no-op'd — this is where the per-app geometry actually lands).
-                // Resolved explicitly rather than via geometryPackage(), which reports the app the
-                // box is ALREADY bound to and would therefore never follow the settled selection.
+                appEntries.clear(); appEntries.addAll(apps)
+                // Restore the user's last pick by PACKAGE (the list can reorder/shrink when apps
+                // are (un)installed between loads), then show the tiles.
+                selectedPkg = restorePickedPackage()
+                renderAppTiles()
+                // Now that the pick is settled, restore THAT app's saved window (the one-shot
+                // restore in onViewCreated ran before this async load populated the list, so it
+                // always no-op'd — this is where the per-app geometry actually lands). Resolved
+                // explicitly rather than via geometryPackage(), which reports the app the box is
+                // ALREADY bound to and would therefore never follow the settled selection.
                 val cast = castPackage
                 restoreWindowFor(if (casting && cast.isNotEmpty()) cast else selectedPackage())
                 setBusy(false); updateButtons()
@@ -1451,25 +1727,24 @@ class ProjectionFragment : Fragment() {
         }
     }
 
-    /** Re-select the persisted last-picked package in the (just rebuilt) spinner. Returns
-     *  the position the spinner settles at — the saved app's index, or 0 (the adapter-reset
-     *  default) when nothing is saved / the saved app is gone from the list (uninstalled). */
-    private fun restoreSpinnerSelection(): Int {
+    /** The persisted last-picked package, or null when nothing is saved or that app is gone
+     *  from the list (uninstalled). */
+    private fun restorePickedPackage(): String? {
         val saved = context?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             ?.getString(K_PICKED_PKG, null)
-        val idx = if (saved != null) appPackages.indexOf(saved) else -1
-        if (idx > 0) spinnerApps?.setSelection(idx)
-        return if (idx >= 0) idx else 0
+        return saved?.takeIf { it in appPackages }
     }
 
-    /** Remember the user's spinner pick so the selection survives tab switches, screen
-     *  re-entry and app restarts (loadApps rebuilds the adapter each resume). */
-    private fun persistSpinnerSelection(pkg: String) {
+    /** Remember the user's pick so it survives tab switches, screen re-entry and app restarts. */
+    private fun persistPickedPackage(pkg: String) {
         context?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             ?.edit()?.putString(K_PICKED_PKG, pkg)?.apply()
     }
 
     private fun onCastClicked() {
+        // Any early return below means no cast starts, so a Resize waiting on it is dropped.
+        val pkg = selectedPackage()
+        if (pkg == null || layoutActive || layoutBusy || diLink5ModeRequired) pendingAdjustPackage = null
         if (layoutActive || layoutBusy) {
             notifyToast(getString(R.string.cluster_layouts_stop_first), AppToast.Kind.ERROR)
             return
@@ -1481,22 +1756,22 @@ class ProjectionFragment : Fragment() {
             )
             return
         }
-        val idx = spinnerApps?.selectedItemPosition ?: -1
-        if (idx < 0 || idx >= appPackages.size) return
-        val pkg = appPackages[idx]
+        if (pkg == null) return
         setBusy(true)
         // A cast can take a minute to verify on DI5; one request at a time.
         castInFlight = true
         updateButtons()
         submitIo {
             val result = postCast(pkg)
-            val status = if (result.success) fetchStatus() else null
-            casting = result.success
+            // After a failed SWITCH the previous app can still be on the cluster, so read the
+            // daemon either way; only assume idle when that read fails too.
+            val status = fetchStatus()
+            casting = result.success || (status?.casting ?: false)
             // Bind the box to this app immediately, rather than waiting for the next status poll
             // (up to STATUS_POLL_MS away): between the two, `casting` is already true, so a drag or
-            // preset would otherwise be keyed to the spinner pick instead of the cast target.
+            // preset would otherwise be keyed to the picked app instead of the cast target.
             // A failed cast leaves it empty so nothing is attributed to a cast that never started.
-            castPackage = if (result.success) pkg else ""
+            castPackage = if (result.success) pkg else status?.castPackage.orEmpty()
             postMain {
                 castInFlight = false
                 setBusy(false); updateButtons()
@@ -1504,6 +1779,13 @@ class ProjectionFragment : Fragment() {
                 // applyStatus rebinds only when castPackage changes, and it was just set above,
                 // so a box still bound to a previously browsed app must be rebound here.
                 if (result.success && boxPackage != pkg) restoreWindowFor(pkg)
+                // "Resize" from the menu of an app that was not live: open the frame now.
+                if (pendingAdjustPackage == pkg) {
+                    pendingAdjustPackage = null
+                    if (result.success && !adjusting && !aaosHostedMap && !layoutActive && !layoutBusy) {
+                        toggleAdjust()
+                    }
+                }
                 if (!result.success) {
                     // Distinguish "app no longer installed" from a generic failure so the
                     // user knows to pick another (and refresh the picker to drop it).
@@ -1517,6 +1799,8 @@ class ProjectionFragment : Fragment() {
                         }
                         "dilink5_mode_required" -> {
                             diLink5ModeRequired = true
+                            if (!casting) setIdleNotice(
+                                getString(R.string.projection_dilink5_mode_required), fromMode = true)
                             updateButtons()
                             notifyToast(
                                 getString(R.string.projection_dilink5_mode_required),
@@ -1530,6 +1814,7 @@ class ProjectionFragment : Fragment() {
                             setStatus(message)
                             setStatusDot(R.drawable.status_dot_offline)
                             notifyToast(message, AppToast.Kind.ERROR)
+                            if (!casting) setIdleNotice(message)
                         }
                         else -> {
                             notifyToast(
@@ -1692,9 +1977,11 @@ class ProjectionFragment : Fragment() {
                 setStatus(message)
                 setStatusDot(R.drawable.status_dot_offline)
                 notifyStickyError(message)
+                if (idleNoticeMessage != message) setIdleNotice(message, fromMode = true)
                 applyBoundsMode()
                 return
             }
+            if (idleNoticeFromMode) setIdleNotice(null)
             renderMirrorState(MODE_STOPPED)
             return
         }
@@ -1815,7 +2102,7 @@ class ProjectionFragment : Fragment() {
 
     /** Idle hint, status pill and progress bar over the stage, from the current state. */
     private fun refreshStageOverlay() {
-        emptyState?.visibility = if (casting) View.GONE else View.VISIBLE
+        emptyState?.visibility = if (casting || castInFlight) View.GONE else View.VISIBLE
         // While idle the hint already says what a neutral pill would.
         hud?.visibility =
             if (!casting && statusDotRes == R.drawable.status_dot_neutral) View.GONE else View.VISIBLE
@@ -1902,22 +2189,21 @@ class ProjectionFragment : Fragment() {
         // lock follow the same rule.
         val canResize = casting && !aaosHostedMap && !layoutActive && !layoutBusy
         btnAdjust?.isEnabled = canResize
-        presetGroup?.isEnabled = canResize
         aspectLockSwitch?.isEnabled = canResize
     }
 
     // ── UI helpers ─────────────────────────────────────────────────────────────────
 
     private fun updateButtons() {
-        btnCast?.isEnabled =
-            !casting && !diLink5ModeRequired && !layoutActive && !layoutBusy
-                && appPackages.isNotEmpty() && !castInFlight && !sealion7HdmiWriteInFlight
+        // Casting starts from a tile; the dock (with Stop) only shows while something is live.
         sealion7HdmiSwitch?.isEnabled = !casting && !layoutBusy && !castInFlight && !sealion7HdmiWriteInFlight
         btnStop?.isEnabled = casting || layoutBusy
-        // One slot: Cast while idle, Stop while casting.
-        btnCast?.visibility = if (casting || layoutBusy) View.GONE else View.VISIBLE
-        btnStop?.visibility = if (casting || layoutBusy) View.VISIBLE else View.GONE
         if (!casting || layoutActive || layoutBusy) btnAdjust?.isEnabled = false
+        // Idle tiles read as disabled while DiLink 5 mode is still required; a tap still lands
+        // in onCastClicked, which explains why with the projection_dilink5_mode_required toast.
+        val idleCastAllowed = !casting && !diLink5ModeRequired
+        appPicker?.alpha = if (casting || idleCastAllowed) 1f else DISABLED_ALPHA
+        renderLiveState()
         refreshFullscreenButton()
         refreshStageOverlay()
     }
@@ -2080,15 +2366,15 @@ class ProjectionFragment : Fragment() {
 
     /** Persist the CURRENT window rect (cluster px) for the selected package, normalized. */
     /** The package the box's geometry belongs to: the LIVE CAST app while casting, else the
-     *  spinner pick (so pre-cast adjustments are still remembered for the app about to be cast).
-     *  Using the spinner while a cast is live is the bug this exists to prevent — the user can
+     *  picked app (so pre-cast adjustments are still remembered for the app about to be cast).
+     *  Using the pick while a cast is live is the bug this exists to prevent — the user can
      *  browse the picker mid-cast, and the box must keep describing the app on the cluster. */
     private fun geometryPackage(): String? {
         // The box's rect is only ever set by restoreWindowFor, which records the app it bound to.
-        // Trust THAT over any live inference: while a cast runs the spinner can be browsed freely
+        // Trust THAT over any live inference: while a cast runs other tiles can be browsed freely
         // (the pick is deliberately not applied to the box), and after a Stop `casting`/`castPackage`
         // are cleared while the box still shows the stopped app's rect — so inferring the key from
-        // the spinner would write app X's geometry under app Z, and the daemon store every headless
+        // the pick would write app X's geometry under app Z, and the daemon store every headless
         // cast reads would then open Z at X's scale on ACC-on / key-mapping / automation casts.
         val bound = boxPackage
         if (bound.isNotEmpty()) return bound
@@ -2144,17 +2430,14 @@ class ProjectionFragment : Fragment() {
         )
     }
 
-    private fun selectedPackage(): String? {
-        val idx = spinnerApps?.selectedItemPosition ?: -1
-        return if (idx in appPackages.indices) appPackages[idx] else null
-    }
+    private fun selectedPackage(): String? = selectedPkg?.takeIf { it in appPackages }
 
     private fun winKey(pkg: String, axis: String) = "win_${pkg}_$axis"
 
     // ── Daemon HTTP (all off-main-thread) ───────────────────────────────────────────
 
-    private fun fetchApps(pm: PackageManager?, res: Resources, iconPx: Int): List<AppEntry> {
-        val apps = ArrayList<AppEntry>()
+    private fun fetchApps(pm: PackageManager?, res: Resources, iconPx: Int): List<ProjectionAppTile> {
+        val apps = ArrayList<ProjectionAppTile>()
         try {
             val body = httpGet("/api/vehicle/cluster-apps") ?: return apps
             val arr = JSONObject(body).optJSONArray("apps") ?: return apps
@@ -2162,13 +2445,13 @@ class ProjectionFragment : Fragment() {
                 val o = arr.optJSONObject(i) ?: continue
                 val pkg = o.optString("package", "")
                 if (pkg.isEmpty()) continue
-                apps.add(AppEntry(o.optString("label", pkg), pkg, appIcon(pm, res, iconPx, pkg)))
+                apps.add(ProjectionAppTile(o.optString("label", pkg), pkg, appIcon(pm, res, iconPx, pkg)))
             }
         } catch (_: Throwable) {}
         return apps
     }
 
-    /** The app's launcher icon at picker size, cached across reloads. Runs on [io] only. */
+    /** The app's launcher icon at tile size, cached across reloads. Runs on [io] only. */
     private fun appIcon(pm: PackageManager?, res: Resources, sizePx: Int, pkg: String): Drawable? {
         appIcons[pkg]?.let { return it }
         val source = try { pm?.getApplicationIcon(pkg) } catch (_: Throwable) { null } ?: return null
@@ -2181,39 +2464,6 @@ class ProjectionFragment : Fragment() {
         } catch (_: Throwable) { source }
         appIcons[pkg] = icon
         return icon
-    }
-
-    private class AppEntry(val label: String, val pkg: String, val icon: Drawable?) {
-        override fun toString() = label
-    }
-
-    /** Picker rows with the app's icon; the collapsed field and the dropdown share one bind. */
-    private class AppAdapter(context: Context, private val entries: List<AppEntry>) :
-        ArrayAdapter<AppEntry>(context, R.layout.item_projection_spinner, entries) {
-
-        private val inflater = LayoutInflater.from(context)
-
-        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View =
-            bind(convertView ?: inflater.inflate(R.layout.item_projection_spinner, parent, false),
-                position)
-
-        override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View =
-            bind(convertView ?: inflater.inflate(R.layout.item_projection_app, parent, false),
-                position)
-
-        private fun bind(row: View, position: Int): View {
-            val entry = entries.getOrNull(position) ?: return row
-            row.findViewById<TextView>(R.id.projectionAppLabel)?.text = entry.label
-            row.findViewById<ImageView>(R.id.projectionAppIcon)?.let { iv ->
-                iv.visibility = if (entry.pkg.isEmpty()) View.GONE else View.VISIBLE
-                // A Drawable keeps one set of bounds, so each row draws its own copy.
-                val icon = entry.icon?.constantState?.newDrawable(iv.resources)?.mutate()
-                    ?: entry.icon
-                if (icon != null) iv.setImageDrawable(icon)
-                else iv.setImageResource(android.R.drawable.sym_def_app_icon)
-            }
-            return row
-        }
     }
 
     private class Status(
@@ -2514,13 +2764,24 @@ class ProjectionFragment : Fragment() {
         private const val THEATER_PADDING_DP = 12f
         private const val HUD_HOLD_MS = 4000L
         private const val HUD_FADE_MS = 300L
-        // The dropdown row's icon size (item_projection_app).
-        private const val APP_ICON_DP = 32f
+        // The idle tile's icon size (item_projection_app_tile); the strip draws it smaller.
+        private const val APP_ICON_DP = 48f
+        // Narrowest tile the idle grid allows before it drops a column.
+        private const val TILE_MIN_DP = 132f
+        // A saved window counts as a preset when every edge is within 2% of it.
+        private const val PRESET_MATCH = 0.02f
+        private const val DISABLED_ALPHA = 0.38f
+        private val PRESETS = intArrayOf(
+            ProjectionBoundsGeometry.PRESET_FULL, ProjectionBoundsGeometry.PRESET_LEFT,
+            ProjectionBoundsGeometry.PRESET_RIGHT, ProjectionBoundsGeometry.PRESET_CENTER,
+        )
 
         private const val PREFS = "projection_prefs"
         private const val K_MODE = "scale_mode"
         private const val K_ASPECT_LOCK = "aspect_lock"
         private const val K_PICKED_PKG = "picked_pkg"
+        // Favorite apps, newline-separated package names in the order they were added.
+        private const val K_FAVORITES = "favorite_pkgs"
     }
 }
 
