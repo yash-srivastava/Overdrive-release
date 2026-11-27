@@ -272,7 +272,6 @@ public final class ChargingDetector {
     private long enginePowerAtMs = 0L;
     private long enginePowerAtElapsedMs = 0L;
     private double lastEnginePowerObservedKw = Double.NaN;
-    private long enginePowerChangedAtMs = 0L;
     private long enginePowerChangedAtElapsedMs = 0L;
     private double externalChargingPowerKw = Double.NaN;
     private double chargingPowerKw = Double.NaN;
@@ -502,7 +501,6 @@ public final class ChargingDetector {
             invalidateAccDependentSignals();
             externalChargingPowerKw = Double.NaN;
             chargingPowerKw = Double.NaN;
-            enginePowerChangedAtMs = 0L;
             enginePowerChangedAtElapsedMs = 0L;
             lastCountedEngineChangeSequence = engineChangeSequence;
             inferenceHysteresis = 0;
@@ -586,9 +584,9 @@ public final class ChargingDetector {
                 } else if (prev == null) {
                     return;
                 } else if (prev.doubleValue() != raw) {
-                    long weakSequence = recordWeakRawMovementLocked(source, wallNow, elapsedNow);
+                    long weakSequence = recordWeakRawMovementLocked(source, elapsedNow);
                     if (shouldPromoteRawMovementLocked(source, prev, raw, elapsedNow)) {
-                        promoteRawMovementLocked(source, wallNow, elapsedNow, weakSequence);
+                        promoteRawMovementLocked(source, elapsedNow, weakSequence);
                         observedActivity = true;
                     }
                     steadyRawSince.remove(source);
@@ -646,9 +644,9 @@ public final class ChargingDetector {
                                 // One consumed corroboration produces one raw observation sequence.
                                 // Recomputes and repeated getter reads cannot spend it again.
                                 long weakSequence = recordWeakRawMovementLocked(
-                                        source, wallNow, elapsedNow);
+                                        source, elapsedNow);
                                 promoteRawMovementLocked(
-                                        source, wallNow, elapsedNow, weakSequence);
+                                        source, elapsedNow, weakSequence);
                                 observedActivity = true;
                             }
                         }
@@ -751,15 +749,11 @@ public final class ChargingDetector {
     }
 
     private void clearRawSignalActivityLocked() {
-            lastRawSignalMoveMs = 0;
             lastRawSignalMoveElapsedMs = 0;
-            rawMoveWallBySource.clear();
             rawMoveElapsedBySource.clear();
             lastCountedRawSequence = rawObservationSequence;
-            weakRawMoveWallBySource.clear();
             weakRawMoveElapsedBySource.clear();
             weakRawMoveSequenceBySource.clear();
-            lastWeakRawSignalMoveMs = 0L;
             lastWeakRawSignalMoveElapsedMs = 0L;
             lastPromotedWeakRawSequence = weakRawObservationSequence;
             lastRawCorroboratingSocRiseSequence = socRiseSequence;
@@ -781,31 +775,9 @@ public final class ChargingDetector {
         }
     }
 
-    /** True when a raw charging channel changed after the supplied wall-clock boundary. */
-    public boolean hasRawChargingMovementSince(long sinceMs) {
-        synchronized (rawSignalLock) {
-            if (sinceMs <= 0) return false;
-            for (Long movedAt : rawMoveWallBySource.values()) {
-                if (movedAt != null && movedAt >= sinceMs) return true;
-            }
-            return false;
-        }
-    }
-
-    /** Wall-clock time of the newest promoted movement for one source, or 0. */
-    public long getRawChargingMovementAtMs(String source) {
-        if (source == null) return 0L;
-        synchronized (rawSignalLock) {
-            Long movedAt = rawMoveWallBySource.get(source);
-            return movedAt != null ? movedAt : 0L;
-        }
-    }
-
-    private void recordRawMovementLocked(String source, long wallNow, long elapsedNow) {
-        rawMoveWallBySource.put(source, wallNow);
+    private void recordRawMovementLocked(String source, long elapsedNow) {
         rawMoveElapsedBySource.put(source, elapsedNow);
         if (elapsedNow >= lastRawSignalMoveElapsedMs) {
-            lastRawSignalMoveMs = wallNow;
             lastRawSignalMoveElapsedMs = elapsedNow;
         }
     }
@@ -815,21 +787,19 @@ public final class ChargingDetector {
      * L3 evidence: stopped-but-plugged rate accessors can jitter, but waking one collection cycle lets
      * the independent pack-flow channel confirm or reject that movement.
      */
-    private long recordWeakRawMovementLocked(String source, long wallNow, long elapsedNow) {
+    private long recordWeakRawMovementLocked(String source, long elapsedNow) {
         long sequence = ++weakRawObservationSequence;
-        weakRawMoveWallBySource.put(source, wallNow);
         weakRawMoveElapsedBySource.put(source, elapsedNow);
         weakRawMoveSequenceBySource.put(source, sequence);
         if (elapsedNow >= lastWeakRawSignalMoveElapsedMs) {
-            lastWeakRawSignalMoveMs = wallNow;
             lastWeakRawSignalMoveElapsedMs = elapsedNow;
         }
         return sequence;
     }
 
-    private void promoteRawMovementLocked(String source, long wallNow, long elapsedNow,
+    private void promoteRawMovementLocked(String source, long elapsedNow,
                                           long weakSequence) {
-        recordRawMovementLocked(source, wallNow, elapsedNow);
+        recordRawMovementLocked(source, elapsedNow);
         rawObservationSequence++;
         if (weakSequence > lastPromotedWeakRawSequence) {
             lastPromotedWeakRawSequence = weakSequence;
@@ -921,32 +891,22 @@ public final class ChargingDetector {
     }
 
     private void removeRawMovementLocked(String source) {
-        rawMoveWallBySource.remove(source);
         rawMoveElapsedBySource.remove(source);
-        lastRawSignalMoveMs = 0L;
         lastRawSignalMoveElapsedMs = 0L;
-        for (java.util.Map.Entry<String, Long> entry : rawMoveElapsedBySource.entrySet()) {
-            Long elapsed = entry.getValue();
+        for (Long elapsed : rawMoveElapsedBySource.values()) {
             if (elapsed != null && elapsed >= lastRawSignalMoveElapsedMs) {
                 lastRawSignalMoveElapsedMs = elapsed;
-                Long wall = rawMoveWallBySource.get(entry.getKey());
-                lastRawSignalMoveMs = wall != null ? wall : 0L;
             }
         }
     }
 
     private void removeWeakRawMovementLocked(String source) {
-        weakRawMoveWallBySource.remove(source);
         weakRawMoveElapsedBySource.remove(source);
         weakRawMoveSequenceBySource.remove(source);
-        lastWeakRawSignalMoveMs = 0L;
         lastWeakRawSignalMoveElapsedMs = 0L;
-        for (java.util.Map.Entry<String, Long> entry : weakRawMoveElapsedBySource.entrySet()) {
-            Long elapsed = entry.getValue();
+        for (Long elapsed : weakRawMoveElapsedBySource.values()) {
             if (elapsed != null && elapsed >= lastWeakRawSignalMoveElapsedMs) {
                 lastWeakRawSignalMoveElapsedMs = elapsed;
-                Long wall = weakRawMoveWallBySource.get(entry.getKey());
-                lastWeakRawSignalMoveMs = wall != null ? wall : 0L;
             }
         }
     }
@@ -958,28 +918,15 @@ public final class ChargingDetector {
         }
     }
 
-    /** True when the independent pack-flow value itself changed after the supplied boundary. */
-    public boolean hasEnginePowerChangedSince(long sinceMs) {
-        synchronized (lock) {
-            return sinceMs > 0 && enginePowerChangedAtMs >= sinceMs;
-        }
-    }
-
     private final Object rawSignalLock = new Object();
     private final java.util.HashMap<String, Double> lastRawSignal = new java.util.HashMap<>();
-    private final java.util.HashMap<String, Long> rawMoveWallBySource =
-            new java.util.HashMap<>();
     private final java.util.HashMap<String, Long> rawMoveElapsedBySource =
-            new java.util.HashMap<>();
-    private final java.util.HashMap<String, Long> weakRawMoveWallBySource =
             new java.util.HashMap<>();
     private final java.util.HashMap<String, Long> weakRawMoveElapsedBySource =
             new java.util.HashMap<>();
     private final java.util.HashMap<String, Long> weakRawMoveSequenceBySource =
             new java.util.HashMap<>();
-    private long lastRawSignalMoveMs = 0;
     private long lastRawSignalMoveElapsedMs = 0;
-    private long lastWeakRawSignalMoveMs = 0;
     private long lastWeakRawSignalMoveElapsedMs = 0;
     private long rawObservationSequence = 0L;
     private long lastCountedRawSequence = 0L;
@@ -1270,7 +1217,7 @@ public final class ChargingDetector {
         if (Double.isNaN(vd.enginePowerKw)) return;
         if (Double.isNaN(lastEnginePowerObservedKw)
                 || Math.abs(vd.enginePowerKw - lastEnginePowerObservedKw) >= 0.05) {
-            enginePowerChangedAtMs = vd.enginePowerAtMs > 0
+            long enginePowerChangedAtMs = vd.enginePowerAtMs > 0
                     ? Math.min(wallNow, vd.enginePowerAtMs) : wallNow;
             enginePowerChangedAtElapsedMs = sourceWallTimeToElapsed(
                     enginePowerChangedAtMs, wallNow, elapsedNow);
@@ -1322,9 +1269,7 @@ public final class ChargingDetector {
                 return false;
             }
             if (!consumeIndependentCorroborationLocked(elapsedNow, movedElapsed)) return false;
-            Long movedWallValue = weakRawMoveWallBySource.get(newestSource);
-            long movedWall = movedWallValue != null ? movedWallValue : System.currentTimeMillis();
-            promoteRawMovementLocked(newestSource, movedWall, movedElapsed, newestSequence);
+            promoteRawMovementLocked(newestSource, movedElapsed, newestSequence);
             return true;
         }
     }
@@ -1471,7 +1416,6 @@ public final class ChargingDetector {
         terminalBarrierSinceElapsedMs = elapsedNow;
         activeSessionEpoch = 0L;
         clearPendingTerminalCallbackLocked();
-        enginePowerChangedAtMs = 0L;
         enginePowerChangedAtElapsedMs = 0L;
         clearCompletedSessionEvidence();
     }
@@ -1593,7 +1537,6 @@ public final class ChargingDetector {
 
     private void clearEnginePowerChangeBaselineLocked() {
         lastEnginePowerObservedKw = Double.NaN;
-        enginePowerChangedAtMs = 0L;
         enginePowerChangedAtElapsedMs = 0L;
         lastCountedEngineChangeSequence = engineChangeSequence;
     }

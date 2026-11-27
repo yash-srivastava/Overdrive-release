@@ -414,12 +414,6 @@ public class SocHistoryDatabase {
         }
     }
 
-    /**
-     * Clear/reset transaction whose commit result could not yet be read back. All writes remain fenced
-     * until either the replacement row or the pre-transaction row is proven durable.
-     */
-    private volatile ActiveChargingReplacement pendingActiveReplacement = null;
-    private volatile long pendingActiveReplacementPreviousStart = 0L;
     /** Durable clear/reset intent; non-null fences all lifecycle writers until H2 is reconciled. */
     private volatile ChargingMaintenanceIntent pendingChargingMaintenanceIntent = null;
     /**
@@ -1506,7 +1500,7 @@ public class SocHistoryDatabase {
     
     private boolean trackChargingSession(boolean isCharging, double soc, double power, long now) {
         if (!isInitialized || connection == null) return false;
-        if (!reconcilePendingActiveChargingReplacement()) return false;
+        if (!reconcilePendingChargingMaintenanceIntent(null)) return false;
 
         // Re-enable can happen before a failed disable-time close retries. The old row still belongs
         // only to the enabled segment that ended at optOutBoundaryMs; close that frozen segment before
@@ -3146,7 +3140,7 @@ public class SocHistoryDatabase {
     }
 
     public synchronized boolean capturePendingChargingClose(boolean resumeBlocked) {
-        if (!reconcilePendingActiveChargingReplacement()) return false;
+        if (!reconcilePendingChargingMaintenanceIntent(null)) return false;
         if (!wasCharging || chargingStartTime <= 0) {
             return !chargingLifecycleJournalDirty || persistChargingLifecycleJournal();
         }
@@ -3354,8 +3348,7 @@ public class SocHistoryDatabase {
 
     /** True when startup must reconcile journal-restored lifecycle work even with no ON/OFF edge. */
     public synchronized boolean hasPendingChargingLifecycle() {
-        return pendingActiveReplacement != null
-                || pendingChargingMaintenanceIntent != null
+        return pendingChargingMaintenanceIntent != null
                 || wasCharging || optOutClosePending || pendingCloseSessionStart > 0L
                 || !deferredPhysicalGenerations.isEmpty();
     }
@@ -3467,7 +3460,7 @@ public class SocHistoryDatabase {
 
     /** Fence the old row and queue a distinct physical charge while its close retries. */
     public synchronized boolean deferPhysicalChargingStart() {
-        if (!reconcilePendingActiveChargingReplacement()) return false;
+        if (!reconcilePendingChargingMaintenanceIntent(null)) return false;
         if (!wasCharging || chargingStartTime <= 0) return false;
         capturePendingChargingClose();
         DeferredChargingGeneration current = currentDeferredPhysicalGeneration();
@@ -3630,7 +3623,7 @@ public class SocHistoryDatabase {
     }
 
     public synchronized boolean deferPhysicalChargingStop(boolean resumeBlocked) {
-        if (!reconcilePendingActiveChargingReplacement()) return false;
+        if (!reconcilePendingChargingMaintenanceIntent(null)) return false;
         return endDeferredPhysicalGeneration(currentDeferredPhysicalGeneration(),
                 System.currentTimeMillis(), currentSocForContinuation(), resumeBlocked);
     }
@@ -3804,7 +3797,7 @@ public class SocHistoryDatabase {
                 || !isValidChargingSamplePower(powerKw)) {
             return false;
         }
-        if (!reconcilePendingActiveChargingReplacement()) return false;
+        if (!reconcilePendingChargingMaintenanceIntent(null)) return false;
         DeferredChargingGeneration generation = currentDeferredPhysicalGeneration();
         if (generation == null) return false;
         if (powerKw > 0 && generation.isEnded() && isAdmittedTaperTail()) {
@@ -3910,12 +3903,6 @@ public class SocHistoryDatabase {
             pendingCloseTempAvg = -999;
         }
         sessionInputsFenced = !deferredPhysicalGenerations.isEmpty();
-        persistChargingLifecycleJournal();
-    }
-
-    private void discardDeferredPhysicalSessions() {
-        deferredPhysicalGenerations.clear();
-        sessionInputsFenced = false;
         persistChargingLifecycleJournal();
     }
 
@@ -5653,7 +5640,7 @@ public class SocHistoryDatabase {
             }
             return journalPhysicalChargingStartWithoutDatabase();
         }
-        if (!reconcilePendingActiveChargingReplacement()) return false;
+        if (!reconcilePendingChargingMaintenanceIntent(null)) return false;
         if (!isCharging && expectedCloseStart > 0L) {
             expectedCloseStart = resolveChargingCloseTargetStart(expectedCloseStart);
         }
@@ -5804,9 +5791,8 @@ public class SocHistoryDatabase {
         }
         boolean databaseAvailable = isInitialized && connection != null;
         if (databaseAvailable) {
-            if (!reconcilePendingActiveChargingReplacement()) return;
-        } else if (pendingChargingMaintenanceIntent != null
-                || pendingActiveReplacement != null) {
+            if (!reconcilePendingChargingMaintenanceIntent(null)) return;
+        } else if (pendingChargingMaintenanceIntent != null) {
             return;
         }
         // PROVISIONAL vs COMMITTED. An external source may be fed here BEFORE the classifier has ruled,
@@ -6053,7 +6039,7 @@ public class SocHistoryDatabase {
      */
     public synchronized boolean finalizeStaleOpenSessions(boolean forceRecent) {
         if (!isInitialized || connection == null) return false;
-        if (!reconcilePendingActiveChargingReplacement()) return false;
+        if (!reconcilePendingChargingMaintenanceIntent(null)) return false;
         boolean allCommitted = true;
         try {
             java.util.List<Long> staleStarts = new java.util.ArrayList<>();
@@ -8635,18 +8621,6 @@ public class SocHistoryDatabase {
         }
     }
 
-    private String getCurrencySymbol() {
-        try {
-            org.json.JSONObject cfg = com.overdrive.app.config.UnifiedConfigManager.loadConfig();
-            org.json.JSONObject trips = cfg != null ? cfg.optJSONObject("tripAnalytics") : null;
-            if (trips != null) {
-                String c = trips.optString("currency", "");
-                if (c != null && !c.isEmpty()) return c;
-            }
-        } catch (Exception ignored) {}
-        return "";
-    }
-
     @FunctionalInterface
     private interface SqlTransactionWork {
         void run() throws Exception;
@@ -8866,7 +8840,7 @@ public class SocHistoryDatabase {
                                       double soc, double temp, double tempHigh, double tempLow) {
         if (!isInitialized || connection == null || sessionStartTime <= 0) return false;
         if (!isValidChargingSamplePower(powerKw)) return false;
-        if (!reconcilePendingActiveChargingReplacement()) return false;
+        if (!reconcilePendingChargingMaintenanceIntent(null)) return false;
         if (!chargingAnalyticsEnabled || optOutClosePending) return false;
         // A clear/reset can atomically replace the active row while a sampler is waiting on this
         // monitor with the old start key. Reject that stale write instead of creating an orphan sample.
@@ -9001,7 +8975,7 @@ public class SocHistoryDatabase {
 
     /** Start time of the currently-open charging session, or -1 if none. */
     public synchronized long getOpenChargingSessionStart() {
-        if (!reconcilePendingActiveChargingReplacement()) return -1L;
+        if (!reconcilePendingChargingMaintenanceIntent(null)) return -1L;
         return wasCharging ? chargingStartTime : -1;
     }
 
@@ -9015,7 +8989,7 @@ public class SocHistoryDatabase {
      * evidence has not proved either charger type.
      */
     public synchronized int getOpenChargingSessionTypeVerdict() {
-        if (!reconcilePendingActiveChargingReplacement()
+        if (!reconcilePendingChargingMaintenanceIntent(null)
                 || !wasCharging || chargingStartTime <= 0L) {
             return ChargingTypeClassifier.UNKNOWN;
         }
@@ -9024,7 +8998,7 @@ public class SocHistoryDatabase {
 
     /** Durable H2 truth used by manager edge postcondition checks. */
     public synchronized boolean hasOpenChargingSessionRow() throws java.sql.SQLException {
-        if (!reconcilePendingActiveChargingReplacement()) {
+        if (!reconcilePendingChargingMaintenanceIntent(null)) {
             throw new java.sql.SQLException(
                     "active charging replacement identity is unresolved");
         }
@@ -9041,7 +9015,7 @@ public class SocHistoryDatabase {
 
     /** Exact row frozen for the next close retry, or the current open row when not yet frozen. */
     public synchronized long getChargingCloseTargetStart() {
-        if (!reconcilePendingActiveChargingReplacement()) return -1L;
+        if (!reconcilePendingChargingMaintenanceIntent(null)) return -1L;
         if (pendingCloseSessionStart > 0L) return pendingCloseSessionStart;
         if (optOutClosePending && chargingStartTime > 0L) return chargingStartTime;
         return wasCharging ? chargingStartTime : -1L;
@@ -9049,7 +9023,7 @@ public class SocHistoryDatabase {
 
     /** Resolve a captured close key through clear/reset replacements of the same physical boundary. */
     public synchronized long remapChargingCloseTargetStart(long capturedStart) {
-        if (!reconcilePendingActiveChargingReplacement()) return -1L;
+        if (!reconcilePendingChargingMaintenanceIntent(null)) return -1L;
         return resolveChargingCloseTargetStart(capturedStart);
     }
 
@@ -9083,7 +9057,7 @@ public class SocHistoryDatabase {
      */
     public synchronized boolean isChargingSessionCloseSatisfied(long sessionStart) {
         if (connection == null || sessionStart <= 0L) return false;
-        if (!reconcilePendingActiveChargingReplacement()) return false;
+        if (!reconcilePendingChargingMaintenanceIntent(null)) return false;
         sessionStart = resolveChargingCloseTargetStart(sessionStart);
         try {
             return durableChargingRowState(sessionStart) != 1;
@@ -9474,74 +9448,7 @@ public class SocHistoryDatabase {
         persistChargingLifecycleJournal();
     }
 
-    private ActiveChargingReplacement reconcileActiveChargingReplacement(
-            ActiveChargingReplacement expected, long previousStart,
-            Exception transactionFailure) {
-        if (expected == null) return null;
-        ActiveChargingReplacement durable = readDurableActiveChargingReplacement(expected);
-        if (durable != null) {
-            pendingActiveReplacement = null;
-            pendingActiveReplacementPreviousStart = 0L;
-            return durable;
-        }
-        Boolean oldStillOpen = isDurablyOpenSession(previousStart);
-        if (Boolean.TRUE.equals(oldStillOpen)) {
-            pendingActiveReplacement = null;
-            pendingActiveReplacementPreviousStart = 0L;
-            return null; // rollback is durable; the pre-transaction in-memory key is still correct
-        }
-        if (isSqlFailure(transactionFailure)) {
-            noteWriteFailed();
-            try { reconnect(); } catch (Exception ignored) {}
-            durable = readDurableActiveChargingReplacement(expected);
-            if (durable != null) {
-                pendingActiveReplacement = null;
-                pendingActiveReplacementPreviousStart = 0L;
-                return durable;
-            }
-            oldStillOpen = isDurablyOpenSession(previousStart);
-            if (Boolean.TRUE.equals(oldStillOpen)) return null;
-        }
-        // Neither postcondition could be proved. Retain the exact identities and fence every writer;
-        // a later healthy call will publish the replacement or confirm rollback before using a key.
-        pendingActiveReplacement = expected;
-        pendingActiveReplacementPreviousStart = previousStart;
-        return null;
-    }
-
-    private boolean reconcilePendingActiveChargingReplacement() {
-        if (!reconcilePendingChargingMaintenanceIntent(null)) return false;
-        ActiveChargingReplacement expected = pendingActiveReplacement;
-        if (expected == null) return true;
-        for (int attempt = 0; attempt < 2; attempt++) {
-            ActiveChargingReplacement durable =
-                    readDurableActiveChargingReplacement(expected);
-            if (durable != null) {
-                pendingActiveReplacement = null;
-                pendingActiveReplacementPreviousStart = 0L;
-                publishActiveChargingReplacement(durable);
-                noteWriteOk();
-                return true;
-            }
-            Boolean oldStillOpen =
-                    isDurablyOpenSession(pendingActiveReplacementPreviousStart);
-            if (Boolean.TRUE.equals(oldStillOpen)) {
-                pendingActiveReplacement = null;
-                pendingActiveReplacementPreviousStart = 0L;
-                return true;
-            }
-            if (attempt == 0 && (oldStillOpen == null || connection == null)) {
-                try { reconnect(); } catch (Exception ignored) {}
-            } else {
-                break;
-            }
-        }
-        return false;
-    }
-
     private void publishActiveChargingReplacement(ActiveChargingReplacement state) {
-        pendingActiveReplacement = null;
-        pendingActiveReplacementPreviousStart = 0L;
         if (state.pendingClose && state.previousStartTime > 0L
                 && state.previousStartTime != state.startTime) {
             chargingCloseTargetRemaps.put(
@@ -9678,11 +9585,6 @@ public class SocHistoryDatabase {
         if (persistJournal) persistChargingLifecycleJournal();
     }
 
-    /** SoC% at the start of the currently-open charging session, or -1 if none. */
-    public double getOpenChargingSessionStartSoc() {
-        return wasCharging ? chargingStartSoc : -1;
-    }
-
     /** Quality-preserving live energy snapshot for the currently open charging session. */
     public static final class OpenChargingSessionEnergy {
         public final double energyKwh;
@@ -9765,12 +9667,6 @@ public class SocHistoryDatabase {
         } catch (Exception ignored) {}
         return OpenChargingSessionEnergy.unavailable();
     }
-
-    /** Compatibility accessor for callers that only need the numeric value. */
-    public synchronized double getOpenChargingSessionEnergyKwh() {
-        return getOpenChargingSessionEnergy().energyKwh;
-    }
-
 
     // ==================== DATA RETRIEVAL ====================
 
@@ -10873,7 +10769,7 @@ public class SocHistoryDatabase {
     /** Wipe only the charging-related tables (user "Clear charging history"). Returns rows deleted. */
     public synchronized long clearChargingHistory() {
         if (!isInitialized || connection == null) return -1;
-        if (!reconcilePendingActiveChargingReplacement()) return -1;
+        if (!reconcilePendingChargingMaintenanceIntent(null)) return -1;
         final long[] deleted = {0L};
         ChargingMaintenanceIntent stagedIntent = null;
         try {
@@ -11262,7 +11158,7 @@ public class SocHistoryDatabase {
      * When false, {@link #trackChargingSession} records nothing.
      */
     public synchronized boolean setChargingAnalyticsEnabled(boolean enabled) {
-        if (!reconcilePendingActiveChargingReplacement()) return false;
+        if (!reconcilePendingChargingMaintenanceIntent(null)) return false;
         boolean wasEnabled = this.chargingAnalyticsEnabled;
         long priorDisabledSinceMs = analyticsDisabledSinceMs;
         long now = System.currentTimeMillis();
@@ -11373,7 +11269,7 @@ public class SocHistoryDatabase {
      * bit from admitting callbacks after opt-out, close, clear, or reset.
      */
     public synchronized boolean isChargingLifecycleHoldActive() {
-        if (!reconcilePendingActiveChargingReplacement()) return false;
+        if (!reconcilePendingChargingMaintenanceIntent(null)) return false;
         return chargingLifecycleHold
                 && chargingAnalyticsEnabled
                 && wasCharging
@@ -11956,7 +11852,7 @@ public class SocHistoryDatabase {
      */
     public synchronized long resetAll() {
         if (!isInitialized || connection == null) return -1;
-        if (!reconcilePendingActiveChargingReplacement()) return -1;
+        if (!reconcilePendingChargingMaintenanceIntent(null)) return -1;
         final int[] deleted = new int[4];
         ChargingMaintenanceIntent stagedIntent = null;
         try {
@@ -12086,18 +11982,6 @@ public class SocHistoryDatabase {
 
         } catch (Exception e) {
             logger.error("Failed to cleanup old data", e);
-        }
-    }
-    
-    /**
-     * Get database file size.
-     */
-    public long getDatabaseSize() {
-        try {
-            java.io.File dbFile = new java.io.File(DB_PATH + ".mv.db");
-            return dbFile.exists() ? dbFile.length() : 0;
-        } catch (Exception e) {
-            return 0;
         }
     }
     
