@@ -873,6 +873,16 @@ open class MainActivity : AppCompatActivity() {
     }
 
     
+    override fun onStart() {
+        super.onStart()
+        com.overdrive.app.ui.fragment.WebViewTimers.activityStarted()
+    }
+
+    override fun onStop() {
+        com.overdrive.app.ui.fragment.WebViewTimers.activityStopped()
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         // PIN gate: if Settings → Security has the app lock enabled and the
