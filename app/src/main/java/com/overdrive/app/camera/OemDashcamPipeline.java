@@ -503,7 +503,7 @@ public class OemDashcamPipeline {
             // tier carries across, but capped against the bitrate budget so
             // pano + OEM combined stays under the encoder ceiling. The cap is
             // resolved by QualitySettingsApiHandler at write time; we just read.
-            applyRecordingConfigFromUcm();
+            applyRecordingConfigFromUcm(true);
 
             // Refuse to open if HAL-declared dims look panoramic. This protects
             // against a bad oemDashcamCameraId pointing at the AVM strip.
@@ -533,7 +533,11 @@ public class OemDashcamPipeline {
                     cameraStartEpoch, lifecycleOwnerCurrent, "pre-render loop");
                 startRenderLoop();
                 logger.info("OemDashcamPipeline started: " + width + "x" + height + " @ "
-                    + fps + " fps, " + (bitrate / 1_000_000) + " Mbps, id=" + oemDashcamCameraId
+                    + fps + " fps" + (clipDrawStride > 1
+                        ? " (encode " + encodeFps() + " fps, stride " + clipDrawStride + ", follow "
+                            + activeFollowFps + ")" : "")
+                    + (sessionProximityIdleThrottle ? " [proximity-idle throttle]" : "")
+                    + ", " + (bitrate / 1_000_000) + " Mbps, id=" + oemDashcamCameraId
                     + ", codec=" + (isHevc() ? "H.265" : "H.264"));
             } catch (Throwable t) {
                 running.set(false);
@@ -752,7 +756,8 @@ public class OemDashcamPipeline {
             // clip body then records at full frame rate from frame 1 (parity with
             // today). No-op when stride was already 1. triggerEventRecording (below)
             // issues its own splice IDR, so strided pre-roll frames stay valid.
-            recorderDrawStride = 1;
+            // clipDrawStride is 1 unless the session follows the recording fps.
+            recorderDrawStride = clipDrawStride;
         }
         String path = generateOutputPath(eventOwned);
         long clampedPost = Math.max(0L, postRecordMs);
@@ -941,19 +946,59 @@ public class OemDashcamPipeline {
             // inside the same lock) is observed here as recording==true, so we skip
             // the write and never clobber a freshly-opened full-rate clip's stride.
             boolean surveillanceAxis = !com.overdrive.app.monitor.AccMonitor.isAccOn();
-            int target;
-            if (surveillanceAxis && UnifiedConfigManager.isOemIdleThrottleWhenParked()) {
-                int idleFps = UnifiedConfigManager.getOemIdleFps();
-                target = (idleFps > 0) ? Math.max(1, Math.round((float) fps / idleFps)) : 1;
-            } else {
-                target = 1;
-            }
+            int throttle = idleThrottleStride(surveillanceAxis);
+            int axisFollow = surveillanceAxis ? sessionFollowParkedFps : sessionFollowDriveFps;
             synchronized (recordingStateLock) {
                 if (recording.get()) return;  // a new clip already opened — leave its stride
-                recorderDrawStride = target;
+                // Between clips the follow target tracks the current axis.
+                activeFollowFps = axisFollow;
+                clipDrawStride = followDrawStride(fps, axisFollow);
+                recorderDrawStride = Math.max(clipDrawStride, throttle);
+            }
+            HardwareEventRecorderGpu enc = encoder;
+            if (enc != null && axisFollow > 0) enc.setTargetFps(encodeFps());
+        } catch (Throwable t) {
+            recorderDrawStride = clipDrawStride;  // fail safe: full session rate
+        }
+    }
+
+    /**
+     * Not-recording throttle stride, 0 = none. Parked: the existing idle throttle.
+     * Driving: the opt-in Proximity-monitor throttle while the pano's low-power
+     * monitor waits. Callers take max(clip stride, this).
+     */
+    private int idleThrottleStride(boolean surveillanceAxis) {
+        if (surveillanceAxis) {
+            if (UnifiedConfigManager.isOemIdleThrottleWhenParked()) {
+                int idleFps = UnifiedConfigManager.getOemIdleFps();
+                return (idleFps > 0) ? Math.round((float) fps / idleFps) : 0;
+            }
+            return 0;
+        }
+        int monitorFps = com.overdrive.app.recording.OemDashcamMirror.getProximityMonitorFps();
+        if (sessionProximityIdleThrottle && monitorFps > 0) {
+            return Math.round((float) fps / monitorFps);
+        }
+        return 0;
+    }
+
+    /**
+     * Pano Proximity monitor entered/left its low-power wait. Leaving snaps the
+     * warm encode back to the clip rate at once, before the mirrored clip opens;
+     * entering re-strides only when no clip is in flight. Cheap: no config read.
+     */
+    public void onProximityMonitorChanged() {
+        if (!running.get() || !sessionProximityIdleThrottle) return;
+        try {
+            boolean surveillanceAxis = !com.overdrive.app.monitor.AccMonitor.isAccOn();
+            if (surveillanceAxis) return;  // parked stride is owned by the idle throttle
+            int throttle = idleThrottleStride(false);
+            synchronized (recordingStateLock) {
+                if (recording.get()) return;
+                recorderDrawStride = Math.max(clipDrawStride, throttle);
             }
         } catch (Throwable t) {
-            recorderDrawStride = 1;  // fail safe: full rate
+            recorderDrawStride = clipDrawStride;
         }
     }
 
@@ -1116,7 +1161,15 @@ public class OemDashcamPipeline {
      * pre-split installs where the user had configured the legacy single
      * key. Subsequent writes go to the OEM-specific slot.
      */
-    private void applyRecordingConfigFromUcm() {
+    private void applyRecordingConfigFromUcm(boolean sessionStart) {
+        if (sessionStart) {
+            // Fail-safe defaults = today's path if any read below throws.
+            sessionFollowDriveFps = 0;
+            sessionFollowParkedFps = 0;
+            activeFollowFps = 0;
+            sessionProximityIdleThrottle = false;
+            clipDrawStride = 1;
+        }
         try {
             // R8-A #15: read UCM once into locals, pass into helpers.
             // Pre-fix did 5 disk reads per start (oem + rec twice each +
@@ -1164,20 +1217,28 @@ public class OemDashcamPipeline {
             }
             fps = Math.max(15, Math.min(60, requestedFps));
 
-            // Parked-idle encode throttle: on the SURVEILLANCE (parked) axis, when
-            // the OEM throttle is enabled and we are NOT recording, sub-sample the
-            // encoder draw to ~idleFps via the draw-stride. The camera HAL rate
-            // (fps, >=15) is untouched — only the encode rate drops — so an event
-            // can snap to a clean full-rate clip (startRecordingInternal resets
-            // stride to 1). On the drive axis, or with the throttle off, force
-            // stride 1 (today's behaviour). Never override an in-flight clip.
-            if (surveillanceAxis
-                    && UnifiedConfigManager.isOemIdleThrottleWhenParked()
-                    && !recording.get()) {
-                int idleFps = UnifiedConfigManager.getOemIdleFps();
-                recorderDrawStride = (idleFps > 0) ? Math.max(1, Math.round((float) fps / idleFps)) : 1;
-            } else if (!recording.get()) {
-                recorderDrawStride = 1;
+            // "follow" encodes at the current axis's recording fps (driving:
+            // camera.targetFps, parked: camera.surveillanceTargetFps) by striding
+            // the encode over the camera rate, so frames stay evenly spaced. The
+            // camera rate is raised to oemDashcam.fps only when the axis rate
+            // can't reach the follow rate. Targets lock per session; a clip in
+            // flight keeps the rate it opened with. Fixed mode: untouched.
+            if (sessionStart && UnifiedConfigManager.isOemFpsFollow()) {
+                sessionFollowDriveFps = UnifiedConfigManager.getOemFollowFps();
+                sessionFollowParkedFps = UnifiedConfigManager.getOemFollowParkedFps();
+            }
+            if (sessionStart) {
+                sessionProximityIdleThrottle = UnifiedConfigManager.isOemProximityIdleThrottle();
+            }
+            int axisFollow = surveillanceAxis ? sessionFollowParkedFps : sessionFollowDriveFps;
+            if (axisFollow > 0) fps = followHalFps(fps, recAxisFps, axisFollow);
+
+            int throttle = idleThrottleStride(surveillanceAxis);
+            synchronized (recordingStateLock) {
+                if (!recording.get()) activeFollowFps = axisFollow;
+                clipDrawStride = followDrawStride(fps, activeFollowFps);
+                recorderDrawStride = recording.get()
+                    ? clipDrawStride : Math.max(clipDrawStride, throttle);
             }
 
             // Recording-axis tier chain (also the surveillance-axis fallback).
@@ -1216,8 +1277,9 @@ public class OemDashcamPipeline {
     public void reapplyAxisProfileFromUcm() {
         if (!running.get()) return;
         int oldFps = fps;
+        int oldEncodeFps = encodeFps();
         int oldBitrate = bitrate;
-        applyRecordingConfigFromUcm();  // re-resolves fps/bitrate for the live axis
+        applyRecordingConfigFromUcm(false);  // re-resolves fps/bitrate for the live axis
         try {
             if (bitrate != oldBitrate) {
                 HardwareEventRecorderGpu enc = encoder;
@@ -1237,8 +1299,12 @@ public class OemDashcamPipeline {
                 // camera.setTargetFps with encoder.setTargetFps).
                 HardwareEventRecorderGpu enc = encoder;
                 if (enc != null) {
-                    enc.setTargetFps(fps);
+                    enc.setTargetFps(encodeFps());
                 }
+            }
+            if (fps == oldFps && encodeFps() != oldEncodeFps) {
+                HardwareEventRecorderGpu enc = encoder;
+                if (enc != null) enc.setTargetFps(encodeFps());
             }
             if (fps != oldFps || bitrate != oldBitrate) {
                 logger.info("OEM axis profile re-applied live: fps " + oldFps + "→" + fps
@@ -1451,7 +1517,8 @@ public class OemDashcamPipeline {
         // makeCurrent target end up in the same EGL context.
         runOnGlThreadAndWait(() -> {
             try {
-                encoder = new HardwareEventRecorderGpu(width, height, fps, bitrate, codecMimeType);
+                // Encoder rate = delivered rate so GOP seconds and rate control match.
+                encoder = new HardwareEventRecorderGpu(width, height, encodeFps(), bitrate, codecMimeType);
                 // Skip KEY_OPERATING_RATE so we don't over-subscribe the
                 // single Venus H.264 block when pano is also encoding.
                 // Pano keeps its pin (it's the primary recorder); OEM
@@ -1835,10 +1902,49 @@ public class OemDashcamPipeline {
     // frames swapped into its input surface, so drawing every Nth iteration
     // yields ~halFps/N encode fps WITHOUT touching the (HAL-rejectable) camera
     // setCameraFps or the (immutable) KEY_FRAME_RATE. Default 1 = every frame
-    // (byte-identical to today). Set >1 only while parked-idle keep-warm; snapped
-    // back to 1 on an event so the clip body records full-rate. Written from the
+    // (byte-identical to today). Above the clip stride only while idle keep-warm;
+    // snapped back to the clip stride on an event so the clip body records at the
+    // session rate (clip stride is 1 unless "follow"). Written from the
     // control thread, read on the GL thread — volatile is sufficient.
     private volatile int recorderDrawStride = 1;
+    // Session clip stride: round(HAL fps / follow fps) in "follow" mode, else 1.
+    private volatile int clipDrawStride = 1;
+    // Follow targets per axis, locked at start(); 0 = fixed fps (stride 1, today's path).
+    private volatile int sessionFollowDriveFps = 0;
+    private volatile int sessionFollowParkedFps = 0;
+    // Follow target of the current/next clip (changes only between clips).
+    private volatile int activeFollowFps = 0;
+    // Opt-in Proximity-monitor throttle, locked at start().
+    private volatile boolean sessionProximityIdleThrottle = false;
+
+    /** Stride that brings halFps down to followFps; 1 when not following or followFps >= halFps. */
+    public static int followDrawStride(int halFps, int followFps) {
+        if (followFps <= 0 || followFps >= halFps) return 1;
+        return Math.max(1, Math.round((float) halFps / followFps));
+    }
+
+    /** Encoded rate for a camera rate and follow target. */
+    public static int followEncodeFps(int halFps, int followFps) {
+        return Math.max(1, Math.round((float) halFps / followDrawStride(halFps, followFps)));
+    }
+
+    /**
+     * Camera rate for follow: the axis rate when it already yields the follow rate,
+     * else the stored OEM rate (both clamped 15..60) if that does, else the axis rate.
+     */
+    public static int followHalFps(int axisFps, int storedFps, int followFps) {
+        int axis = Math.max(15, Math.min(60, axisFps));
+        if (followFps <= 0 || followEncodeFps(axis, followFps) == followFps) return axis;
+        int alt = Math.max(15, Math.min(60, storedFps));
+        if (alt > axis && followEncodeFps(alt, followFps) == followFps) return alt;
+        return axis;
+    }
+
+    /** Rate the encoder actually receives at the clip stride. */
+    private int encodeFps() {
+        int stride = clipDrawStride;
+        return stride <= 1 ? fps : Math.max(1, Math.round((float) fps / stride));
+    }
     // GL-thread-confined stride counter (never touched off the render loop).
     private int renderStridePhase = 0;
     // GL-thread-confined: last time we forced an IDR while parked-idle. At the
@@ -2028,8 +2134,9 @@ public class OemDashcamPipeline {
                     // event, force an IDR every ~preRecordSeconds/2 so the
                     // pre-record ring always holds a keyframe despite the stretched
                     // low-rate GOP. Guarded on stride>1 so it never runs at full
-                    // rate; only adds IDRs.
-                    if (stride > 1 && !recordingEventOwned.get()) {
+                    // rate; only adds IDRs. Strides at the clip rate keep the
+                    // encoder's own GOP (KEY_FRAME_RATE = that rate).
+                    if (stride > clipDrawStride && !recordingEventOwned.get()) {
                         long nowMs = android.os.SystemClock.uptimeMillis();
                         long periodMs = Math.max(1000L, resolveOemPreRecordSeconds() * 1000L / 2L);
                         if (oemLastIdleKeyframeMs == 0
