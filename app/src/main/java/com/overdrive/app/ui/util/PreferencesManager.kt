@@ -18,7 +18,6 @@ object PreferencesManager {
     private const val PREFS_NAME = "overdrive_prefs"
     private const val KEY_ENABLED_DAEMONS = "enabled_daemons"
     private const val KEY_THEME_MODE = "theme_mode"
-    private const val KEY_SELECTED_CAMERAS = "selected_cameras"
     private const val KEY_LAST_TUNNEL_URL = "last_tunnel_url"
     private const val KEY_LAST_ZROK_URL = "last_zrok_url"
     private const val KEY_ZROK_UNIQUE_NAME = "zrok_unique_name"
@@ -144,28 +143,6 @@ object PreferencesManager {
     
     fun isDaemonEnabled(type: DaemonType): Boolean {
         return type in getEnabledDaemons()
-    }
-    
-    // Selected Cameras
-    fun getSelectedCameras(): Set<Int> {
-        val strings = requirePrefs().getStringSet(KEY_SELECTED_CAMERAS, setOf("1")) ?: setOf("1")
-        return strings.mapNotNull { it.toIntOrNull() }.toSet()
-    }
-    
-    fun setSelectedCameras(cameras: Set<Int>) {
-        val strings = cameras.map { it.toString() }.toSet()
-        requirePrefs().edit().putStringSet(KEY_SELECTED_CAMERAS, strings).apply()
-    }
-    
-    fun toggleCamera(cameraId: Int): Set<Int> {
-        val current = getSelectedCameras().toMutableSet()
-        if (cameraId in current) {
-            current.remove(cameraId)
-        } else {
-            current.add(cameraId)
-        }
-        setSelectedCameras(current)
-        return current
     }
     
     // Tunnel URL
