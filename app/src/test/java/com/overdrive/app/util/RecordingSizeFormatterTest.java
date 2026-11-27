@@ -32,4 +32,22 @@ public class RecordingSizeFormatterTest {
             Locale.setDefault(Locale.Category.FORMAT, previous);
         }
     }
+
+    @Test
+    public void localizesByteDigitsWithoutChangingUsApiLabels() {
+        Locale arabic = Locale.forLanguageTag("ar-EG-u-nu-arab");
+        assertEquals("\u0660 B", RecordingSizeFormatter.format(0, arabic));
+        assertEquals("\u0669\u0669\u0669 B", RecordingSizeFormatter.format(999, arabic));
+        assertEquals("\u0661\u0662\u0663 B", RecordingSizeFormatter.format(123, arabic));
+        assertEquals("999 B", RecordingSizeFormatter.format(999, Locale.US));
+
+        Locale previous = Locale.getDefault(Locale.Category.FORMAT);
+        try {
+            Locale.setDefault(Locale.Category.FORMAT, arabic);
+            assertEquals("\u0669\u0669\u0669 B", RecordingSizeFormatter.format(999));
+            assertEquals("999 B", RecordingSizeFormatter.format(999, Locale.US));
+        } finally {
+            Locale.setDefault(Locale.Category.FORMAT, previous);
+        }
+    }
 }
