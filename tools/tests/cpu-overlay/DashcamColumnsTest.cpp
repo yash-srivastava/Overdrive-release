@@ -101,13 +101,32 @@ static void check(int w, int h, int sw, int sh, int ww, int wh,
     if (rng() % 2) p.off[0] = 0.013f, p.off[3] = 0.81f;
     CellBounds cb;
     cellBounds(w, &cb);
-    for (int yc = 0; yc < h / 2; yc++) {
-        referenceDashcamRow(p, src, expected.planes, cb, yc * 2, false);
-        referenceDashcamRow(p, src, expected.planes, cb, yc * 2 + 1, false);
-        referenceDashcamRow(p, src, expected.planes, cb, yc, true);
+    Frame uncached(w, h, dstMode, 9, nullptr);
+    dashcamRemapCache().clear();
+    // The second frame changes every source byte and a strip offset, but not
+    // the lens geometry. This exercises the warm map, not cached image data.
+    for (int frame = 0; frame < 2; ++frame) {
+        if (frame != 0) {
+            for (auto* plane : {&strip.y, &strip.u, &strip.v, &ws.y, &ws.u, &ws.v}) {
+                for (auto& value : *plane) value ^= 0x5a;
+            }
+            p.off[1] = 0.29f;
+        }
+        DashcamColumns columns;
+        dashcamColumns(p, src, cb, columns);
+        for (int yc = 0; yc < h / 2; yc++) {
+            dashcamRow(p, src, uncached.planes, cb, columns, yc * 2, false, nullptr);
+            dashcamRow(p, src, uncached.planes, cb, columns, yc * 2 + 1, false, nullptr);
+            dashcamRow(p, src, uncached.planes, cb, columns, yc, true, nullptr);
+            referenceDashcamRow(p, src, expected.planes, cb, yc * 2, false);
+            referenceDashcamRow(p, src, expected.planes, cb, yc * 2 + 1, false);
+            referenceDashcamRow(p, src, expected.planes, cb, yc, true);
+        }
+        assert(remapGrid(p, src[0], windshield ? &src[1] : nullptr, actual.planes,
+                         frame == 0 ? bands : 1) == 0);
+        assert(actual.y == uncached.y && actual.u == uncached.u && actual.v == uncached.v);
+        assert(actual.y == expected.y && actual.u == expected.u && actual.v == expected.v);
     }
-    assert(remapGrid(p, src[0], windshield ? &src[1] : nullptr, actual.planes, bands) == 0);
-    assert(actual.y == expected.y && actual.u == expected.u && actual.v == expected.v);
 }
 // A horizontally exact grid with vertical scaling uses the new path even
 // though it does not qualify for the separate 1:1 composeGrid fast path.
@@ -191,10 +210,71 @@ static void checkVerticalRows(std::mt19937& rng) {
     }
 }
 
+
+// Verify row selection, key invalidation, reuse and budget without allocating
+// entire camera frames. Actual pixel parity is checked by check() above.
+static void checkCachePolicy() {
+    DashcamRemapCache cache;
+    RemapSource strip = {{}, 2560, 480};
+    RemapSpec p = {640, 480, 1, {0.f, .25f, .5f, .75f}, .3f, .07f,
+                   .75f, 0, 0.f, .7f};
+    int32_t *u = nullptr, *v = nullptr;
+    cache.prepare(p, strip);
+    assert(cache.row(0, false, u, v));  // full map fits
+    assert(v - u == 640 * 480 * 5 / 4);
+    assert(cache.row(239, true, u, v));
+    cache.ready = true;
+    p.off[1] = .27f;  // offsets are applied at gather time
+    cache.prepare(p, strip);
+    assert(cache.ready);
+    p.k1 = .2f;
+    cache.prepare(p, strip);
+    assert(!cache.ready);
+    cache.ready = true;
+    p.k2 = .1f;
+    cache.prepare(p, strip);
+    assert(!cache.ready);
+    cache.ready = true;
+    p.aspect = 1.f;
+    cache.prepare(p, strip);
+    assert(!cache.ready);
+    cache.ready = true;
+    strip.h = 720;
+    cache.prepare(p, strip);
+    assert(!cache.ready);
+    p.outW = 1920; p.outH = 1080;
+    cache.prepare(p, strip);
+    assert(!cache.row(755, false, u, v));
+    assert(cache.row(756, false, u, v));  // bottom only at 1080p
+    assert(v - u == 777600);
+    assert(!cache.row(377, true, u, v));
+    assert(cache.row(378, true, u, v));
+    cache.ready = true;
+    p.windshield = 1;
+    cache.prepare(p, strip);
+    assert(!cache.ready);
+    p.split = .1f;  // bottom alone exceeds cap
+    cache.prepare(p, strip);
+    assert(!cache.row(1079, false, u, v));
+    cache.ready = true;
+    cache.prepare(p, strip);
+    assert(cache.ready); // rejected geometry is not reallocated every frame
+    p.split = .7f;
+    cache.prepare(p, strip);
+    assert(cache.row(1079, false, u, v));
+    p.k1 = p.k2 = 0.f;
+    cache.prepare(p, strip);
+    assert(!cache.row(1079, false, u, v));
+    p.k1 = .3f; p.layout = 0;
+    cache.prepare(p, strip);
+    assert(!cache.row(1079, false, u, v));
+}
+
 }  // namespace odcpu
 
 int main() {
     std::mt19937 rng(715);
+    odcpu::checkCachePolicy();
     odcpu::checkVerticalRows(rng);
     odcpu::checkGrid(rng);
     int cases = 0;
@@ -226,8 +306,14 @@ int main() {
             cases++;
         }
     }
+    odcpu::check(1920, 1080, 2560, 480, 1280, 720, 0, 1, false, .3f, .07f,
+                 .75f, .7f, .12f, 32, rng);
+    cases++;
+    odcpu::check(1920, 1080, 2560, 480, 1280, 720, 2, 0, false, .3f, .07f,
+                 .75f, .1f, .12f, 32, rng);
+    cases++;
     odcpu::check(4096, 12, 8192, 8, 4096, 8, 1, 2, true, 0.f, 0.f,
                  0.75f, 0.7f, 0.f, 32, rng);
     cases++;
-    std::printf("Dashcam column parity passed (%d cases)\n", cases);
+    std::printf("Dashcam column/cache parity passed (%d two-frame cases)\n", cases);
 }
