@@ -12,6 +12,7 @@ import com.overdrive.app.surveillance.ScreenDeterrentAsset;
 import com.overdrive.app.ui.model.DaemonType;
 import com.overdrive.app.ui.model.ParkedShutdown;
 
+import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Arrays;
@@ -68,7 +69,7 @@ public class ScratchRootLegacyIdentityTest {
         assertEquals(LEGACY, ScratchRoot.path(""));
         assertEquals(LEGACY, ScratchRoot.path(null));
         assertEquals("/sdcard/DCIM/BYDCam", ScratchRoot.path("/sdcard/DCIM/BYDCam"));
-        assertEquals(LEGACY + "/x", ScratchRoot.file("x").getPath());
+        assertEquals(new File(LEGACY + "/x").getPath(), ScratchRoot.file("x").getPath());
     }
 
     @Test

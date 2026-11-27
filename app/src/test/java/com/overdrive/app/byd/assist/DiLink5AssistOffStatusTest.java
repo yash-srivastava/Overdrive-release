@@ -169,11 +169,14 @@ public class DiLink5AssistOffStatusTest {
         File[] candidates = DiLink5AssistOffStatus.daemonReadCandidates();
         assertEquals(2, candidates.length);
         for (File c : candidates) {
-            String path = c.getPath();
+            // File uses the host separator; these assertions describe Android paths.
+            String path = c.getPath().replace(File.separatorChar, '/');
             assertTrue(path, path.contains("/Android/data/"));
             assertTrue(path, path.endsWith("/files/" + DiLink5AssistOffStatus.FILE_NAME));
         }
-        assertTrue(candidates[0].getPath().startsWith("/storage/emulated/0/"));
-        assertTrue(candidates[1].getPath().startsWith("/sdcard/"));
+        assertTrue(candidates[0].getPath().replace(File.separatorChar, '/')
+                .startsWith("/storage/emulated/0/"));
+        assertTrue(candidates[1].getPath().replace(File.separatorChar, '/')
+                .startsWith("/sdcard/"));
     }
 }
