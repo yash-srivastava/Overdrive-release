@@ -311,6 +311,7 @@ class TimelineFragment : Fragment() {
         p.setFrameSink(vv)
         val f = createFollower(vv, p)
         follower = f
+        compose = com.overdrive.app.ui.timeline.player.DashcamFollower.Compose.PENDING
         vv.onFollowerSurfaceLost = { f.onSurfaceLost() }
         f.setEnabled(dashcamView)
         u.playerBox.addView(vv, 0, FrameLayout.LayoutParams(
@@ -456,6 +457,7 @@ class TimelineFragment : Fragment() {
         // Follower before the view: its decoder stops before the renderer frees the Surface it draws into.
         follower?.let { runCatching { it.release() } }
         follower = null
+        compose = com.overdrive.app.ui.timeline.player.DashcamFollower.Compose.PENDING
         videoView?.onFollowerSurfaceLost = null
         player?.let { p ->
             runCatching { p.setFrameSink(null) }
@@ -697,16 +699,21 @@ class TimelineFragment : Fragment() {
         follower?.setLeaderState(followerState(playerState), speed.toFloat(), skipQuiet)
     }
 
-    /** Contract #1414 section 4 at [wall]: a grid-tagged 360° clip and a windshield clip, both writer-anchored. */
+    /**
+     * Contract #1414 section 4 at [wall], the same verdict the follower reaches: a grid-tagged 360° clip and a
+     * windshield clip, both writer-anchored, |rate| <= 2, no skip quiet, a format pair that runs here. The seam
+     * the plan bridges counts only to stay in the view, never to enter it (no flip-flop at a boundary).
+     */
     private fun dashcamViewAt(wall: Long): Boolean {
-        if (!dashcamSupported || !dashcamPref) return false
+        if (!dashcamSupported || !dashcamPref || speed > 2 || skipQuiet) return false
+        if (follower?.pairBlocked() == true) return false
         val segs = repo?.currentSnapshot?.segments ?: return false
         var mosaic = false
         var oem = false
-        val seam = com.overdrive.app.ui.timeline.player.PlaybackPlan.SEAM_MS
+        val seam = if (compose == com.overdrive.app.ui.timeline.player.DashcamFollower.Compose.COMPOSING)
+            com.overdrive.app.ui.timeline.player.PlaybackPlan.SEAM_MS else 0L
         for (sg in segs) {
             val end = sg.end ?: continue
-            // The seam the plan bridges counts as covered: no flip at a clip boundary.
             if (!sg.available || wall < sg.start - seam || wall >= end + seam || sg.spanSrc != "writer") continue
             if (com.overdrive.app.ui.timeline.player.PlaybackPlan.oem(sg)) oem = true
             else if (specs?.cached(sg)?.grid != null) mosaic = true
@@ -1763,6 +1770,9 @@ class TimelineFragment : Fragment() {
             runCatching { io?.execute { com.overdrive.app.config.UnifiedConfigManager.setDashcamViewDefault(on) } }
             setDashcamView(on)
         }
+        // Rate and skip quiet are part of the availability verdict.
+        applyLeaderPrefer()
+        refreshSourceChip()
         updateSpeedButton()
     }
 

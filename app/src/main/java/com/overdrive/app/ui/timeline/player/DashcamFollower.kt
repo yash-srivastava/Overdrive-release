@@ -118,6 +118,17 @@ class DashcamFollower(
     private var curFmt: VideoFmt? = null
     private var curPair: String? = null
     private var curPairRate = 0f
+    // Runtime verdicts for this player instance: pairs that failed repeatedly with both decoders live.
+    private val pairFailures = HashMap<String, Int>()
+    private val badPairs = HashSet<String>()
+    // Last pair this follower composed or tried; a bad one keeps the mode off until the formats change.
+    @Volatile private var lastPair: String? = null
+
+    /** The formats last tried can't run together here (any thread): don't switch the leader for them. */
+    fun pairBlocked(): Boolean {
+        val k = lastPair ?: return false
+        return k in badPairs || pairs[k] == false
+    }
     private val skip = HashSet<String>()
     private val params = PlaybackParams()
     private var ticking = false
@@ -140,6 +151,16 @@ class DashcamFollower(
 
     fun setLeaderState(state: LeaderState, rate: Float, skipQuietOn: Boolean) = exec {
         leaderState = state
+        if (rate != leaderRate || skipQuietOn != skipQuiet) {
+            // A real change: verdicts taken at the old rate are spent; the pair is judged at the new one.
+            blocked = false
+            unsynced = false
+            hardSeeks = 0
+            pendingSince = 0L
+            val f = curFmt
+            val lead = leader.codec()
+            if (f != null && lead != null) lastPair = pairKey(lead.mime, lead.width, lead.height, LEADER_FPS, f, rate)
+        }
         leaderRate = rate
         skipQuiet = skipQuietOn
     }
@@ -162,7 +183,9 @@ class DashcamFollower(
     /** The leader's decoder failed: the leader wins; this pair is not tried again. */
     fun onLeaderDecoderError() = exec {
         if (mp == null) return@exec
-        curPair?.let { pairs[it] = false }
+        // Counts against the pair only with the 360° clip leading and both decoders up.
+        val live = prepared && leaderSeg?.let { !PlaybackPlan.oem(it) } == true
+        curPair?.takeIf { live }?.let { notePairFailure(it) }
         block()
         failCurrent()
     }
@@ -247,9 +270,8 @@ class DashcamFollower(
         val st = when {
             unavailable -> Compose.BLOCKED
             shown -> Compose.COMPOSING
-            blocked || unsynced -> Compose.BLOCKED
-            leaderSeg != null && !PlaybackPlan.oem(leaderSeg!!) && (!leaderGrid || leaderRate > MAX_RATE || skipQuiet) ->
-                Compose.BLOCKED
+            blocked || unsynced || pairBlocked() -> Compose.BLOCKED
+            leaderRate > MAX_RATE || skipQuiet -> Compose.BLOCKED
             else -> Compose.PENDING
         }
         if (st == reported) return
@@ -284,6 +306,10 @@ class DashcamFollower(
             pendingSince = 0L
         }
         val ok = leaderOk()
+        // The 360° clip leads but carries no usable grid: can't compose here (sticky like a failure).
+        val l = leaderSeg
+        if (l != null && !PlaybackPlan.oem(l) && !leaderGrid && raw != null) blocked = true
+        if (pairBlocked()) blocked = true
         val dvr = if (ok) oemAt(w) else null
         if (ok && dvr == null && !blocked && !unsynced && holdAcrossSeam(w)) {
             // Index seam between windshield clips: hold the last frame rather than flash the 360° view.
@@ -295,7 +321,7 @@ class DashcamFollower(
         if (ok && dvr != null && !shown && leaderState == LeaderState.PLAYING) {
             if (pendingSince == 0L) pendingSince = now
             else if (now - pendingSince > PENDING_MAX_MS) block()
-        } else if (shown) {
+        } else {
             pendingSince = 0L
         }
         if (dvr == null || unsynced || blocked) {
@@ -331,6 +357,7 @@ class DashcamFollower(
         val f = curFmt
         val lead = leader.codec()
         if (f != null && lead != null && leaderRate != curPairRate) {
+            lastPair = pairKey(lead.mime, lead.width, lead.height, LEADER_FPS, f, leaderRate)
             if (!canRunBoth(lead.mime, lead.width, lead.height, LEADER_FPS, f, leaderRate)) {
                 block()
                 failCurrent()
@@ -639,6 +666,14 @@ class DashcamFollower(
         curFmt = fmt
         curPairRate = leaderRate
         curPair = if (fmt != null && lead != null) pairKey(lead.mime, lead.width, lead.height, LEADER_FPS, fmt, leaderRate) else null
+        if (curPair != null) lastPair = curPair
+        if (curPair in badPairs) {
+            src.close()
+            skip.add(key(dvr))
+            seg = null
+            blocked = true
+            return
+        }
         if (fmt != null && lead != null && !canRunBoth(lead.mime, lead.width, lead.height, LEADER_FPS, fmt, leaderRate)) {
             if (BuildConfig.DEBUG) Log.d(TAG, "decoders can't run together: $lead + ${fmt.mime} ${fmt.width}x${fmt.height}")
             src.close()
@@ -741,13 +776,19 @@ class DashcamFollower(
         if (!wasPrepared && capability) {
             val pk = curPair
             if (pk != null) {
-                // This pair of formats can't run together here; other pairs may.
-                pairs[pk] = false
+                // Repeated capability failures for this pair of formats: off for it in this player.
+                notePairFailure(pk)
                 blocked = true
             } else if (!everPlayed && ++prepareFailures >= MAX_PREPARE_FAILURES) {
                 onDecoderUnavailable()
             }
         }
+    }
+
+    private fun notePairFailure(k: String) {
+        val n = (pairFailures[k] ?: 0) + 1
+        pairFailures[k] = n
+        if (n >= MAX_PAIR_FAILURES) badPairs.add(k)
     }
 
     private fun failCurrent() {
@@ -867,6 +908,7 @@ class DashcamFollower(
         private const val LEADER_FPS = 30
 
         private const val PENDING_MAX_MS = 4_000L
+        private const val MAX_PAIR_FAILURES = 2
         private const val MAX_SURFACE_FAILURES = 3
         private const val END_SLACK_MS = 1_500L
         // MediaPlayer.MEDIA_ERROR_SYSTEM (hidden constant): codec could not be allocated.
