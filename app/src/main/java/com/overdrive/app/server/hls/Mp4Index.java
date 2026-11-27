@@ -289,12 +289,36 @@ public final class Mp4Index {
             for (int g = 1; g < gops; g++) {
                 int s = gopFirst[g];
                 long vUs = video.toUs(video.time[s] + video.ctsAt(s));
-                while (i < audio.count && audio.toUs(audio.time[i] - audio.editMediaTime) < vUs) i++;
+                i = firstAudioAtOrAfter(audio, i, vUs);
                 audioFirst[g] = i;
             }
             audioFirst[gops] = audio.count;
         }
         return new Mp4Index(f, len, mtime, video, audio, gopFirst, gopUs, audioFirst);
+    }
+
+    /** First remaining audio sample at or after the video boundary, in the original us rounding. */
+    static int firstAudioAtOrAfter(Mp4Track audio, int from, long vUs) {
+        int count = audio.count;
+        if (from >= count || audio.toUs(audio.time[from] - audio.editMediaTime) >= vUs) return from;
+        // Decode times are nondecreasing. Gallop from the previous GOP's cursor
+        // so short GOPs stay cheap while long GOPs skip most AAC timestamps.
+        int lo = from + 1;
+        int step = 1;
+        int hi;
+        while (true) {
+            hi = from + Math.min(step, count - from);
+            if (hi == count || audio.toUs(audio.time[hi] - audio.editMediaTime) >= vUs) break;
+            lo = hi + 1;
+            step = Math.min(step * 2, count - from);
+        }
+        // hi may be the exclusive sample-count sentinel; never read its timestamp.
+        while (lo < hi) {
+            int mid = lo + (hi - lo) / 2;
+            if (audio.toUs(audio.time[mid] - audio.editMediaTime) < vUs) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
     }
 
     private static long mvhdTimescale(byte[] m, int p, int end) throws Mp4Exception {
