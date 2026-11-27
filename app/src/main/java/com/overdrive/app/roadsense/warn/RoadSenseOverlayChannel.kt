@@ -30,10 +30,19 @@ object RoadSenseOverlayChannel {
     }
 
     private fun put(s: OverlayState) {
+        val d = drawn
+        if (d == null || !looksSame(d, s)) { drawn = s; version++ }
         state = s
-        val key = s.copy(calibrationLevel = s.calLevel().ordinal.toFloat(), updatedMs = 0L)
-        if (key != drawn) { drawn = key; version++ }
     }
+
+    // Everything the overlays draw; maturity by its pill bucket, the timestamp ignored.
+    private fun looksSame(a: OverlayState, b: OverlayState): Boolean =
+        a.calLevel() == b.calLevel() && a.coverage == b.coverage &&
+            a.hazardAhead == b.hazardAhead && a.nextHazardMeters == b.nextHazardMeters &&
+            a.nextHazardRelBearingDeg == b.nextHazardRelBearingDeg &&
+            a.nextHazardSeverity == b.nextHazardSeverity && a.nextHazardType == b.nextHazardType &&
+            a.zoneCount == b.zoneCount && a.zoneLengthM == b.zoneLengthM &&
+            a.zoneRough == b.zoneRough && a.pendingConfirm == b.pendingConfirm
 
     /** Latest published state (its updatedMs is the last warn-tick publish), or null. */
     fun current(): OverlayState? = synchronized(lock) { state }

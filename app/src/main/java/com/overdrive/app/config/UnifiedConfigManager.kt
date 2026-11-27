@@ -105,8 +105,10 @@ object UnifiedConfigManager {
     private const val MUTATION_CLOCKS_KEY = "__overdriveMutationClocks"
     private val processMutationOrigin = UUID.randomUUID().toString()
     private val processMutationSequence = AtomicLong(0)
-    // Per-origin [wall ms, configSeq] of its last applied write; not a section name.
+    // Per origin: "wallMs:configSeq" of its last applied write (not a section name).
     private const val MUTATION_TOUCH_KEY = "@touched"
+    // In the clocks object: the same pair, from when origins without a touch began ageing.
+    private const val MUTATION_UNTOUCHED_KEY = "@untouched"
     private const val MUTATION_CLOCK_PRUNE_MS = 7L * 24 * 60 * 60 * 1000
     private const val MUTATION_CLOCK_PRUNE_COMMITS = 1_000L
 
@@ -3960,7 +3962,7 @@ object UnifiedConfigManager {
         originClock.put(section, sectionClock)
         val now = System.currentTimeMillis()
         val seq = seqOf(config)
-        originClock.put(MUTATION_TOUCH_KEY, org.json.JSONArray().put(now).put(seq))
+        originClock.put(MUTATION_TOUCH_KEY, "$now:$seq")
         clocks.put(stamp.origin, originClock)
         pruneMutationClocks(clocks, now, seq)
         config.put(MUTATION_CLOCKS_KEY, clocks)
@@ -3973,26 +3975,42 @@ object UnifiedConfigManager {
      * IPC and lock timeouts (seconds), so nothing from a pruned origin is in flight;
      * a later write from it carries a higher sequence and applies as it should. The
      * commit bound keeps an RTC jump forward from pruning alone; a clock stepped back
-     * never prunes. Origins recorded before touches existed start ageing now. This
-     * process's origin is never pruned.
+     * never prunes. Origins with no touch (written before touches existed) share one
+     * [MUTATION_UNTOUCHED_KEY] age, so they cost no bytes each. This process's origin
+     * is never pruned.
      */
     private fun pruneMutationClocks(clocks: JSONObject, now: Long, seq: Long) {
+        val untouchedSince = mutationTouch(clocks.opt(MUTATION_UNTOUCHED_KEY))
+        var untouchedLeft = false
         val origins = ArrayList<String>()
         clocks.keys().forEach { origins.add(it) }
         for (origin in origins) {
-            if (origin == processMutationOrigin) continue
+            if (origin.startsWith("@") || origin == processMutationOrigin) continue
             val clock = clocks.optJSONObject(origin) ?: continue
-            val touched = clock.optJSONArray(MUTATION_TOUCH_KEY)
-            if (touched == null || touched.length() < 2) {
-                clock.put(MUTATION_TOUCH_KEY, org.json.JSONArray().put(now).put(seq))
-                continue
-            }
-            val idleMs = now - touched.optLong(0, now)
-            val idleCommits = seq - touched.optLong(1, seq)
-            if (idleMs >= MUTATION_CLOCK_PRUNE_MS && idleCommits >= MUTATION_CLOCK_PRUNE_COMMITS) {
+            val own = mutationTouch(clock.opt(MUTATION_TOUCH_KEY))
+            // also drops a touch in an older, unparseable shape
+            if (own == null) clock.remove(MUTATION_TOUCH_KEY)
+            val touched = own ?: untouchedSince
+            if (touched != null
+                    && now - touched[0] >= MUTATION_CLOCK_PRUNE_MS
+                    && seq - touched[1] >= MUTATION_CLOCK_PRUNE_COMMITS) {
                 clocks.remove(origin)
+            } else if (own == null) {
+                untouchedLeft = true
             }
         }
+        if (!untouchedLeft) clocks.remove(MUTATION_UNTOUCHED_KEY)
+        else if (untouchedSince == null) clocks.put(MUTATION_UNTOUCHED_KEY, "$now:$seq")
+    }
+
+    /** A "wallMs:configSeq" touch, or null. */
+    private fun mutationTouch(v: Any?): LongArray? {
+        val text = v as? String ?: return null
+        val sep = text.indexOf(':')
+        if (sep <= 0) return null
+        val ms = text.substring(0, sep).toLongOrNull() ?: return null
+        val sq = text.substring(sep + 1).toLongOrNull() ?: return null
+        return longArrayOf(ms, sq)
     }
 
     private fun isBluetoothPreferenceKey(section: String, key: String): Boolean =
