@@ -556,11 +556,7 @@ public class TripApiHandler {
             return errorResponse("Telemetry data unavailable", 410);
         }
 
-        List<TelemetrySample> samples = TelemetryStore.readFromFile(telemetryFile);
-        JSONArray telemetryArray = new JSONArray();
-        for (TelemetrySample sample : samples) {
-            telemetryArray.put(sample.toJson());
-        }
+        JSONArray telemetryArray = TelemetryStore.readJsonTelemetry(telemetryFile);
 
         JSONObject response = new JSONObject();
         try {
@@ -1383,17 +1379,7 @@ public class TripApiHandler {
             return errorResponse("Telemetry data unavailable", 410);
         }
 
-        List<TelemetrySample> samples = TelemetryStore.readFromFile(telemetryFile);
-        JSONArray gps = new JSONArray();
-        for (TelemetrySample s : samples) {
-            if (!TelemetrySample.hasGpsFix(s.lat, s.lon)) continue;
-            try {
-                JSONArray point = new JSONArray();
-                point.put(s.lat);
-                point.put(s.lon);
-                gps.put(point);
-            } catch (Exception ignored) {}
-        }
+        JSONArray gps = TelemetryStore.readGpsTrace(telemetryFile);
 
         JSONObject response = new JSONObject();
         try {

@@ -4,6 +4,7 @@ import com.overdrive.app.storage.removable.RemovableStorageFs;
 
 import com.overdrive.app.logging.DaemonLogger;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedOutputStream;
@@ -13,6 +14,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 import java.util.zip.GZIPOutputStream;
 
 /**
@@ -42,19 +44,47 @@ public class TelemetryStore {
      * @return list of TelemetrySample objects parsed from all gzip streams
      */
     public static List<TelemetrySample> readFromFile(File file) {
+        return readProjected(file, ArrayList::new,
+                (samples, row) -> samples.add(TelemetrySample.fromJson(row)));
+    }
+
+    /** Build the full API response array without retaining a separate sample list. */
+    static JSONArray readJsonTelemetry(File file) {
+        return readProjected(file, JSONArray::new,
+                (rows, row) -> rows.put(TelemetrySample.fromJson(row).toJson()));
+    }
+
+    /** Project only the two GPS fields needed by the map API, preserving journal order. */
+    static JSONArray readGpsTrace(File file) {
+        return readProjected(file, JSONArray::new, (points, row) -> {
+            double lat = row.optDouble("la", Double.NaN);
+            double lon = row.optDouble("lo", Double.NaN);
+            if (TelemetrySample.hasGpsFix(lat, lon)) {
+                points.put(new JSONArray().put(lat).put(lon));
+            }
+        });
+    }
+
+    @FunctionalInterface
+    private interface RowAppender<T> {
+        void append(T result, JSONObject row) throws Exception;
+    }
+
+    private static <T> T readProjected(File file, Supplier<T> empty, RowAppender<T> append) {
         if (file == null || !RemovableStorageFs.exists(file) || RemovableStorageFs.length(file) == 0) {
-            return new ArrayList<>();
+            return empty.get();
         }
 
         try (FileInputStream input = RemovableStorageFs.openInput(file)) {
             // Capture the descriptor length once, so a live append cannot extend the read.
             long length = input.getChannel().size();
-            List<TelemetrySample> samples = new ArrayList<>();
-            GzipJsonLines.read(input, length, line -> appendSample(samples, line));
-            return samples;
+            T result = empty.get();
+            GzipJsonLines.read(input, length, line -> appendRow(result, line, append));
+            return result;
         } catch (Exception e) {
+            // Discard a partial result on storage failure, as the list reader did.
             logger.error("Failed to read telemetry file: " + file.getName(), e);
-            return new ArrayList<>();
+            return empty.get();
         }
     }
 
@@ -115,17 +145,17 @@ public class TelemetryStore {
 
         String[] lines = jsonLines.split("\n");
         for (String line : lines) {
-            appendSample(samples, line);
+            appendRow(samples, line, (result, row) -> result.add(TelemetrySample.fromJson(row)));
         }
         return samples;
     }
 
-    private static void appendSample(List<TelemetrySample> samples, String line) {
+    private static <T> void appendRow(T result, String line, RowAppender<T> append) {
         String trimmed = line.trim();
         if (trimmed.isEmpty()) return;
         try {
             JSONObject json = new JSONObject(trimmed);
-            samples.add(TelemetrySample.fromJson(json));
+            append.append(result, json);
         } catch (Exception e) {
             logger.warn("Skipping malformed telemetry line: " + e.getMessage());
         }
