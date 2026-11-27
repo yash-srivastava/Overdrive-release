@@ -22,33 +22,8 @@ import java.nio.FloatBuffer;
 import java.util.Locale;
 
 /**
- * AsyncGpuDownscaler - Zero-stutter GPU thumbnail generator.
- * 
- * Uses a dedicated background thread with EGL context sharing to avoid
- * expensive eglMakeCurrent calls on the main render thread.
- * 
- * Key features:
- * - Dedicated background thread (never touches main thread's EGL)
- * - Shared EGL context (can read main thread's camera texture)
- * - ImageReader DMA output (zero-copy to system RAM)
- * - Non-blocking postFrame() returns instantly
- * 
- * USAGE:
- * 1. Initialize from GL thread (onSurfaceCreated):
- *    gpuDownscaler.init(EGL14.eglGetCurrentContext());
- * 
- * 2. In onDrawFrame (main thread):
- *    drawCameraPreview();
- *    GLES20.glFlush();  // Ensure texture is ready before background reads it
- *    gpuDownscaler.postFrame(cameraTextureId);
- * 
- * 3. In AI thread:
- *    Image image = gpuDownscaler.acquireLatestImage();
- *    if (image != null) {
- *        ByteBuffer buf = GpuDownscaler.getDirectBuffer(image);
- *        tflite.run(buf, output);  // Zero-copy!
- *        image.close();
- *    }
+ * GPU mosaic and road-frame downscaler. The AI lane uses direct readback;
+ * a separate shared EGL context serves the ImageReader-based probes and road frames.
  */
 public class GpuDownscaler {
     private static final String TAG = "GpuDownscaler";
@@ -152,8 +127,7 @@ public class GpuDownscaler {
     };
     private final Object producerCornerMapLock = new Object();
 
-    // readPixelsDirect scratch only (AI-lane thread); drawFrame and
-    // readPixelsSync run on other threads and keep per-call arrays.
+    // readPixelsDirect scratch only (AI-lane thread); drawFrame uses per-call arrays.
     private final float[] drawProducerCorners = new float[8];
     private final float[] drawFlipFlags = new float[8];
     private final int[] drawSavedViewport = new int[4];
@@ -217,35 +191,6 @@ public class GpuDownscaler {
         "    vTexCoord = (uTexMatrix * vec4(src, 0.0, 1.0)).xy;\n" +
         "}\n";
     
-    /**
-     * Creates the async downscaler with shared EGL context.
-     *
-     * @param mainThreadContext EGL context from main render thread (for texture sharing)
-     */
-    public GpuDownscaler(EGLContext mainThreadContext) {
-        this(mainThreadContext, null, false);
-    }
-
-    public GpuDownscaler(EGLContext mainThreadContext, float[] quadrantStripOffsetX) {
-        this(mainThreadContext, quadrantStripOffsetX, false);
-    }
-
-    public GpuDownscaler(
-            EGLContext mainThreadContext,
-            float[] quadrantStripOffsetX,
-            boolean isTexture2D) {
-        this(quadrantStripOffsetX, isTexture2D);
-        this.sharedContext = mainThreadContext;
-
-        // Start background thread
-        renderThread = new HandlerThread("GpuDownscalerThread");
-        renderThread.start();
-        renderHandler = new Handler(renderThread.getLooper());
-
-        // Initialize EGL on background thread
-        renderHandler.post(this::initGlOnThread);
-    }
-
     /**
      * Default constructor - call init() later with context.
      */
@@ -339,15 +284,6 @@ public class GpuDownscaler {
             throw new IllegalStateException("GpuDownscaler.init() must be called from GL thread");
         }
         return init(ctx);
-    }
-    
-    /**
-     * Legacy init with grayscale flag (ignored, always RGBA).
-     * 
-     * ⚠️ WARNING: Must be called from GL thread!
-     */
-    public boolean init(boolean grayscaleMode) {
-        return init();
     }
     
     private void initGlOnThread() {
@@ -446,17 +382,6 @@ public class GpuDownscaler {
         texCoordBuffer = GlUtil.createFloatBuffer(TEX_COORDS);
     }
 
-    /**
-     * Non-blocking call to trigger a downscale.
-     * Returns immediately - rendering happens on background thread.
-     * 
-     * @param textureId Camera texture ID from main thread
-     */
-    public void postFrame(int textureId) {
-        if (!initialized || renderHandler == null) return;
-        renderHandler.post(() -> drawFrame(textureId));
-    }
-    
     /**
      * Get the latest image for AI inference.
      * Call from AI thread, not main thread.
@@ -736,7 +661,7 @@ public class GpuDownscaler {
      * Synchronous downscale + readback. Draws the camera texture on the downscaler
      * thread, waits for completion, then reads the result.
      * 
-     * SOTA: Previous async pattern (postFrame + sleep(5ms) + acquireLatestImage) was
+     * SOTA: Previous asynchronous draw-and-sleep pattern was
      * unreliable — the 5ms sleep was often not enough for the render thread to complete,
      * resulting in stale frames. This synchronous approach ensures the readback always
      * gets the current frame.
@@ -853,20 +778,6 @@ public class GpuDownscaler {
     private boolean directGles3Available = false;
     private ByteBuffer directFallbackReadBuffer = null;
 
-    // Single-buffered SYNCHRONOUS readback path. Used by the camera-mapping
-    // dialog snapshot endpoint where surveillance may be off and the async
-    // PBO-ring path would hand back null until enough frames had been
-    // queued for a fence to signal. This path renders to a dedicated FBO
-    // and reads back in the SAME call — glReadPixels is implicitly a sync
-    // point, so the bytes are guaranteed valid on return. Independent
-    // FBO/texture from the async path so the AI lane's PBO ring state
-    // isn't disturbed.
-    private final MosaicTarget syncTarget = new MosaicTarget();
-    private ByteBuffer syncReadBuffer = null;
-    private byte[] syncRgbBuffer = null;
-    private final RgbaReadback syncReadback = new RgbaReadback(WIDTH, HEIGHT);
-    private boolean syncInitialized = false;
-    
     /**
      * SOTA Tier 2: PBO ring + fence-sync.
      *
@@ -1015,7 +926,7 @@ public class GpuDownscaler {
         return result;
     }
     
-    // Sync and direct readback already share this program on the caller's GL context.
+    // Direct readback owns this program on the caller's GL context.
     private boolean ensureDirectProgram(String path) {
         if (directProgram > 0) return true;
         directProgram = GlUtil.createProgram(VERTEX_SHADER, fragmentShader);
@@ -1027,7 +938,7 @@ public class GpuDownscaler {
         return true;
     }
 
-    /** A separate RGBA framebuffer/texture pair for each readback mode. */
+    /** RGBA framebuffer/texture pair for direct readback. */
     private static final class MosaicTarget {
         private int fbo = -1;
         private int texture = -1;
@@ -1122,103 +1033,13 @@ public class GpuDownscaler {
         }
     }
 
-    /**
-     * Synchronous single-shot readback. Renders {@code cameraTextureId} into
-     * a dedicated 640x480 FBO and reads it back in the same call. Always
-     * returns valid bytes on success (no double-buffer warmup race). MUST be
-     * called from the GL thread that owns {@code cameraTextureId}.
-     *
-     * <p>Used by the camera-mapping dialog snapshot endpoint where surveillance
-     * may be off and the async {@link #readPixelsDirect(int)} would return
-     * null on its first call. Independent of the async path's FBO state, so
-     * calling this here doesn't disturb the AI lane's PBO ring cadence.
-     *
-     * <p>Cost: ~10-15 ms (glReadPixels stalls until the GPU finishes the
-     * render). Acceptable for one-shot dialog use; do NOT call per-frame.
-     *
-     * <p>Lazy-inits its FBO + program on first call. Reuses the existing
-     * {@code directProgram} if {@link #initDirectFbo()} ran first; otherwise
-     * compiles a fresh program. The shared shader source is the same
-     * fragment shader the async path uses.
-     *
-     * @return RGB byte[] of length WIDTH*HEIGHT*3, Y-flipped to image
-     *         convention. Null on init failure.
-     */
-    public byte[] readPixelsSync(int cameraTextureId) {
-        if (!syncInitialized) initSyncFbo();
-        if (!syncInitialized) return null;
-
-        int[] savedViewport = new int[4];
-        GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, savedViewport, 0);
-
-        try {
-            // Render the camera texture into the sync FBO.
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, syncTarget.fbo);
-            drawMosaic(cameraTextureId, directProgram, directBindings, null, null);
-
-            // Read back from the FBO we just rendered to. glReadPixels is a
-            // synchronization point — the GPU finishes the draw before this
-            // returns, so the bytes are guaranteed valid.
-            syncReadBuffer.clear();
-            GLES20.glReadPixels(0, 0, WIDTH, HEIGHT, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, syncReadBuffer);
-
-            syncReadBuffer.rewind();
-            return syncReadback.pack(syncReadBuffer, syncRgbBuffer) ? syncRgbBuffer : null;
-        } catch (Throwable t) {
-            logger.warn("readPixelsSync failed: " + t.getClass().getSimpleName()
-                    + ": " + t.getMessage());
-            return null;
-        } finally {
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
-            GLES20.glViewport(savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3]);
-        }
-    }
-
-    private void initSyncFbo() {
-        try {
-            if (!ensureDirectProgram("Sync")) return;
-            if (!syncTarget.init("Sync")) return;
-
-            syncReadBuffer = ByteBuffer.allocateDirect(WIDTH * HEIGHT * 4);
-            syncReadBuffer.order(java.nio.ByteOrder.nativeOrder());
-            syncRgbBuffer = new byte[WIDTH * HEIGHT * 3];
-
-            if (vertexBuffer == null) vertexBuffer = GlUtil.createFloatBuffer(VERTEX_COORDS);
-            if (texCoordBuffer == null) texCoordBuffer = GlUtil.createFloatBuffer(TEX_COORDS);
-
-            syncInitialized = true;
-            logger.info("Synchronous FBO readback initialized (640x480)");
-        } catch (Exception e) {
-            logger.error("Failed to init sync FBO: " + e.getMessage());
-        }
-    }
-
-    // Utility methods
-    public static ByteBuffer getDirectBuffer(Image image) {
-        if (image == null) return null;
-        return image.getPlanes()[0].getBuffer();
-    }
-    
-    public static int getRowStride(Image image) {
-        if (image == null) return 0;
-        return image.getPlanes()[0].getRowStride();
-    }
-    
-    public static int getPixelStride(Image image) {
-        if (image == null) return 0;
-        return image.getPlanes()[0].getPixelStride();
-    }
-    
     public int getWidth() { return WIDTH; }
     public int getHeight() { return HEIGHT; }
-    public boolean isGrayscaleMode() { return false; }
-    public int getBytesPerPixel() { return 4; }
     public void recycleBuffer(byte[] buffer) { }
-    public String getPoolStats() { return "Async ImageReader (zero-stutter)"; }
 
     /**
      * Publishes the SurfaceTexture transform matrix that subsequent draws
-     * (drawFrame / readPixelsDirect / readPixelsSync) will upload to the
+     * (drawFrame / readPixelsDirect) will upload to the
      * shader's uTexMatrix. Plain copy — same GL thread as the readers.
      */
     public void setTextureMatrix(float[] matrix4x4) {
@@ -1304,7 +1125,7 @@ public class GpuDownscaler {
     
     /**
      * Release the direct-path GL resources (PBO ring, FBO, texture, shader
-     * program shared with the sync path). MUST be called on whichever GL
+     * program). MUST be called on whichever GL
      * thread/context originally allocated these — under Tier 1 wiring,
      * that is the AiLaneGl thread (because readPixelsDirect is invoked
      * from AiLaneGl.processOnce). The pipeline shutdown path calls this
@@ -1337,23 +1158,18 @@ public class GpuDownscaler {
             for (int i = 0; i < DIRECT_PBO_RING_SIZE; i++) directPboIds[i] = 0;
         }
         directTarget.release();
-        syncTarget.release();
         if (directProgram > 0) {
             try { GLES20.glDeleteProgram(directProgram); } catch (Throwable ignored) {}
             directProgram = -1;
         }
         // Drop CPU-side scratch + readback buffers. Deleting the GL handles
         // alone leaves ~5 MB of byte[] / direct ByteBuffers retained for the
-        // daemon's lifetime; lazy paths re-init these on next call.
+        // daemon's lifetime; lazy readback re-initializes these on next call.
         directReadback = null;
         directDiagnostics = null;
         directFallbackReadBuffer = null;
-        syncReadBuffer = null;
-        syncRgbBuffer = null;
-        syncReadback.clear();
         reusableRgbBuffer = null;
         directInitialized = false;
-        syncInitialized = false;
     }
 
     /**
