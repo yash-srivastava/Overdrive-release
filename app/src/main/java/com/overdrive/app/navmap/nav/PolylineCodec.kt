@@ -20,7 +20,7 @@ object PolylineCodec {
      * @param encoded the encoded polyline string (Valhalla `legs[].shape`)
      * @param precisionFactor the coordinate scaling factor; Valhalla uses
      *   `1e6` (the default), classic Google polylines use `1e5`
-     * @return decoded points; an empty list if [encoded] is blank or malformed
+     * @return decoded points; a truncated tail contributes no incomplete point
      */
     fun decode(encoded: String, precisionFactor: Double = 1e6): List<GeoPoint> {
         if (encoded.isEmpty()) return emptyList()
@@ -52,6 +52,9 @@ object PolylineCodec {
                     result = result or ((b and 0x1f) shl shift)
                     shift += 5
                 } while (b >= 0x20 && index < len)
+                // A continuation bit at EOF means the longitude is incomplete.
+                // Keep the complete prefix instead of appending a fabricated point.
+                if (b >= 0x20) break
                 val dLng = if (result and 1 != 0) (result shr 1).inv() else result shr 1
                 lng += dLng
 
