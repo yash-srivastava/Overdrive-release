@@ -283,6 +283,22 @@ int main() {
     odcpu::check(1920, 1080, 2560, 480, 1280, 720, 1, 0, false,
                  0.3f, 0.07f, 0.75f, 0.7f, 0.f, 16, rng);
     cases += 2;
+    // Legacy panoramic recording (5120x960 strip -> 2560x1920): the lower band
+    // must fit the cache, with and without the windshield top band.
+    for (int ws : {0, 1}) {
+        odcpu::DashcamRemapCache cache;
+        odcpu::RemapSpec p = {2560, 1920, 1, {0.75f, 0.5f, 0.f, 0.25f},
+                              0.12f, 0.04f, 0.75f, ws, 0.12f, 0.7f};
+        odcpu::RemapSource sr = {};
+        sr.w = 5120;
+        sr.h = 960;
+        cache.prepare(p, sr);
+        assert(cache.data && cache.needsFill);
+        assert(cache.planes[0].first == 1344 && cache.planes[1].first == 672);
+        odcpu::check(2560, 1920, 5120, 960, 1920, 1080, 1, 0, ws == 1,
+                     0.12f, 0.04f, 0.75f, 0.7f, 0.12f, 32, rng);
+        cases++;
+    }
     // Same-width windshield, including nonlinear correction of the lower band.
     for (int src = 0; src < 3; src++) {
         for (int dst = 0; dst < 3; dst++) {

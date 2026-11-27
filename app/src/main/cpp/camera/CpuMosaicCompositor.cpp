@@ -992,7 +992,8 @@ static void dashcamColumns(const RemapSpec& p, const RemapSource* src,
 
 // A CPU recording lane keeps its lens geometry for the whole session. Store
 // only fixed-point coordinates, never frame pointers or pixels. Limit the
-// cache to 8 MiB; prefer the entire corrected image, then the lower band.
+// cache to 16 MiB; prefer the entire corrected image, then the lower band.
+// 16 MiB holds the lower band of the legacy 2560x1920 mosaic (~14.7 MB).
 // The calling thread owns it, so a retired recording lane frees its table.
 struct DashcamRemapCache {
     struct Plane {
@@ -1045,7 +1046,7 @@ struct DashcamRemapCache {
             bottom[div - 1] = lo;
             plane.first = p.windshield ? lo : 0;
         }
-        constexpr size_t maxEntries = 8 * 1024 * 1024 / sizeof(int32_t);
+        constexpr size_t maxEntries = 16 * 1024 * 1024 / sizeof(int32_t);
         if (planes[0].size() + planes[1].size() > maxEntries) {
             planes[0].first = bottom[0];
             planes[1].first = bottom[1];
