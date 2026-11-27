@@ -105,16 +105,21 @@ public class CameraDaemonRestartSafetyContractTest {
                 "\"/api/surveillance/prepare-restart\", \"POST\""));
 
         String telegram = readRepositoryFile(
-                "app/src/main/java/com/overdrive/app/telegram/impl/DaemonManager.java");
+                "app/src/main/java/com/overdrive/app/daemon/telegram/DaemonCommandHandler.java");
+        int telegramStop = telegram.indexOf("private boolean stopDaemon(");
         int cameraBranch = telegram.indexOf(
-                "if (\"camera\".equals(name.toLowerCase()))");
+                "if (\"byd_cam_daemon\".equals(processName))", telegramStop);
         int telegramPrepare = telegram.indexOf(
-                "if (!prepareCameraRestart())", cameraBranch);
-        int firstKill = telegram.indexOf("kill -9", cameraBranch);
+                "prepareCameraDaemonForKill(ctx);", cameraBranch);
+        int firstKill = telegram.indexOf("ctx.execShell(", cameraBranch);
+        assertTrue(telegramStop >= 0);
+        assertTrue(cameraBranch > telegramStop);
         assertTrue(telegramPrepare > cameraBranch);
         assertTrue(firstKill > telegramPrepare);
-        assertTrue(telegram.contains(
-                "\"/api/surveillance/prepare-restart\", \"POST\""));
+        int prepareMethod = telegram.indexOf("private void prepareCameraDaemonForKill(");
+        int prepareRequest = telegram.indexOf(
+                "\"/api/surveillance/prepare-restart\", \"POST\"", prepareMethod);
+        assertTrue(prepareMethod >= 0 && prepareRequest > prepareMethod);
     }
 
     @Test
