@@ -94,15 +94,22 @@ public class CameraDaemonRestartSafetyContractTest {
                 "restartCameraDaemonForCameraSettings()"));
         assertFalse(reconfigureBody.contains("killDaemon("));
 
-        String appManager = readRepositoryFile(
-                "app/src/main/java/com/overdrive/app/daemon/management/DaemonManager.kt");
-        int appStop = appManager.indexOf("private fun stopCameraDaemon");
-        int appPrepare = appManager.indexOf("prepareCameraRestart()", appStop);
-        int appKill = appManager.indexOf("adbLauncher.killDaemon(", appPrepare);
-        assertTrue(appPrepare > appStop);
-        assertTrue(appKill > appPrepare);
-        assertTrue(appManager.contains(
-                "\"/api/surveillance/prepare-restart\", \"POST\""));
+        int settingsRestart = activity.indexOf(
+                "private fun restartCameraDaemonForCameraSettings()");
+        int settingsRestartEnd = activity.indexOf(
+                "private fun buildCameraPreviewPath(", settingsRestart);
+        assertTrue(settingsRestart >= 0);
+        assertTrue(settingsRestartEnd > settingsRestart);
+        String settingsRestartBody = activity.substring(
+                settingsRestart, settingsRestartEnd);
+        assertOrdered(settingsRestartBody,
+                "\"/api/surveillance/prepare-restart\", \"POST\"",
+                "if (code in 200..299) {\n",
+                "true\n                    } else {",
+                "runOnUiThread {",
+                "if (!prepared) {",
+                "return@runOnUiThread\n                }",
+                "daemonStartupManager.adbLauncher.killDaemon(");
 
         String telegram = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/daemon/telegram/DaemonCommandHandler.java");
