@@ -86,7 +86,7 @@ public final class TripExporter {
     }
 
     public static String csvRow(TripRecord t) {
-        double kwh = (t.kwhStart > 0 && t.kwhEnd > 0) ? Math.max(0, t.kwhStart - t.kwhEnd) : 0;
+        double kwh = t.getResolvedEnergyKwh();
         return fmt("yyyy-MM-dd", t.startTime) + "," + fmt("HH:mm", t.startTime) + "," + fmt("HH:mm", t.endTime)
                 + "," + (t.durationSeconds / 60) + "," + num(t.distanceKm, 2) + "," + num(t.avgSpeedKmh, 1)
                 + "," + t.maxSpeedKmh + "," + num(t.socStart, 1) + "," + num(t.socEnd, 1) + "," + num(kwh, 2)
