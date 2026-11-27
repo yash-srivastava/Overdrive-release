@@ -129,34 +129,8 @@ public final class Mp4Header {
     }
 
     private static long moovDurationMs(Window w) throws IOException {
-        int[] budget = {MAX_BOXES};
-        if (!validTree(w, 0, w.length, 0, budget)) return -1L;
-        long movie = -1L;
-        long longestTrack = -1L;
-        Box box = new Box();
-        int off = 0;
-        while (off < w.length) {
-            if (!box.read(w, off, w.length)) return -1L;
-            if (box.type == MVHD) {
-                movie = fullBoxDurationMs(w, off + box.header, off + box.size);
-            } else if (box.type == TRAK) {
-                long track = trackDurationMs(w, off + box.header, off + box.size);
-                if (track > longestTrack) longestTrack = track;
-            }
-            off += box.size;
-        }
-        long result = movie > 0 ? movie : longestTrack;
-        return result > 0 ? result : -1L;
-    }
-
-    private static long trackDurationMs(Window w, int from, int to) throws IOException {
-        Box box = new Box();
-        int mdia = child(w, from, to, MDIA, box);
-        if (mdia < 0) return -1L;
-        int mdiaEnd = mdia + box.size;
-        int mdhd = child(w, mdia + box.header, mdiaEnd, MDHD, box);
-        if (mdhd < 0) return -1L;
-        return fullBoxDurationMs(w, mdhd + box.header, mdhd + box.size);
+        long duration = walk(w, 0, w.length, 0, new int[]{MAX_BOXES}, ROOT);
+        return duration > 0 ? duration : -1L;
     }
 
     /** mvhd/mdhd share the version 0/1 layout for timescale and duration. */
@@ -186,31 +160,46 @@ public final class Mp4Header {
         return duration * 1000L / timescale;
     }
 
-    // On success, box describes the first matching child, not a later duplicate.
-    private static int child(Window w, int from, int to, int type, Box box) throws IOException {
-        int off = from;
-        while (off < to) {
-            if (!box.read(w, off, to)) return -1;
-            if (box.type == type) return off;
-            off += box.size;
-        }
-        return -1;
-    }
+    private static final int ROOT = 0, TRACK = 1, MEDIA = 2, VALIDATE_ONLY = 3;
+    // Distinguish a malformed tree from an absent/unknown duration (-1 or 0).
+    private static final long INVALID_TREE = Long.MIN_VALUE;
 
-    private static boolean validTree(Window w, int from, int to, int depth, int[] budget)
+    /** Validate every known container and collect durations during the same forward walk. */
+    private static long walk(Window w, int from, int to, int depth, int[] budget, int context)
             throws IOException {
-        if (depth > MAX_DEPTH) return false;
+        if (depth > MAX_DEPTH) return INVALID_TREE;
         int off = from;
         Box box = new Box();
+        long duration = -1L;
+        long longestTrack = -1L;
+        boolean firstChildSeen = false;
         while (off < to) {
-            if (--budget[0] < 0 || !box.read(w, off, to)) return false;
-            if (isContainer(box.type)
-                    && !validTree(w, off + box.header, off + box.size, depth + 1, budget)) {
-                return false;
+            if (--budget[0] < 0 || !box.read(w, off, to)) return INVALID_TREE;
+            int payload = off + box.header;
+            int end = off + box.size;
+            int childContext = VALIDATE_ONLY;
+            if (context == ROOT && box.type == TRAK) {
+                childContext = TRACK;
+            } else if (context == TRACK && box.type == MDIA && !firstChildSeen) {
+                childContext = MEDIA;
+                firstChildSeen = true;
             }
-            off += box.size;
+            if (isContainer(box.type)) {
+                long child = walk(w, payload, end, depth + 1, budget, childContext);
+                if (child == INVALID_TREE) return INVALID_TREE;
+                if (childContext == TRACK) longestTrack = Math.max(longestTrack, child);
+                else if (childContext == MEDIA) duration = child;
+            } else if (context == ROOT && box.type == MVHD) {
+                // Last movie header wins, including an unknown duration.
+                duration = fullBoxDurationMs(w, payload, end);
+            } else if (context == MEDIA && box.type == MDHD && !firstChildSeen) {
+                duration = fullBoxDurationMs(w, payload, end);
+                firstChildSeen = true;
+            }
+            off = end;
         }
-        return off == to;
+        if (off != to) return INVALID_TREE;
+        return context == ROOT && duration <= 0 ? longestTrack : duration;
     }
 
     private static final int MVHD = 0x6d766864, TRAK = 0x7472616b;

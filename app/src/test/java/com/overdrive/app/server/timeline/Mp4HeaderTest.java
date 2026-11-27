@@ -84,6 +84,37 @@ public class Mp4HeaderTest {
         assertTrue(source.bytesRead < 32 * 1024);
     }
 
+    @Test public void readsMetadataWindowsOnlyOnceDuringForwardWalk() throws IOException {
+        byte[] tables = box("minf", box("stbl", box("stsz", new byte[1024 * 1024])));
+        byte[] moov = join(box("mvhd", duration(0, 1000, 5000)),
+                track(duration(0, 1000, 3000), tables),
+                track(duration(0, 1000, 4000), tables), box("free", new byte[8192]));
+        byte[] file = box("moov", moov);
+        Source source = new Source(file, Integer.MAX_VALUE);
+        assertEquals(5000, Mp4Header.durationMs(source, file.length));
+        // Initial header plus three forward windows; no rewind to collect durations.
+        assertEquals(16 + 3 * Mp4Header.WINDOW_BYTES, source.bytesRead);
+    }
+
+    @Test public void onlyCollectsDurationFromDirectFirstTrackChildren() throws IOException {
+        byte[] nested = box("minf", box("mdia", box("mdhd", duration(0, 1000, 9000))));
+        byte[] first = box("mdia", box("minf", box("mdhd", duration(0, 1000, 8000))),
+                box("mdhd", duration(0, 0, 1)), box("mdhd", duration(0, 1000, 7000)));
+        byte[] second = box("mdia", box("mdhd", duration(0, 1000, 6000)));
+        byte[] moov = join(box("trak", nested, first, second),
+                box("trak", box("mdia"), second), track(duration(0, 1000, 2000)));
+        assertEquals(2000, read(moov, 19));
+        assertEquals(2000, Mp4Header.moovDurationMs(moov));
+    }
+
+    @Test public void validatesIgnoredDuplicateMediaContainer() throws IOException {
+        byte[] good = box("mdia", box("mdhd", duration(0, 1000, 2000)));
+        byte[] invalid = ByteBuffer.allocate(8).putInt(100).putInt(0x6d646864).array();
+        byte[] moov = join(box("mvhd", duration(0, 1000, 5000)),
+                box("trak", good, box("mdia", invalid)));
+        assertEquals(-1, read(moov, 13));
+    }
+
     @Test public void handlesCrossWindowExtendedHeaderAndPartialReads() throws IOException {
         byte[] moov = join(box("free", new byte[Mp4Header.WINDOW_BYTES - 12]),
                 extendedBox("mvhd", duration(1, 90000, 90000L * 123)));
