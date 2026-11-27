@@ -50,4 +50,36 @@ public class RgbaReadbackTest {
         assertFalse(packer.pack(source, new byte[11]));
         assertArrayEquals(expected, output);
     }
+
+    @Test public void rowPackingMatchesFullCopyAndPreservesBufferState() {
+        Random random = new Random(172);
+        for (int width : new int[]{1, 15, 16, 17, 63, 640}) {
+            int height = width == 640 ? 480 : 7;
+            RgbaReadback packer = new RgbaReadback(width, height);
+            byte[] data = new byte[width * height * 4];
+            byte[] actual = new byte[width * height * 3];
+            byte[] expected = new byte[actual.length];
+            byte[] row = new byte[width * 4];
+            for (ByteBuffer source : new ByteBuffer[]{ByteBuffer.allocate(data.length + 8),
+                    ByteBuffer.allocateDirect(data.length + 8)}) {
+                for (int frame = 0; frame < 5; frame++) {
+                    random.nextBytes(data);
+                    source.clear(); source.put(data).flip();
+                    assertTrue(packer.pack(source, expected));
+                    packer.clear();
+                    assertTrue(packer.packRows(source, actual, row));
+                    assertArrayEquals(expected, actual);
+                    assertEquals(0, source.position());
+                    assertEquals(data.length, source.limit());
+                }
+                source.limit(data.length - 1);
+                assertFalse(packer.packRows(source, actual, row));
+                source.limit(data.length);
+                source.position(1);
+                assertFalse(packer.packRows(source, actual, row));
+                assertEquals(1, source.position());
+                assertArrayEquals(expected, actual);
+            }
+        }
+    }
 }
