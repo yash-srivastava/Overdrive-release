@@ -188,6 +188,163 @@ static inline uint16_t clampU16(double v) {
 // rgba: premultiplied RGBA8 (Android ARGB_8888 memory order), drawn over the
 // top w x h of the frame with bilinear scaling, like the GL overlay pass.
 // Colour math is BT.601 limited range, the encoder's RGB->YUV conversion.
+//
+// The row, column and run helpers below are deliberately not inlined: a full
+// build (prepareOverlay) and a partial one (updateOverlay) run the same compiled
+// code on the same inputs, so they write the same bits under any float flags.
+
+// Horizontal bilinear mapping of one output column; identical for every row.
+struct OverlayColumn {
+    int x0, x1;
+    double wx;
+};
+
+// Vertical bilinear mapping of one output row.
+struct OverlayRow {
+    const uint8_t* r0;
+    const uint8_t* r1;
+    double wy;
+    int y0, y1;
+};
+
+// Bilinear weights on four identical texels return that texel exactly
+// (p + 0 * w == p, fused or not), so a uniform footprint depends only on its
+// colour. Opaque strips are mostly one colour: reuse the last uniform result.
+struct OverlayMemo {
+    uint32_t pix = 0;
+    bool valid = false;
+    uint16_t y = 0, inv = 256;
+    float a = 0.f, u = 0.f, v = 0.f;
+};
+
+// Preserve the original double expression and clamping (no accumulated step).
+__attribute__((noinline))
+static void overlayColumns(OverlayColumn* columns, int bw, int w) {
+    for (int x = 0; x < w; x++) {
+        double fx = ((double) x + 0.5) * bw / w - 0.5;
+        if (fx < 0) fx = 0;
+        if (fx > bw - 1) fx = bw - 1;
+        const int x0 = (int) fx;
+        columns[x] = {x0, x0 + 1 < bw ? x0 + 1 : x0, fx - x0};
+    }
+}
+
+__attribute__((noinline))
+static OverlayRow overlayRow(const uint8_t* rgba, int rowBytes, int bh, int h, int y) {
+    double fy = ((double) y + 0.5) * bh / h - 0.5;
+    if (fy < 0) fy = 0;
+    if (fy > bh - 1) fy = bh - 1;
+    const int y0 = (int) fy;
+    const int y1 = y0 + 1 < bh ? y0 + 1 : y0;
+    return {rgba + (size_t) y0 * rowBytes, rgba + (size_t) y1 * rowBytes, fy - y0, y0, y1};
+}
+
+// Luma entries, and each pixel's alpha and alpha-weighted U/V, for columns
+// [xa, xb) of one output row.
+__attribute__((noinline))
+static void overlayLumaRun(const OverlayRow& row, const OverlayColumn* columns, int xa, int xb,
+                           uint16_t* ty, float* rowA, float* rowU, float* rowV,
+                           OverlayMemo& sharedMemo) {
+    const uint8_t* r0 = row.r0;
+    const uint8_t* r1 = row.r1;
+    const double wy = row.wy;
+    OverlayMemo memo = sharedMemo;
+    for (int x = xa; x < xb; x++) {
+        const OverlayColumn& column = columns[x];
+        const int x0 = column.x0;
+        const int x1 = column.x1;
+        const double wx = column.wx;
+        const uint8_t* p00 = r0 + (size_t) x0 * 4;
+        const uint8_t* p01 = r0 + (size_t) x1 * 4;
+        const uint8_t* p10 = r1 + (size_t) x0 * 4;
+        const uint8_t* p11 = r1 + (size_t) x1 * 4;
+        if ((p00[3] | p01[3] | p10[3] | p11[3]) == 0) {
+            // Premultiplied: zero alpha means zero colour too.
+            ty[x * 2] = 0;
+            ty[x * 2 + 1] = 256;
+            rowA[x] = rowU[x] = rowV[x] = 0.0f;
+            continue;
+        }
+        uint32_t q00, q01, q10, q11;
+        memcpy(&q00, p00, 4);
+        memcpy(&q01, p01, 4);
+        memcpy(&q10, p10, 4);
+        memcpy(&q11, p11, 4);
+        const bool uniform = q00 == q01 && q00 == q10 && q00 == q11;
+        if (uniform && memo.valid && q00 == memo.pix) {
+            ty[x * 2] = memo.y;
+            ty[x * 2 + 1] = memo.inv;
+            rowA[x] = memo.a;
+            rowU[x] = memo.u;
+            rowV[x] = memo.v;
+            continue;
+        }
+        double c[4];
+        for (int ch = 0; ch < 4; ch++) {
+            const double top = p00[ch] + (p01[ch] - p00[ch]) * wx;
+            const double bot = p10[ch] + (p11[ch] - p10[ch]) * wx;
+            c[ch] = top + (bot - top) * wy;
+        }
+        const double a = c[3] / 255.0;
+        const double yv = 16.0 + (65.481 * c[0] + 128.553 * c[1] + 24.966 * c[2]) / 255.0;
+        const double uv = 128.0 + (-37.797 * c[0] - 74.203 * c[1] + 112.0 * c[2]) / 255.0;
+        const double vv = 128.0 + (112.0 * c[0] - 93.786 * c[1] - 18.214 * c[2]) / 255.0;
+        const long a256 = lround(a * 256.0);
+        ty[x * 2] = a256 > 0 ? clampU16(a * yv * 256.0) : 0;
+        ty[x * 2 + 1] = (uint16_t) (256 - (a256 < 0 ? 0 : a256 > 256 ? 256 : a256));
+        rowA[x] = (float) a;
+        rowU[x] = (float) (a * uv);
+        rowV[x] = (float) (a * vv);
+        if (uniform) {
+            memo.pix = q00;
+            memo.valid = true;
+            memo.y = ty[x * 2];
+            memo.inv = ty[x * 2 + 1];
+            memo.a = rowA[x];
+            memo.u = rowU[x];
+            memo.v = rowV[x];
+        }
+    }
+    sharedMemo = memo;
+}
+
+// Chroma entries for cells [xca, xcb) from the two luma rows computed above.
+__attribute__((noinline))
+static void overlayChromaRun(float* const rowA[2], float* const rowU[2], float* const rowV[2],
+                             int xca, int xcb, uint16_t* tc) {
+    for (int xc = xca; xc < xcb; xc++) {
+        const int x = xc * 2;
+        const double a = ((double) rowA[0][x] + rowA[0][x + 1] + rowA[1][x] + rowA[1][x + 1]) * 0.25;
+        // Zero (or rounded-to-zero) alpha is an identity blend. Do not
+        // load/average the two chroma channels when their weights are unused.
+        const long a256 = a == 0.0 ? 0 : lround(a * 256.0);
+        if (a256 <= 0) {
+            tc[xc * 3] = tc[xc * 3 + 1] = 0;
+            tc[xc * 3 + 2] = 256;
+            continue;
+        }
+        const double pu = ((double) rowU[0][x] + rowU[0][x + 1] + rowU[1][x] + rowU[1][x + 1]) * 0.25;
+        const double pv = ((double) rowV[0][x] + rowV[0][x + 1] + rowV[1][x] + rowV[1][x + 1]) * 0.25;
+        tc[xc * 3] = clampU16(pu * 256.0);
+        tc[xc * 3 + 1] = clampU16(pv * 256.0);
+        tc[xc * 3 + 2] = (uint16_t) (256 - (a256 > 256 ? 256 : a256));
+    }
+}
+
+// [first, last + 1) of the entries that blend something (inverse alpha below 256), or {0, 0}.
+static void overlaySpan(const uint16_t* inv, int n, int step, int32_t* span) {
+    int first = 0;
+    while (first < n && inv[(size_t) first * step] == 256) first++;
+    if (first == n) {
+        span[0] = span[1] = 0;
+        return;
+    }
+    int last = n - 1;
+    while (inv[(size_t) last * step] == 256) last--;
+    span[0] = first;
+    span[1] = last + 1;
+}
+
 bool prepareOverlay(const uint8_t* rgba, size_t rgbaCap, int bw, int bh, int rowBytes,
                     uint8_t* out, size_t outCap, int w, int h) {
     const size_t need = overlayBytes(w, h);
@@ -214,142 +371,161 @@ bool prepareOverlay(const uint8_t* rgba, size_t rgbaCap, int bw, int bh, int row
     float* rowU[2] = {scratch + 2 * (size_t) w, scratch + 3 * (size_t) w};
     float* rowV[2] = {scratch + 4 * (size_t) w, scratch + 5 * (size_t) w};
 
-    // The horizontal bilinear mapping is identical for every output row.
-    // Preserve the original double expression and clamping (no accumulated step).
-    struct Column {
-        int x0, x1;
-        double wx;
-    };
-    Column* columns = new (std::nothrow) Column[w];
+    OverlayColumn* columns = new (std::nothrow) OverlayColumn[w];
     if (!columns) {
         delete[] scratch;
         return false;
     }
-    for (int x = 0; x < w; x++) {
-        double fx = ((double) x + 0.5) * bw / w - 0.5;
-        if (fx < 0) fx = 0;
-        if (fx > bw - 1) fx = bw - 1;
-        const int x0 = (int) fx;
-        columns[x] = {x0, x0 + 1 < bw ? x0 + 1 : x0, fx - x0};
-    }
+    overlayColumns(columns, bw, w);
 
-    // Bilinear weights on four identical texels return that texel exactly
-    // (p + 0 * w == p, fused or not), so a uniform footprint depends only on its
-    // colour. Opaque strips are mostly one colour: reuse the last uniform result.
-    uint32_t memoPix = 0;
-    bool memoValid = false, memoVisible = false;
-    uint16_t memoY = 0, memoInv = 256;
-    float memoA = 0.f, memoU = 0.f, memoV = 0.f;
-
+    OverlayMemo memo;
     for (int yc = 0; yc < h / 2; yc++) {
         for (int k = 0; k < 2; k++) {
             const int y = yc * 2 + k;
-            double fy = ((double) y + 0.5) * bh / h - 0.5;
-            if (fy < 0) fy = 0;
-            if (fy > bh - 1) fy = bh - 1;
-            const int y0 = (int) fy;
-            const int y1 = y0 + 1 < bh ? y0 + 1 : y0;
-            const double wy = fy - y0;
-            const uint8_t* r0 = rgba + (size_t) y0 * rowBytes;
-            const uint8_t* r1 = rgba + (size_t) y1 * rowBytes;
-            int first = -1, last = -1;
+            const OverlayRow row = overlayRow(rgba, rowBytes, bh, h, y);
             uint16_t* ty = tabY + (size_t) y * w * 2;
-            for (int x = 0; x < w; x++) {
-                const Column& column = columns[x];
-                const int x0 = column.x0;
-                const int x1 = column.x1;
-                const double wx = column.wx;
-                const uint8_t* p00 = r0 + (size_t) x0 * 4;
-                const uint8_t* p01 = r0 + (size_t) x1 * 4;
-                const uint8_t* p10 = r1 + (size_t) x0 * 4;
-                const uint8_t* p11 = r1 + (size_t) x1 * 4;
-                if ((p00[3] | p01[3] | p10[3] | p11[3]) == 0) {
-                    // Premultiplied: zero alpha means zero colour too.
-                    ty[x * 2] = 0;
-                    ty[x * 2 + 1] = 256;
-                    rowA[k][x] = rowU[k][x] = rowV[k][x] = 0.0f;
-                    continue;
-                }
-                uint32_t q00, q01, q10, q11;
-                memcpy(&q00, p00, 4);
-                memcpy(&q01, p01, 4);
-                memcpy(&q10, p10, 4);
-                memcpy(&q11, p11, 4);
-                const bool uniform = q00 == q01 && q00 == q10 && q00 == q11;
-                if (uniform && memoValid && q00 == memoPix) {
-                    ty[x * 2] = memoY;
-                    ty[x * 2 + 1] = memoInv;
-                    if (memoVisible) {
-                        if (first < 0) first = x;
-                        last = x;
-                    }
-                    rowA[k][x] = memoA;
-                    rowU[k][x] = memoU;
-                    rowV[k][x] = memoV;
-                    continue;
-                }
-                double c[4];
-                for (int ch = 0; ch < 4; ch++) {
-                    const double top = p00[ch] + (p01[ch] - p00[ch]) * wx;
-                    const double bot = p10[ch] + (p11[ch] - p10[ch]) * wx;
-                    c[ch] = top + (bot - top) * wy;
-                }
-                const double a = c[3] / 255.0;
-                const double yv = 16.0 + (65.481 * c[0] + 128.553 * c[1] + 24.966 * c[2]) / 255.0;
-                const double uv = 128.0 + (-37.797 * c[0] - 74.203 * c[1] + 112.0 * c[2]) / 255.0;
-                const double vv = 128.0 + (112.0 * c[0] - 93.786 * c[1] - 18.214 * c[2]) / 255.0;
-                const long a256 = lround(a * 256.0);
-                ty[x * 2] = a256 > 0 ? clampU16(a * yv * 256.0) : 0;
-                ty[x * 2 + 1] = (uint16_t) (256 - (a256 < 0 ? 0 : a256 > 256 ? 256 : a256));
-                if (a256 > 0) {
-                    if (first < 0) first = x;
-                    last = x;
-                }
-                rowA[k][x] = (float) a;
-                rowU[k][x] = (float) (a * uv);
-                rowV[k][x] = (float) (a * vv);
-                if (uniform) {
-                    memoPix = q00;
-                    memoValid = true;
-                    memoVisible = a256 > 0;
-                    memoY = ty[x * 2];
-                    memoInv = ty[x * 2 + 1];
-                    memoA = rowA[k][x];
-                    memoU = rowU[k][x];
-                    memoV = rowV[k][x];
-                }
-            }
-            spansY[y * 2] = first < 0 ? 0 : first;
-            spansY[y * 2 + 1] = first < 0 ? 0 : last + 1;
+            overlayLumaRun(row, columns, 0, w, ty, rowA[k], rowU[k], rowV[k], memo);
+            overlaySpan(ty + 1, w, 2, spansY + (size_t) y * 2);
         }
-        int first = -1, last = -1;
         uint16_t* tc = tabC + (size_t) yc * wc * 3;
-        for (int xc = 0; xc < wc; xc++) {
-            const int x = xc * 2;
-            const double a = ((double) rowA[0][x] + rowA[0][x + 1] + rowA[1][x] + rowA[1][x + 1]) * 0.25;
-            // Zero (or rounded-to-zero) alpha is an identity blend. Do not
-            // load/average the two chroma channels when their weights are unused.
-            const long a256 = a == 0.0 ? 0 : lround(a * 256.0);
-            if (a256 <= 0) {
-                tc[xc * 3] = tc[xc * 3 + 1] = 0;
-                tc[xc * 3 + 2] = 256;
-                continue;
-            }
-            const double pu = ((double) rowU[0][x] + rowU[0][x + 1] + rowU[1][x] + rowU[1][x + 1]) * 0.25;
-            const double pv = ((double) rowV[0][x] + rowV[0][x + 1] + rowV[1][x] + rowV[1][x + 1]) * 0.25;
-            tc[xc * 3] = clampU16(pu * 256.0);
-            tc[xc * 3 + 1] = clampU16(pv * 256.0);
-            tc[xc * 3 + 2] = (uint16_t) (256 - (a256 > 256 ? 256 : a256));
-            if (first < 0) first = xc;
-            last = xc;
-        }
-        spansC[yc * 2] = first < 0 ? 0 : first;
-        spansC[yc * 2 + 1] = first < 0 ? 0 : last + 1;
+        overlayChromaRun(rowA, rowU, rowV, 0, wc, tc);
+        overlaySpan(tc + 2, wc, 3, spansC + (size_t) yc * 2);
     }
     delete[] columns;
     delete[] scratch;
     hdr[3] = 1;
     return true;
+}
+
+// Sets every texel's alpha to 255: premultiplied RGB at full alpha is the overlay
+// drawn over black (the opaque recording strip).
+bool forceOpaque(uint8_t* rgba, size_t rgbaCap, int bw, int bh, int rowBytes) {
+    if (!rgba || bw <= 0 || bh <= 0 || rowBytes < bw * 4) return false;
+    if ((uint64_t) (bh - 1) * (uint64_t) rowBytes + (uint64_t) bw * 4u > (uint64_t) rgbaCap) return false;
+    for (int y = 0; y < bh; y++) {
+        uint8_t* alpha = rgba + (size_t) y * rowBytes + 3;
+        for (int x = 0; x < bw; x++) alpha[(size_t) x * 4] = 0xFF;
+    }
+    return true;
+}
+
+// out holds the table prepareOverlay built from prev. Rewrites only the cells whose
+// source texels differ in rgba, leaving exactly the table prepareOverlay(rgba) writes.
+// Returns the chroma cells recomputed (0: same bitmap), or -1 when it cannot run and
+// the caller must rebuild with prepareOverlay; out is untouched in that case.
+int updateOverlay(const uint8_t* prev, size_t prevCap, const uint8_t* rgba, size_t rgbaCap,
+                  int bw, int bh, int rowBytes, uint8_t* out, size_t outCap, int w, int h) {
+    const size_t need = overlayBytes(w, h);
+    if (!prev || !rgba || !out || need == 0 || need > outCap) return -1;
+    if (bw <= 0 || bh <= 0 || rowBytes < bw * 4) return -1;
+    const uint64_t bitmapBytes = (uint64_t) (bh - 1) * (uint64_t) rowBytes + (uint64_t) bw * 4u;
+    if (bitmapBytes > (uint64_t) rgbaCap || bitmapBytes > (uint64_t) prevCap) return -1;
+    if (((uintptr_t) out & 3u) != 0) return -1;
+    int32_t* hdr = (int32_t*) out;
+    if (hdr[0] != kOverlayMagic || hdr[1] != w || hdr[2] != h || hdr[3] != 1) return -1;
+
+    // Changed source rows, and changed columns in tiles of 8 texels (text edits are
+    // narrow). Their product over-covers the changed texels, which is always safe.
+    constexpr int kTile = 8;
+    const int tiles = (bw + kTile - 1) / kTile;
+    const int wc = w / 2, hc = h / 2;
+    // rowsBefore[r] / tilesBefore[t]: changed rows below r / changed tiles below t.
+    int32_t* counts = new (std::nothrow) int32_t[(size_t) bh + tiles + 2];
+    if (!counts) return -1;
+    int32_t* rowsBefore = counts;
+    int32_t* tilesBefore = counts + bh + 1;
+    uint8_t* tileChanged = new (std::nothrow) uint8_t[(size_t) tiles + wc];
+    if (!tileChanged) {
+        delete[] counts;
+        return -1;
+    }
+    uint8_t* cellChanged = tileChanged + tiles;
+    memset(tileChanged, 0, (size_t) tiles);
+    rowsBefore[0] = 0;
+    for (int r = 0; r < bh; r++) {
+        const uint8_t* was = prev + (size_t) r * rowBytes;
+        const uint8_t* now = rgba + (size_t) r * rowBytes;
+        const bool changed = memcmp(was, now, (size_t) bw * 4) != 0;
+        rowsBefore[r + 1] = rowsBefore[r] + (changed ? 1 : 0);
+        if (!changed) continue;
+        for (int t = 0; t < tiles; t++) {
+            if (tileChanged[t]) continue;
+            const int x = t * kTile;
+            const int n = bw - x < kTile ? bw - x : kTile;
+            if (memcmp(was + (size_t) x * 4, now + (size_t) x * 4, (size_t) n * 4) != 0) tileChanged[t] = 1;
+        }
+    }
+    if (rowsBefore[bh] == 0) {
+        delete[] tileChanged;
+        delete[] counts;
+        return 0;
+    }
+    tilesBefore[0] = 0;
+    for (int t = 0; t < tiles; t++) tilesBefore[t + 1] = tilesBefore[t] + tileChanged[t];
+
+    float* scratch = new (std::nothrow) float[(size_t) w * 6];
+    OverlayColumn* columns = new (std::nothrow) OverlayColumn[w];
+    if (!scratch || !columns) {
+        delete[] columns;
+        delete[] scratch;
+        delete[] tileChanged;
+        delete[] counts;
+        return -1;
+    }
+    float* rowA[2] = {scratch, scratch + w};
+    float* rowU[2] = {scratch + 2 * (size_t) w, scratch + 3 * (size_t) w};
+    float* rowV[2] = {scratch + 4 * (size_t) w, scratch + 5 * (size_t) w};
+    overlayColumns(columns, bw, w);
+
+    // A chroma cell covers luma columns 2xc and 2xc + 1; x0 never decreases with x,
+    // so their texels lie in [columns[2xc].x0, columns[2xc + 1].x1].
+    for (int xc = 0; xc < wc; xc++) {
+        const int ta = columns[xc * 2].x0 / kTile;
+        const int tb = columns[xc * 2 + 1].x1 / kTile;
+        cellChanged[xc] = tilesBefore[tb + 1] - tilesBefore[ta] > 0;
+    }
+
+    int32_t* spansY = hdr + 4;
+    int32_t* spansC = spansY + (size_t) h * 2;
+    uint16_t* tabY = (uint16_t*) (spansC + (size_t) hc * 2);
+    uint16_t* tabC = tabY + (size_t) w * h * 2;
+    OverlayMemo memo;
+    int cells = 0;
+    for (int yc = 0; yc < hc; yc++) {
+        const OverlayRow rows[2] = {overlayRow(rgba, rowBytes, bh, h, yc * 2),
+                                    overlayRow(rgba, rowBytes, bh, h, yc * 2 + 1)};
+        // Same argument vertically: the cell's texels lie in rows [rows[0].y0, rows[1].y1].
+        if (rowsBefore[rows[1].y1 + 1] - rowsBefore[rows[0].y0] == 0) continue;
+        uint16_t* tc = tabC + (size_t) yc * wc * 3;
+        bool touched = false;
+        for (int xc = 0; xc < wc;) {
+            if (!cellChanged[xc]) {
+                xc++;
+                continue;
+            }
+            int xe = xc + 1;
+            while (xe < wc && cellChanged[xe]) xe++;
+            for (int k = 0; k < 2; k++) {
+                overlayLumaRun(rows[k], columns, xc * 2, xe * 2,
+                               tabY + (size_t) (yc * 2 + k) * w * 2, rowA[k], rowU[k], rowV[k], memo);
+            }
+            overlayChromaRun(rowA, rowU, rowV, xc, xe, tc);
+            cells += xe - xc;
+            touched = true;
+            xc = xe;
+        }
+        if (!touched) continue;
+        for (int k = 0; k < 2; k++) {
+            const int y = yc * 2 + k;
+            overlaySpan(tabY + (size_t) y * w * 2 + 1, w, 2, spansY + (size_t) y * 2);
+        }
+        overlaySpan(tc + 2, wc, 3, spansC + (size_t) yc * 2);
+    }
+    delete[] columns;
+    delete[] scratch;
+    delete[] tileChanged;
+    delete[] counts;
+    return cells;
 }
 
 static inline uint8_t mix(uint32_t premul, uint32_t inv, uint32_t dst) {
@@ -1538,6 +1714,23 @@ Java_com_overdrive_app_surveillance_CpuMosaicCompositor_nativePrepareOverlay(
     if (!src || !out || srcCap <= 0 || outCap <= 0) return JNI_FALSE;
     return odcpu::prepareOverlay(src, (size_t) srcCap, bw, bh, rowBytes, out, (size_t) outCap, w, h)
             ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_overdrive_app_surveillance_CpuMosaicCompositor_nativeUpdateOverlay(
+        JNIEnv* env, jclass, jobject previous, jobject rgba, jint bw, jint bh, jint rowBytes,
+        jboolean opaque, jobject table, jint w, jint h) {
+    if (!previous || !rgba || !table) return -1;
+    const uint8_t* was = (const uint8_t*) env->GetDirectBufferAddress(previous);
+    uint8_t* now = (uint8_t*) env->GetDirectBufferAddress(rgba);
+    uint8_t* out = (uint8_t*) env->GetDirectBufferAddress(table);
+    const jlong wasCap = env->GetDirectBufferCapacity(previous);
+    const jlong nowCap = env->GetDirectBufferCapacity(rgba);
+    const jlong outCap = env->GetDirectBufferCapacity(table);
+    if (!was || !now || !out || was == now || wasCap <= 0 || nowCap <= 0 || outCap <= 0) return -1;
+    if (opaque == JNI_TRUE && !odcpu::forceOpaque(now, (size_t) nowCap, bw, bh, rowBytes)) return -1;
+    return odcpu::updateOverlay(was, (size_t) wasCap, now, (size_t) nowCap, bw, bh, rowBytes,
+                                out, (size_t) outCap, w, h);
 }
 
 extern "C" JNIEXPORT jint JNICALL
