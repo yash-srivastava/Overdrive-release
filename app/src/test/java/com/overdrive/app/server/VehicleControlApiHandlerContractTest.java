@@ -489,8 +489,12 @@ public class VehicleControlApiHandlerContractTest {
                 "\"dilink5_mode_required\""));
         assertTrue(ui.contains(
                 "projection_dilink5_mode_required"));
-        assertTrue(ui.contains(
-                "!casting && !diLink5ModeRequired"));
+        // The UI refuses to start a cast while DiLink 5 mode is still required.
+        int castClicked = ui.indexOf("private fun onCastClicked(");
+        assertTrue(castClicked >= 0);
+        int guard = ui.indexOf("if (diLink5ModeRequired) {", castClicked);
+        int post = ui.indexOf("postCast(pkg)", castClicked);
+        assertTrue(guard > castClicked && post > guard);
     }
 
     /**
