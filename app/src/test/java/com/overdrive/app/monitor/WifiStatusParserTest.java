@@ -148,6 +148,28 @@ public class WifiStatusParserTest {
     }
 
     @Test
+    public void incompleteConnectedSummaryLeavesSsidUnknown() {
+        for (String raw : new String[]{"\"", "\"HomeNet"}) {
+            WifiStatusParser.Parsed p = WifiStatusParser.parse("Wifi is connected to " + raw);
+            assertTrue(p.connected);
+            assertNull(p.ssid);
+            assertNull(p.meteredHint);
+        }
+    }
+
+    @Test
+    public void incompleteConnectedSummaryDoesNotMaskCompleteWifiInfo() {
+        String summary = "Wifi is connected to \"HomeNet";
+        String info = INFO_PREFIX + "\"HomeNetwork\"" + INFO_MIDDLE + "true, score: 60";
+        for (String output : new String[]{summary + "\n" + info, info + "\n" + summary}) {
+            WifiStatusParser.Parsed p = WifiStatusParser.parse(output);
+            assertTrue(p.connected);
+            assertEquals("HomeNetwork", p.ssid);
+            assertEquals(Boolean.TRUE, p.meteredHint);
+        }
+    }
+
+    @Test
     public void exactUnknownMarkersAreRedactedButLegitimateNamesArePreserved() {
         assertNull(WifiStatusParser.normalizeSsid("<unknown ssid>"));
         assertNull(WifiStatusParser.normalizeSsid("\"<UNKNOWN SSID>\""));
