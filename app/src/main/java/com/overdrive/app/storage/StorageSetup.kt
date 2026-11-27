@@ -247,43 +247,4 @@ object StorageSetup {
         Log.i(TAG, "========== STORAGE SETUP END (success=$success) ==========")
         return success
     }
-    
-    /**
-     * Check if directories exist and are writable.
-     */
-    fun areDirectoriesReady(): Boolean {
-        val baseDir = File(BASE_DIR)
-        if (!baseDir.exists() || !baseDir.canWrite()) {
-            return false
-        }
-        
-        for (subdir in SUBDIRS) {
-            val dir = File(baseDir, subdir)
-            if (!dir.exists() || !dir.canWrite()) {
-                return false
-            }
-        }
-        
-        return true
-    }
-    
-    /**
-     * Get the base directory path.
-     */
-    fun getBasePath(): String = BASE_DIR
-    
-    /**
-     * Get recordings directory path.
-     */
-    fun getRecordingsPath(): String = "$BASE_DIR/recordings"
-    
-    /**
-     * Get surveillance directory path.
-     */
-    fun getSurveillancePath(): String = "$BASE_DIR/surveillance"
-    
-    /**
-     * Get proximity directory path.
-     */
-    fun getProximityPath(): String = "$BASE_DIR/proximity"
 }
