@@ -18,8 +18,10 @@ import java.net.Socket
  *
  * Until the daemon has answered once, reads fall back to the legacy `roadSense.overlayState`
  * config key (an older daemon still writing it during an update, or the daemon not up yet).
- * After that the daemon no longer writes the key, so a failed poll keeps the last state and
- * its timestamp goes stale exactly like a daemon that stopped publishing.
+ * After that the key is frozen, so it is never read again: a failed poll keeps the last state
+ * (its timestamp goes stale like a daemon that stopped publishing) and retries on the next poll.
+ * Polls run back to back on the caller's thread, so a hung daemon only slows them (at most
+ * one connect plus one read timeout each), well inside the overlays' stale windows.
  *
  * Not thread-safe: one instance per polling thread. [close] may be called from any thread.
  */
@@ -31,22 +33,27 @@ class RoadSenseOverlayClient {
     private var cached: JSONObject? = null
     private var answered = false
     private var retryAtMs = 0L
+    private var timedOut = false
     @Volatile private var closed = false
 
     /** The overlay state in the [OverlayState] codec, or null. Valid until the next call. */
     fun read(): JSONObject? {
         val now = SystemClock.elapsedRealtime()
         if (!closed && now >= retryAtMs) {
-            // The daemon drops a connection idle for 30 s: a reused socket gets one retry on a fresh one.
+            // The daemon drops a connection idle for 30 s: a reused socket that was closed
+            // under us gets one retry on a fresh one (not after a timeout: that's a busy daemon).
             val reused = socket != null
-            val reply = exchange() ?: if (reused) exchange() else null
+            timedOut = false
+            val reply = exchange() ?: if (reused && !timedOut) exchange() else null
             if (reply != null && reply.has("v")) {
                 answered = true
                 return apply(reply)
             }
-            // no reply, or an older daemon without the command: try again shortly
-            disconnect()
-            retryAtMs = now + RETRY_MS
+            if (reply != null) {
+                // an older daemon without the command: ask again in a while
+                disconnect()
+                retryAtMs = now + UNSUPPORTED_RETRY_MS
+            }
         }
         return if (answered) cached else legacy()
     }
@@ -58,10 +65,10 @@ class RoadSenseOverlayClient {
 
     private fun apply(reply: JSONObject): JSONObject? {
         if (!reply.has("ts")) {
-            // nothing published since the daemon started: the last drive's state, as before
+            // RoadSense isn't running in the daemon: no state
             cached = null
             etag = ""
-            return legacy()
+            return null
         }
         reply.optJSONObject("state")?.let { cached = it; etag = reply.optString("v") }
         val c = cached
@@ -81,7 +88,8 @@ class RoadSenseOverlayClient {
         out!!.flush()
         val line = reader!!.readLine() ?: throw java.io.EOFException()
         JSONObject(line)
-    } catch (_: Throwable) {
+    } catch (t: Throwable) {
+        if (t is java.net.SocketTimeoutException) timedOut = true
         disconnect()
         null
     }
@@ -119,6 +127,6 @@ class RoadSenseOverlayClient {
         private const val DAEMON_IPC_PORT = 19877
         private const val CONNECT_TIMEOUT_MS = 500
         private const val READ_TIMEOUT_MS = 1000
-        private const val RETRY_MS = 5_000L
+        private const val UNSUPPORTED_RETRY_MS = 5_000L
     }
 }

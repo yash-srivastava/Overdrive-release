@@ -534,7 +534,7 @@ class RoadSenseOverlayService : Service() {
      */
     private fun renderSignature(state: OverlayState?, warnMode: String): String {
         if (state == null) return "null"
-        val stale = System.currentTimeMillis() - state.updatedMs > STALE_MS
+        val stale = isStale(state)
         // Recompute on a config/theme change too (themedCtx swap re-tints chips).
         return buildString {
             append(warnMode); append('|')
@@ -553,13 +553,17 @@ class RoadSenseOverlayService : Service() {
         }
     }
 
+    /** Not published recently. A future ts (clock stepped back) is stale too, never live. */
+    private fun isStale(state: OverlayState): Boolean =
+        kotlin.math.abs(System.currentTimeMillis() - state.updatedMs) > STALE_MS
+
     /** Apply state to the views. MUST run on the main thread (view mutations).
      *  [state]/[warnMode] were read off the IO thread by the poll loop. */
     private fun render(state: OverlayState?, warnMode: String) {
         if (state == null) return
         // Staleness: if the daemon hasn't written recently, treat as no-data and
         // show the scanning/idle state rather than a frozen hazard.
-        val stale = System.currentTimeMillis() - state.updatedMs > STALE_MS
+        val stale = isStale(state)
 
         // Reflect the real warnMode on the quick-toggle chips every render (audit
         // UI #2: chips previously never showed actual state).

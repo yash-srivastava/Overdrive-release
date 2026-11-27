@@ -21,11 +21,18 @@ object RoadSenseOverlayChannel {
     private var version = 0L
 
     fun publish(s: OverlayState) {
+        synchronized(lock) { put(s) }
+    }
+
+    /** Before the first tick publishes: a stale (ts 0) idle state, so the pill shows Idle and the calibration dot. */
+    fun seedIfEmpty(s: OverlayState) {
+        synchronized(lock) { if (state == null) put(s) }
+    }
+
+    private fun put(s: OverlayState) {
+        state = s
         val key = s.copy(calibrationLevel = s.calLevel().ordinal.toFloat(), updatedMs = 0L)
-        synchronized(lock) {
-            state = s
-            if (key != drawn) { drawn = key; version++ }
-        }
+        if (key != drawn) { drawn = key; version++ }
     }
 
     /** Latest published state (its updatedMs is the last warn-tick publish), or null. */

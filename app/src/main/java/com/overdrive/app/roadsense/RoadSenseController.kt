@@ -507,6 +507,8 @@ class RoadSenseController @JvmOverloads constructor(
         // trip (a head unit power-cycles with the car, so without this the overlay
         // would sit at "Calibrating" forever and never reach the mature state).
         restoreCalibration()
+        com.overdrive.app.roadsense.warn.RoadSenseOverlayChannel.seedIfEmpty(
+            com.overdrive.app.roadsense.warn.OverlayState.idle(calibrator.maturity, 0, 0L))
         imuStream.setListener(this)
         // Self-driven housekeeping tick (kept out of CameraDaemon per D-023 notes):
         // ~2 Hz drives both the regime poll (gear/ACC → sidecar start/stop) and the
