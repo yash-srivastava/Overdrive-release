@@ -233,6 +233,14 @@ bool prepareOverlay(const uint8_t* rgba, size_t rgbaCap, int bw, int bh, int row
         columns[x] = {x0, x0 + 1 < bw ? x0 + 1 : x0, fx - x0};
     }
 
+    // Bilinear weights on four identical texels return that texel exactly
+    // (p + 0 * w == p, fused or not), so a uniform footprint depends only on its
+    // colour. Opaque strips are mostly one colour: reuse the last uniform result.
+    uint32_t memoPix = 0;
+    bool memoValid = false, memoVisible = false;
+    uint16_t memoY = 0, memoInv = 256;
+    float memoA = 0.f, memoU = 0.f, memoV = 0.f;
+
     for (int yc = 0; yc < h / 2; yc++) {
         for (int k = 0; k < 2; k++) {
             const int y = yc * 2 + k;
@@ -262,6 +270,24 @@ bool prepareOverlay(const uint8_t* rgba, size_t rgbaCap, int bw, int bh, int row
                     rowA[k][x] = rowU[k][x] = rowV[k][x] = 0.0f;
                     continue;
                 }
+                uint32_t q00, q01, q10, q11;
+                memcpy(&q00, p00, 4);
+                memcpy(&q01, p01, 4);
+                memcpy(&q10, p10, 4);
+                memcpy(&q11, p11, 4);
+                const bool uniform = q00 == q01 && q00 == q10 && q00 == q11;
+                if (uniform && memoValid && q00 == memoPix) {
+                    ty[x * 2] = memoY;
+                    ty[x * 2 + 1] = memoInv;
+                    if (memoVisible) {
+                        if (first < 0) first = x;
+                        last = x;
+                    }
+                    rowA[k][x] = memoA;
+                    rowU[k][x] = memoU;
+                    rowV[k][x] = memoV;
+                    continue;
+                }
                 double c[4];
                 for (int ch = 0; ch < 4; ch++) {
                     const double top = p00[ch] + (p01[ch] - p00[ch]) * wx;
@@ -282,6 +308,16 @@ bool prepareOverlay(const uint8_t* rgba, size_t rgbaCap, int bw, int bh, int row
                 rowA[k][x] = (float) a;
                 rowU[k][x] = (float) (a * uv);
                 rowV[k][x] = (float) (a * vv);
+                if (uniform) {
+                    memoPix = q00;
+                    memoValid = true;
+                    memoVisible = a256 > 0;
+                    memoY = ty[x * 2];
+                    memoInv = ty[x * 2 + 1];
+                    memoA = rowA[k][x];
+                    memoU = rowU[k][x];
+                    memoV = rowV[k][x];
+                }
             }
             spansY[y * 2] = first < 0 ? 0 : first;
             spansY[y * 2 + 1] = first < 0 ? 0 : last + 1;
