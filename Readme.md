@@ -80,7 +80,7 @@ Enable your preferred tunnel (Zrok, Cloudflared or Tailscale).
 - **ISP Blocklist Bypass** — Browse via BYD's built-in SIM card without a dedicated hotspot
 - **ADB Shell Runner** — Built-in terminal for running commands, checking processes, and viewing logs
 - **Telegram Notifications** — Instant alerts for motion detection, recording events, and low battery
-- **Recording Library** — Calendar view for browsing and managing recordings. Watched badges are saved on the car and refreshed when returning to the Events list, including when switching between LAN and remote access. In List view, the player can continue to newer or older clips after each one ends (off by default). Playlist settings can skip `dvr_p*`, `event_*`, `cam_*`, or watched clips without hiding them from the list. Resume unwatched starts at the oldest matching unwatched clip when reviewing newer clips (the newest when reviewing older clips), across all pages of the active filters.
+- **Recording Library** — Calendar view for browsing and managing recordings. Watched badges are saved on the car and refreshed when returning to the Events list, including when switching between LAN and remote access. In List view, the player can continue to newer or older clips after each one ends (off by default). Playlist settings can independently skip powered-on `dvr_*`, powered-off `dvr_p*`, `event_*`, `cam_*`, or watched clips without hiding them from the list. Resume unwatched starts at the oldest matching unwatched clip when reviewing newer clips (the newest when reviewing older clips), across all pages of the active filters.
 
 ### Combined Live View (All + DVR)
 
