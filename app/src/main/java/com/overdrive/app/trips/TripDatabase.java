@@ -32,11 +32,11 @@ public class TripDatabase {
     // AUTO_SERVER omitted — incompatible with DB_CLOSE_ON_EXIT=FALSE
     // (H2 throws JdbcSQLFeatureNotSupportedException at init). Single-
     // process architecture: only CameraDaemon writes, TripApiHandler reads
-    // from the same JVM. FILE_LOCK=SOCKET handles cross-process safety.
+    // from the same JVM. FILE_LOCK=FS (kernel lock) handles cross-process safety.
     // AUTO_COMPACT_FILL_RATE=50: idle-CPU tuning shared by all seven H2 stores
     // (see SocHistoryDatabase.JDBC_URL for the full rationale).
     private static final String JDBC_URL = "jdbc:h2:file:" + DB_PATH +
-            ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
+            ";FILE_LOCK=FS;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
             ";AUTO_COMPACT_FILL_RATE=50";
 
     // volatile: reassigned by reconnect() (now synchronized); the fence gives a
@@ -66,7 +66,8 @@ public class TripDatabase {
 
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+                connection = com.overdrive.app.storage.H2CommitPoint.wrap(
+                        DriverManager.getConnection(JDBC_URL, "sa", ""));
                 logger.info("H2 connection established");
 
                 // Tune H2 for embedded daemon use
@@ -149,7 +150,8 @@ public class TripDatabase {
     private synchronized void reconnect() {
         try {
             if (connection == null || connection.isClosed()) {
-                connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+                connection = com.overdrive.app.storage.H2CommitPoint.wrap(
+                        DriverManager.getConnection(JDBC_URL, "sa", ""));
                 // Idempotent (IF NOT EXISTS throughout). A reopen against a wiped
                 // or replaced .mv.db would otherwise yield a table-less store that
                 // probe() still calls healthy (SELECT 1 needs no table), turning
@@ -199,7 +201,8 @@ public class TripDatabase {
             connection = null;
         }
         try {
-            connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+            connection = com.overdrive.app.storage.H2CommitPoint.wrap(
+                    DriverManager.getConnection(JDBC_URL, "sa", ""));
             createTables();   // idempotent; see reconnect()
             isInitialized = true;
             logger.warn("H2 trip database force-reconnected after failed liveness probe");

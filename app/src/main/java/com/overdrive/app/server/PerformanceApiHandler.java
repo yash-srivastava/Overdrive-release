@@ -475,7 +475,7 @@ public class PerformanceApiHandler {
      *
      * Proxies SocHistoryDatabase.getLastParkingDelta() to UI-process callers
      * (DashboardInsightProvider) which can't open the H2 file themselves —
-     * the daemon's FILE_LOCK=SOCKET excludes other JVMs, and the UI-side
+     * the daemon's FILE_LOCK=FS kernel lock excludes other JVMs, and the UI-side
      * singleton is never init()'d anyway because init() only runs in
      * CameraDaemon.main().
      *

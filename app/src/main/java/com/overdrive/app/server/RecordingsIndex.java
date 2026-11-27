@@ -44,8 +44,7 @@ import java.util.regex.Pattern;
  * Same pattern as {@link com.overdrive.app.trips.TripDatabase}: daemon UID
  * 2000 owns the file, app UID reads via the {@code /api/recordings} HTTP
  * surface (not direct JDBC). Cross-UID reads go through HTTP only —
- * {@code FILE_LOCK=SOCKET} is for cross-process coordination within the
- * daemon JVM, not cross-UID JDBC.
+ * {@code FILE_LOCK=FS} guards against a second process, not cross-UID JDBC.
  *
  * <p><b>Backward compat:</b>
  * <ul>
@@ -90,16 +89,16 @@ public final class RecordingsIndex {
     // lock file would otherwise block the next CameraDaemon boot with
     // "Locked by another process".
     //
-    // FILE_LOCK=SOCKET: process-level lock via a localhost socket, NOT
-    // suitable for cross-UID coordination. App UID never opens this DB
-    // directly; it reads via /api/recordings.
+    // FILE_LOCK=FS: kernel lock on the .mv.db against a second process, NOT
+    // cross-UID coordination. App UID never opens this DB directly; it reads
+    // via /api/recordings.
     // AUTO_COMPACT_FILL_RATE=50: idle-CPU tuning shared by all seven H2 stores
     // (see SocHistoryDatabase.JDBC_URL for the full rationale).
     // WRITE_DELAY=5000: H2 housekeeps every WRITE_DELAY/10 ms; rows lost to a kill are
     // rebuilt from the files by the boot warmup and the reconcile. User-owned
     // watched acknowledgements explicitly sync before returning success.
     private static final String JDBC_URL = "jdbc:h2:file:" + DB_PATH +
-            ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
+            ";FILE_LOCK=FS;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
             ";AUTO_COMPACT_FILL_RATE=50;WRITE_DELAY=5000";
 
     // Filename patterns mirror RecordingsApiHandler exactly. Kept in sync

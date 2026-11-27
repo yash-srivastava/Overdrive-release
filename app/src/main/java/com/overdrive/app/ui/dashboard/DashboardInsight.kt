@@ -160,7 +160,7 @@ class DashboardInsightProvider(appContext: Context) {
      * Fetched over HTTP from the camera daemon — the H2 DB lives in a
      * different process (UID 1000, app_process), so the UI process can't
      * touch SocHistoryDatabase directly: its singleton is never init()'d
-     * here, and FILE_LOCK=SOCKET would refuse a second JVM anyway.
+     * here, and the daemon's kernel file lock would refuse a second JVM anyway.
      *
      * Skipped silently when |deltaSoc| ≤ 0.5 or the cycle is older than 3 days.
      */
