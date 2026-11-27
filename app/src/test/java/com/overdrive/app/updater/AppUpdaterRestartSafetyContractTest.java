@@ -33,7 +33,7 @@ public class AppUpdaterRestartSafetyContractTest {
         String install = methodBody(
                 source,
                 "public void downloadAndInstall(InstallCallback callback)",
-                "// ==================== COMPANION APK INSTALL");
+                "private String buildDownloadCommand(");
 
         int metadata = install.indexOf(
                 "android.content.SharedPreferences.Editor ie");
@@ -59,7 +59,7 @@ public class AppUpdaterRestartSafetyContractTest {
         String install = methodBody(
                 source,
                 "public void downloadAndInstall(InstallCallback callback)",
-                "// ==================== COMPANION APK INSTALL");
+                "private String buildDownloadCommand(");
 
         int detachedCall = install.indexOf(
                 "boolean detachedStarted = runDetachedInstall(");
@@ -149,7 +149,7 @@ public class AppUpdaterRestartSafetyContractTest {
         String install = methodBody(
                 source,
                 "public void downloadAndInstall(InstallCallback callback)",
-                "// ==================== COMPANION APK INSTALL");
+                "private String buildDownloadCommand(");
         assertFalse(install.contains("prepareCameraDaemonForUpdate();"));
         assertTrue(install.indexOf("runDetachedInstall(") >= 0);
         assertTrue(install.indexOf("stopAllDaemons();") >= 0);
@@ -337,7 +337,7 @@ public class AppUpdaterRestartSafetyContractTest {
         String synchronousInstall = methodBody(
                 updater,
                 "public void downloadAndInstall(InstallCallback callback)",
-                "// ==================== COMPANION APK INSTALL");
+                "private String buildDownloadCommand(");
         String detachedInstall = methodBody(
                 updater,
                 "private boolean runDetachedInstall(",
