@@ -5834,8 +5834,6 @@ public class PanoramicCameraGpu {
      * See CAMERA_FPS_INVESTIGATION.md for the full rationale.
      *
      * After either path succeeds, addPreviewSurface + startPreview are called.
-     *
-     * Calls the coordinator's pre-open hook before acquisition.
      */
     private void startCameraViaAvmReflection(int cameraId) throws Exception {
         requireCurrentStartEpoch(activeStartEpoch, "AVM acquisition");
