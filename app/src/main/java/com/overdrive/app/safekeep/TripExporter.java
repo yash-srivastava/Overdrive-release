@@ -44,7 +44,7 @@ public final class TripExporter {
         sb.append(" <trk><name>").append(esc(name)).append("</name><trkseg>\n");
         forEachPoint(telemetry, (ts, lat, lon, alt, speedKmh) -> {
             numbers.format("  <trkpt lat=\"%.6f\" lon=\"%.6f\">", lat, lon);
-            if (!Double.isNaN(alt)) numbers.format("<ele>%.1f</ele>", alt);
+            if (Double.isFinite(alt)) numbers.format("<ele>%.1f</ele>", alt);
             date.setTime(ts);
             sb.append("<time>").append(utc.format(date)).append("</time>");
             if (speedKmh >= 0) {
@@ -71,7 +71,7 @@ public final class TripExporter {
         // Append directly to the final document, not a second full-size coordinate buffer.
         forEachPoint(telemetry, (ts, lat, lon, alt, speed) -> {
             numbers.format("%.6f,%.6f,", lon, lat);
-            if (Double.isNaN(alt)) sb.append('0');
+            if (!Double.isFinite(alt)) sb.append('0');
             else numbers.format("%.1f", alt);
             sb.append(' ');
         });
