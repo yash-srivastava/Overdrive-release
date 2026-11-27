@@ -286,6 +286,7 @@
         android:usesCleartextTraffic="true">
 
         <uses-library android:name="android.car" android:required="false" />
+        <uses-library android:name="ts.framework" android:required="false" />
 
         <!-- Persist AppCompat per-app language on API 28–32. API 33+ uses
              localeConfig + the platform LocaleManager. -->
