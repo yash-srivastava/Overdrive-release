@@ -58,6 +58,8 @@ public final class MicroFrontend {
     private final short[] windowInput;
     private final short[] windowOutput;
     private int inputUsed;
+    // Last nonzero raw sample in the valid window prefix, or -1 for all zeros.
+    private int lastNonzero = -1;
     private int maxAbsOutput;
 
     private final int fftSize;
@@ -205,17 +207,26 @@ public final class MicroFrontend {
         int copy = Math.min(windowSize - inputUsed, length);
         if (copy <= 0) return 0;
         System.arraycopy(pcm, offset, windowInput, inputUsed, copy);
+        // Inspect only new samples, backwards: active audio normally exits immediately.
+        for (int i = copy - 1; i >= 0; i--) {
+            if (windowInput[inputUsed + i] != 0) {
+                lastNonzero = inputUsed + i;
+                break;
+            }
+        }
         inputUsed += copy;
         if (inputUsed < windowSize) return copy;
 
+        if (lastNonzero < 0) {
+            // The retained overlap is already zero. No window multiplication,
+            // output scratch writes or overlap copy is needed for this frame.
+            inputUsed -= windowStep;
+            finishZeroWindow();
+            return copy;
+        }
+        lastNonzero = Math.max(-1, lastNonzero - windowStep);
         if (applyWindow()) {
-            // An exactly zero window has zero energy in every FFT bin. Keep
-            // the adaptive noise estimate decaying just as on the full path.
-            // Zero signal stays zero through noise reduction, PCAN and log.
-            java.util.Arrays.fill(signal, 0);
-            reduceNoise();
-            java.util.Arrays.fill(features, 0);
-            frameReady = true;
+            finishZeroWindow();
             return copy;
         }
         int inputShift = 15 - msb32(maxAbsOutput);
@@ -230,6 +241,22 @@ public final class MicroFrontend {
         applyLog();
         frameReady = true;
         return copy;
+    }
+
+    private void finishZeroWindow() {
+        // Zero signal stays zero through noise reduction, PCAN and log, but
+        // the *unclamped* unsigned noise estimate must still decay each frame.
+        long evenDecay = (1 << NOISE_REDUCTION_BITS) - evenSmoothing;
+        long oddDecay = (1 << NOISE_REDUCTION_BITS) - oddSmoothing;
+        for (int i = 0; i < NUM_CHANNELS; i += 2) {
+            estimate[i] = (int) (((estimate[i] & 0xFFFFFFFFL) * evenDecay) >>> NOISE_REDUCTION_BITS);
+            estimate[i + 1] = (int) (((estimate[i + 1] & 0xFFFFFFFFL) * oddDecay) >>> NOISE_REDUCTION_BITS);
+        }
+        // FFT scratch (including windowOutput/maxAbsOutput) is overwritten
+        // before its next use on a nonzero window.
+        java.util.Arrays.fill(signal, 0);
+        java.util.Arrays.fill(features, 0);
+        frameReady = true;
     }
 
     /** True when the last {@link #process} call completed a frame. */
@@ -251,6 +278,7 @@ public final class MicroFrontend {
         java.util.Arrays.fill(windowInput, (short) 0);
         java.util.Arrays.fill(windowOutput, (short) 0);
         inputUsed = 0;
+        lastNonzero = -1;
         maxAbsOutput = 0;
         java.util.Arrays.fill(fftInput, (short) 0);
         java.util.Arrays.fill(outRe, (short) 0);

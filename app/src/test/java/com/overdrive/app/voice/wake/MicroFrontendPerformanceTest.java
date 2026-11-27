@@ -145,6 +145,55 @@ public class MicroFrontendPerformanceTest {
     }
 
     @Test
+    public void rawSilenceTrackingExpiresAcrossPartialWindowsAndReset() throws Exception {
+        Random random = new Random(62871);
+        for (int step = 1; step <= 30; step++) {
+            MicroFrontend frontend = new MicroFrontend(step);
+            short[] window = (short[]) readField(frontend, "windowInput");
+            int[] estimate = (int[]) readField(frontend, "estimate");
+            int even = (int) readField(frontend, "evenSmoothing");
+            int odd = (int) readField(frontend, "oddSmoothing");
+            for (int block = 0; block < 16; block++) {
+                if (block == 8) frontend.reset();
+                short[] pcm = new short[1000 + block * 17];
+                // Isolated impulses, including samples which can quantize to
+                // zero under the window, separated by long raw-zero stretches.
+                if (block % 4 == 0) {
+                    pcm[0] = 1;
+                    pcm[pcm.length - 1] = Short.MIN_VALUE;
+                } else if (block % 4 == 1) {
+                    pcm[17] = -1;
+                    pcm[71] = Short.MAX_VALUE;
+                }
+                for (int pos = 0; pos < pcm.length;) {
+                    int usedBefore = (int) readField(frontend, "inputUsed");
+                    int len = Math.min(pcm.length - pos, 1 + random.nextInt(247));
+                    int expectedCopy = Math.min(window.length - usedBefore, len);
+                    boolean zero = true;
+                    for (int i = 0; i < usedBefore; i++) zero &= window[i] == 0;
+                    for (int i = 0; i < expectedCopy; i++) zero &= pcm[pos + i] == 0;
+                    int[] before = estimate.clone();
+                    int used = frontend.process(pcm, pos, len);
+                    assertEquals("consumed", expectedCopy, used);
+                    pos += used;
+                    int valid = (int) readField(frontend, "inputUsed");
+                    int last = -1;
+                    for (int i = 0; i < valid; i++) if (window[i] != 0) last = i;
+                    assertEquals("last raw nonzero", last, readField(frontend, "lastNonzero"));
+                    if (frontend.frameReady() && zero) {
+                        assertArrayEquals("silent features", new int[MicroFrontend.NUM_CHANNELS], frontend.features());
+                        for (int i = 0; i < estimate.length; i++) {
+                            long decay = (1 << 14) - ((i & 1) == 0 ? even : odd);
+                            int expected = (int) (((before[i] & 0xffffffffL) * decay) >>> 14);
+                            assertEquals("unsigned noise decay", expected, estimate[i]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     public void compactFilterbankMatchesIndependentSpectrumReference() throws Exception {
         MicroFrontend frontend = new MicroFrontend();
         // Test the filterbank before adaptive noise reduction can mask a mismatch.
