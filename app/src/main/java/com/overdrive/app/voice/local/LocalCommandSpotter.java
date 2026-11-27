@@ -120,7 +120,6 @@ public final class LocalCommandSpotter implements AutoCloseable {
 
     private final KeywordSpotter spotter;
     private final Map<String, String> commandKeywords;
-    private final Map<String, String> cancelKeywords;
 
     /** Pseudo-intent: "OverDrive" said again inside a command window. */
     public static final String INTENT_WAKE = "assistant.wake";
@@ -162,10 +161,9 @@ public final class LocalCommandSpotter implements AutoCloseable {
     private boolean streamFailureLogged;
 
     private LocalCommandSpotter(KeywordSpotter spotter, Map<String, String> commandKeywords,
-                                Map<String, String> cancelKeywords, Set<String> tokenSet) {
+                                Set<String> tokenSet) {
         this.spotter = spotter;
         this.commandKeywords = commandKeywords;
-        this.cancelKeywords = cancelKeywords;
         this.tokenSet = tokenSet;
     }
 
@@ -186,10 +184,6 @@ public final class LocalCommandSpotter implements AutoCloseable {
         }
     }
 
-    public static List<String> supportedLocales() {
-        return LOCALES;
-    }
-
     public static LocalCommandSpotter load(Context ctx) throws IOException {
         if (ctx == null) throw new IOException("No context");
         AssetManager assets = ctx.getAssets();
@@ -200,20 +194,16 @@ public final class LocalCommandSpotter implements AutoCloseable {
             }
         }
         Map<String, String> commands = new HashMap<>();
-        Map<String, String> cancels = new HashMap<>();
         for (String language : LOCALES) {
             List<String> lines = readLines(assets, ASSET_DIR + "/" + keywordFile(language));
             StringBuilder all = new StringBuilder();
-            StringBuilder cancel = new StringBuilder();
             for (String line : lines) {
                 CommandCatalog.Entry entry = CommandCatalog.find(language, tagOf(line));
                 if (entry == null) continue;
                 append(all, line);
-                if (entry.isCancel()) append(cancel, line);
             }
             if (all.length() == 0) throw new IOException("No usable keywords for " + language);
             commands.put(language, all.toString());
-            cancels.put(language, cancel.toString());
         }
         Set<String> tokens = new HashSet<>();
         for (String line : readLines(assets, ASSET_DIR + "/" + TOKENS)) {
@@ -245,7 +235,7 @@ public final class LocalCommandSpotter implements AutoCloseable {
         } catch (Throwable t) {
             throw new IOException("Keyword spotter failed to initialise: " + t, t);
         }
-        return new LocalCommandSpotter(spotter, commands, cancels, Collections.unmodifiableSet(tokens));
+        return new LocalCommandSpotter(spotter, commands, Collections.unmodifiableSet(tokens));
     }
 
     /** True when every token is one this model can spot (a keyword line with any other is rejected). */
@@ -277,12 +267,7 @@ public final class LocalCommandSpotter implements AutoCloseable {
 
     /** Opens a fresh command window with that locale's phrases (English when unsupported). */
     public synchronized void begin(String locale) {
-        openWindow(resolveLanguage(locale), false);
-    }
-
-    /** Opens a window that only listens for the cancel phrases. */
-    public synchronized void beginConfirmation(String locale) {
-        openWindow(resolveLanguage(locale), true);
+        openWindow(resolveLanguage(locale));
     }
 
     /**
@@ -557,13 +542,13 @@ public final class LocalCommandSpotter implements AutoCloseable {
 
     // ── Internals ───────────────────────────────────────────────────────
 
-    private void openWindow(String language, boolean cancelOnly) {
+    private void openWindow(String language) {
         if (closed) return;
         releaseStream();
-        String keywords = (cancelOnly ? cancelKeywords : commandKeywords).get(language);
+        String keywords = commandKeywords.get(language);
         if (keywords == null) keywords = "";
         // A repeated "OverDrive" must re-arm the window instead of failing as an unknown phrase.
-        if (!cancelOnly) keywords = keywords.isEmpty() ? wakeKeywords() : keywords + "/" + wakeKeywords();
+        keywords = keywords.isEmpty() ? wakeKeywords() : keywords + "/" + wakeKeywords();
         windowKeywords = keywords;
         windowLanguage = language;
         phraseWindow = false;
