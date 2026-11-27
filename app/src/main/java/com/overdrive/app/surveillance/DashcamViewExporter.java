@@ -321,7 +321,11 @@ public final class DashcamViewExporter {
         }
     }
 
-    /** One decoder rendering to an OES texture. */
+    /**
+     * One decoder rendering to an OES texture. Every codec call that touches a buffer (and every
+     * dequeue, always with a zero timeout) runs inside {@link Session#bufLock}, so the releaser
+     * thread can never free a codec under a buffer copy; file reads and waits stay outside it.
+     */
     private static final class VideoIn {
         static final int FRAME = 1, EOS = 0, TIMEOUT = -1;
         final MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
@@ -334,6 +338,12 @@ public final class DashcamViewExporter {
         boolean outputDone;
         int pending = -1;
         long pendingUs;
+        // One sample read from the file ahead of the locked queue step (kept across clips).
+        ByteBuffer stage;
+        boolean staged;
+        boolean extractorDone;
+        int stagedSize;
+        long stagedUs;
 
         Session session;
 
@@ -341,6 +351,8 @@ public final class DashcamViewExporter {
             session = owner;
             inputDone = false;
             outputDone = false;
+            staged = false;
+            extractorDone = false;
             pending = -1;
             extractor = new MediaExtractor();
             RemovableStorageFs.setDataSource(extractor, file);
@@ -360,6 +372,10 @@ public final class DashcamViewExporter {
             width = format.getInteger(MediaFormat.KEY_WIDTH);
             height = format.getInteger(MediaFormat.KEY_HEIGHT);
             fps = format.containsKey(MediaFormat.KEY_FRAME_RATE) ? safeInt(format, MediaFormat.KEY_FRAME_RATE) : 0;
+            int maxInput = format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)
+                    ? safeInt(format, MediaFormat.KEY_MAX_INPUT_SIZE) : 0;
+            int need = Math.max(1 << 20, Math.min(8 << 20, Math.max(maxInput, width * height)));
+            if (stage == null || stage.capacity() < need) stage = ByteBuffer.allocateDirect(need);
             if (seekUs > 0) extractor.seekTo(seekUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC);
             try {
                 format.setInteger(MediaFormat.KEY_PRIORITY, 1);
@@ -368,49 +384,81 @@ public final class DashcamViewExporter {
             codec = session.createCodec(format.getString(MediaFormat.KEY_MIME), false);
             codec.configure(format, surface, null, 0);
             codec.start();
+            session.register(codec);
         }
 
         /** FRAME when an output frame is pending, EOS, or TIMEOUT after {@code timeoutMs}. */
-        int poll(long timeoutMs) {
+        int poll(long timeoutMs) throws ExportException {
             if (pending >= 0) return FRAME;
             if (outputDone) return EOS;
             long deadline = System.nanoTime() + timeoutMs * 1_000_000L;
             while (true) {
-                if (!inputDone) {
-                    int in = codec.dequeueInputBuffer(0);
-                    if (in >= 0) {
-                        ByteBuffer buf = codec.getInputBuffer(in);
-                        int size = buf != null ? extractor.readSampleData(buf, 0) : -1;
-                        if (size < 0) {
-                            codec.queueInputBuffer(in, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
-                            inputDone = true;
-                        } else {
-                            codec.queueInputBuffer(in, 0, size, extractor.getSampleTime(), 0);
-                            extractor.advance();
+                if (!inputDone) feedInput();
+                int out;
+                synchronized (session.bufLock) {
+                    session.ensureLive();
+                    out = codec.dequeueOutputBuffer(info, 0L);
+                    if (out >= 0) {
+                        boolean eos = (info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
+                        if (eos) outputDone = true;
+                        if (info.size > 0 || !eos) {
+                            pending = out;
+                            pendingUs = info.presentationTimeUs;
+                            return FRAME;
                         }
+                        codec.releaseOutputBuffer(out, false);
+                        return EOS;
                     }
-                }
-                int out = codec.dequeueOutputBuffer(info, 5_000L);
-                if (out >= 0) {
-                    boolean eos = (info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
-                    if (eos) outputDone = true;
-                    if (info.size > 0 || !eos) {
-                        pending = out;
-                        pendingUs = info.presentationTimeUs;
-                        return FRAME;
-                    }
-                    codec.releaseOutputBuffer(out, false);
-                    return EOS;
                 }
                 if (System.nanoTime() >= deadline) return TIMEOUT;
+                session.nap();
             }
         }
 
-        void release(boolean render) {
+        private void feedInput() throws ExportException {
+            if (!staged && !extractorDone) {
+                stage.clear();
+                int size = extractor.readSampleData(stage, 0);
+                if (size < 0) {
+                    extractorDone = true;
+                } else {
+                    stagedSize = size;
+                    stagedUs = extractor.getSampleTime();
+                    extractor.advance();
+                    staged = true;
+                }
+            }
+            synchronized (session.bufLock) {
+                session.ensureLive();
+                int in = codec.dequeueInputBuffer(0);
+                if (in < 0) return;
+                if (!staged) {
+                    codec.queueInputBuffer(in, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    inputDone = true;
+                    return;
+                }
+                ByteBuffer buf = codec.getInputBuffer(in);
+                if (buf == null || buf.capacity() < stagedSize) {
+                    codec.queueInputBuffer(in, 0, 0, stagedUs, 0);
+                } else {
+                    buf.clear();
+                    stage.position(0);
+                    stage.limit(stagedSize);
+                    buf.put(stage);
+                    codec.queueInputBuffer(in, 0, stagedSize, stagedUs, 0);
+                }
+                staged = false;
+            }
+        }
+
+        void release(boolean render) throws ExportException {
             if (pending < 0) return;
             int idx = pending;
             pending = -1;
-            codec.releaseOutputBuffer(idx, render);
+            synchronized (session.bufLock) {
+                session.ensureLive();
+                codec.releaseOutputBuffer(idx, render);
+            }
         }
 
         void close() {
@@ -418,6 +466,7 @@ public final class DashcamViewExporter {
                 if (session == null || session.unregister(codec)) {
                     try { codec.stop(); } catch (Throwable ignored) {}
                     try { codec.release(); } catch (Throwable ignored) {}
+                    if (session != null) session.codecFreed();
                 }
                 codec = null;
             }
@@ -452,8 +501,12 @@ public final class DashcamViewExporter {
         final Result result = new Result();
         Abort abort;
         private final Object codecLock = new Object();
+        // Held by the worker around every codec buffer section (< 1 ms) and by the releaser around stop/release.
+        final Object bufLock = new Object();
         private final java.util.ArrayList<MediaCodec> liveCodecs = new java.util.ArrayList<>(3);
-        private boolean releasing;
+        private final java.util.ArrayList<MediaCodec> takenCodecs = new java.util.ArrayList<>(3);
+        private int heldCodecs;
+        private volatile boolean releasing;
         int encodersInUse;
         int decodersInUse;
 
@@ -558,30 +611,70 @@ public final class DashcamViewExporter {
             }
         }
 
-        /** Releaser thread: stop + release every live codec now; the worker's later close skips them. */
+        /** Releaser thread: stop + release every started codec now; the worker's later close skips them. */
         void releaseCodecs() {
             long t0 = System.nanoTime();
             java.util.ArrayList<MediaCodec> list;
             synchronized (codecLock) {
                 releasing = true;
                 list = new java.util.ArrayList<>(liveCodecs);
+                takenCodecs.addAll(liveCodecs);
                 liveCodecs.clear();
             }
             for (MediaCodec c : list) {
-                try { c.stop(); } catch (Throwable ignored) {}
-                try { c.release(); } catch (Throwable ignored) {}
+                synchronized (bufLock) {
+                    try { c.stop(); } catch (Throwable ignored) {}
+                }
+                synchronized (bufLock) {
+                    try { c.release(); } catch (Throwable ignored) {}
+                }
+                codecFreed();
             }
-            CameraLoadProbe.noteBackgroundCodecs(false);
             logger.info("Export codecs released in " + (System.nanoTime() - t0) / 1_000_000 + "ms ("
                     + list.size() + ")");
         }
 
-        /** True when the caller still owns {@code c} (not taken by the releaser). */
+        /** A configured + started codec becomes releasable by the releaser; refused once releasing. */
+        void register(MediaCodec c) throws ExportException {
+            synchronized (codecLock) {
+                if (!releasing) {
+                    liveCodecs.add(c);
+                    return;
+                }
+            }
+            throw new ExportException(abort.reason() != null ? abort.reason() : "cancelled", "Stopped", true);
+        }
+
+        /** True when the caller still owns {@code c} (the releaser has not taken it). */
         boolean unregister(MediaCodec c) {
             synchronized (codecLock) {
-                boolean owned = liveCodecs.remove(c);
-                if (liveCodecs.isEmpty()) CameraLoadProbe.noteBackgroundCodecs(false);
-                return owned;
+                liveCodecs.remove(c);
+                return !takenCodecs.contains(c);
+            }
+        }
+
+        /** Called after a codec's release() returned; the recorder's retry window starts when none are held. */
+        void codecFreed() {
+            synchronized (codecLock) {
+                if (heldCodecs > 0 && --heldCodecs == 0) CameraLoadProbe.noteBackgroundCodecs(false);
+            }
+        }
+
+        /** Inside {@link #bufLock}: no codec call once the releaser has started. */
+        void ensureLive() throws ExportException {
+            if (releasing) {
+                String r = abort.reason();
+                throw new ExportException(r != null ? r : "cancelled", "Stopped", true);
+            }
+        }
+
+        /** Short wait between zero-timeout dequeues (outside the lock). */
+        void nap() throws ExportException {
+            try {
+                Thread.sleep(2L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new ExportException("cancelled", "Cancelled", true);
             }
         }
 
@@ -618,7 +711,8 @@ public final class DashcamViewExporter {
             if (c == null) throw new ExportException("codec", "No codec for " + mime);
             synchronized (codecLock) {
                 if (!releasing) {
-                    liveCodecs.add(c);
+                    // Held from creation; handed to the releaser only once started (register()).
+                    heldCodecs++;
                     CameraLoadProbe.noteBackgroundCodecs(true);
                     return c;
                 }
@@ -662,6 +756,7 @@ public final class DashcamViewExporter {
             configureEncoder(fps);
             encoderSurface = encoder.createInputSurface();
             encoder.start();
+            register(encoder);
 
             egl = new EGLCore();
             eglSurface = egl.createWindowSurface(encoderSurface);
@@ -894,20 +989,30 @@ public final class DashcamViewExporter {
                 Grid g = leaders.get(0).grid;
                 dvrCropY = cropY(g.width, g.height, g.split, follower.width, follower.height);
             }
+            if (follower.codec == null) return;
             long deadline = System.nanoTime() + FOLLOWER_BUDGET_MS * 1_000_000L;
-            while (System.nanoTime() < deadline) {
-                checkStop();
-                int r = follower.poll(POLL_SLICE_MS);
-                if (r == VideoIn.EOS) break;
-                if (r == VideoIn.TIMEOUT) continue;
-                long fWallUs = f.clipStartWall * 1000L + follower.pendingUs;
-                if (fWallUs > wallUs) break;
-                follower.release(true);
-                if (dvrSignal.await(FRAME_WAIT_MS, this)) {
-                    stDvr.updateTexImage();
-                    stDvr.getTransformMatrix(mDvr);
-                    dvrReady = true;
+            try {
+                while (System.nanoTime() < deadline) {
+                    checkStop();
+                    int r = follower.poll(POLL_SLICE_MS);
+                    if (r == VideoIn.EOS) break;
+                    if (r == VideoIn.TIMEOUT) continue;
+                    long fWallUs = f.clipStartWall * 1000L + follower.pendingUs;
+                    if (fWallUs > wallUs) break;
+                    follower.release(true);
+                    if (dvrSignal.await(FRAME_WAIT_MS, this)) {
+                        stDvr.updateTexImage();
+                        stDvr.getTransformMatrix(mDvr);
+                        dvrReady = true;
+                    }
                 }
+            } catch (ExportException e) {
+                if (e.stop) throw e;
+                followerUnreadable(f, want, e);
+            } catch (Throwable t) {
+                // A windshield decode error only blanks the rest of that clip; the grid keeps going.
+                checkStop();
+                followerUnreadable(f, want, t);
             }
         }
 
@@ -947,50 +1052,82 @@ public final class DashcamViewExporter {
             GLES20.glUniform2f(loc, (tile % 2) * 0.5f, (tile / 2) * 0.5f);
         }
 
+        private ByteBuffer encStage;
+        private final MediaCodec.BufferInfo muxInfo = new MediaCodec.BufferInfo();
+
+        /**
+         * Moves encoded frames to the muxer. The output buffer is copied into {@link #encStage} and given
+         * back inside {@link #bufLock}; the muxer write (which may wait on its writer) happens outside.
+         */
         private void drainEncoder(boolean endOfStream) throws ExportException {
             long deadline = System.nanoTime() + 5_000_000_000L;
             while (true) {
                 if (endOfStream) checkStop();
-                int idx = encoder.dequeueOutputBuffer(encInfo, endOfStream ? 10_000L : 0L);
-                if (idx == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                if (encStage == null) encStage = ByteBuffer.allocateDirect(Math.max(1 << 20, outW * outH));
+                boolean write = false;
+                boolean eos = false;
+                int idx;
+                synchronized (bufLock) {
+                    ensureLive();
+                    idx = encoder.dequeueOutputBuffer(encInfo, 0L);
+                    if (idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        if (muxerStarted) throw new ExportException("codec", "Encoder format changed twice");
+                        videoTrack = muxer.addTrack(encoder.getOutputFormat());
+                        if (audioFormat != null) {
+                            try {
+                                audioTrack = muxer.addTrack(audioFormat);
+                            } catch (Throwable t) {
+                                logger.warn("Audio track refused, exporting without sound: " + t.getMessage());
+                                audioTrack = -1;
+                            }
+                        }
+                        muxer.start();
+                        muxerStarted = true;
+                        continue;
+                    }
+                    if (idx >= 0) {
+                        boolean config = (encInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0;
+                        eos = (encInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
+                        if (!config && encInfo.size > 0 && muxerStarted) {
+                            // Never hit in practice (the buffer is a full frame of pixels); kept correct anyway.
+                            if (encInfo.size > encStage.capacity()) {
+                                encStage = ByteBuffer.allocateDirect(encInfo.size + (1 << 16));
+                            }
+                            ByteBuffer data = encoder.getOutputBuffer(idx);
+                            if (data != null) {
+                                data.position(encInfo.offset);
+                                data.limit(encInfo.offset + encInfo.size);
+                                encStage.clear();
+                                encStage.put(data);
+                                encStage.flip();
+                                muxInfo.set(0, encInfo.size, encInfo.presentationTimeUs, encInfo.flags);
+                                write = true;
+                            }
+                        }
+                        encoder.releaseOutputBuffer(idx, false);
+                    }
+                }
+                if (write) muxer.writeSampleData(videoTrack, encStage, muxInfo);
+                if (idx >= 0) {
+                    if (eos) return;
+                    continue;
+                }
+                if (idx == MediaCodec.INFO_TRY_AGAIN_LATER || idx < 0) {
                     if (!endOfStream) return;
-                    checkStop();
                     if (System.nanoTime() > deadline) {
                         logger.warn("Encoder EOS timed out");
                         return;
                     }
-                    continue;
+                    nap();
                 }
-                if (idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    if (muxerStarted) throw new ExportException("codec", "Encoder format changed twice");
-                    videoTrack = muxer.addTrack(encoder.getOutputFormat());
-                    if (audioFormat != null) {
-                        try {
-                            audioTrack = muxer.addTrack(audioFormat);
-                        } catch (Throwable t) {
-                            logger.warn("Audio track refused, exporting without sound: " + t.getMessage());
-                            audioTrack = -1;
-                        }
-                    }
-                    muxer.start();
-                    muxerStarted = true;
-                    continue;
-                }
-                if (idx < 0) continue;
-                ByteBuffer data = encoder.getOutputBuffer(idx);
-                boolean config = (encInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0;
-                if (!config && encInfo.size > 0 && data != null && muxerStarted) {
-                    data.position(encInfo.offset);
-                    data.limit(encInfo.offset + encInfo.size);
-                    muxer.writeSampleData(videoTrack, data, encInfo);
-                }
-                encoder.releaseOutputBuffer(idx, false);
-                if ((encInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) return;
             }
         }
 
         private void finishEncoding() throws ExportException {
-            encoder.signalEndOfInputStream();
+            synchronized (bufLock) {
+                ensureLive();
+                encoder.signalEndOfInputStream();
+            }
             drainEncoder(true);
         }
 
@@ -1087,6 +1224,7 @@ public final class DashcamViewExporter {
                 if (unregister(encoder)) {
                     try { encoder.stop(); } catch (Throwable ignored) {}
                     try { encoder.release(); } catch (Throwable ignored) {}
+                    codecFreed();
                 }
                 encoder = null;
             }

@@ -555,6 +555,7 @@ public final class DashcamViewExportApi {
 
     private static void run(Job job, Plan plan, File output, File tmp, float strength, long epoch) {
         final Health health = new Health();
+        final Runnable busyListener = () -> job.abort.abort(CameraLoadProbe.lastBusyReason());
         final long[] nextCheck = {0L, 0L};
         final String[] stop = {null};
         DashcamViewExporter.Listener listener = new DashcamViewExporter.Listener() {
@@ -613,7 +614,7 @@ public final class DashcamViewExportApi {
             logger.info("Dashcam view export " + job.from + ".." + job.to + " (" + plan.leaders.size()
                     + " grid, " + plan.followers.size() + " windshield clips) -> " + output.getName());
             // The recorder's start signal releases the export's codecs at once on a releaser thread.
-            CameraLoadProbe.setBusyListener(() -> job.abort.abort(CameraLoadProbe.lastBusyReason()));
+            CameraLoadProbe.setBusyListener(busyListener);
             if (CameraLoadProbe.busyEpoch() != epoch) job.abort.abort(CameraLoadProbe.lastBusyReason());
             if (monitoring()) health.calibrate(listener);
             int[] inUse = codecsInUse();
@@ -632,7 +633,7 @@ public final class DashcamViewExportApi {
             job.error = failureMessage("failed", t.getMessage());
             logger.warn("Dashcam view export failed: " + t);
         } finally {
-            CameraLoadProbe.setBusyListener(null);
+            CameraLoadProbe.clearBusyListener(busyListener);
             job.paused = false;
             if (!ok) {
                 RemovableStorageFs.delete(tmp);

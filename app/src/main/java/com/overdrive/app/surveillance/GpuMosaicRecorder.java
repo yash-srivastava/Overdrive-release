@@ -2102,12 +2102,12 @@ public class GpuMosaicRecorder {
         return cpuEngine;
     }
 
-    /** CPU recording queue drops plus frames that found a backlog, since this recorder was built (never reset). */
     /** Frames in a row over the draw budget (encoder backpressure); 0 when healthy. */
     public int consecutiveSlowFrames() {
         return consecutiveSlowFrames;
     }
 
+    /** CPU recording queue drops plus frames that found a backlog, since this recorder was built (never reset). */
     public long cpuPressureTotal() {
         return cpuPressureTotal.get();
     }

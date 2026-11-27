@@ -1900,7 +1900,7 @@ public class HardwareEventRecorderGpu {
                 + "wedged during teardown) — refusing re-init; trip-safe restart pending");
         }
         try {
-            initOnce();
+            initOnceAfterBackgroundExport();
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw interrupted;
@@ -1949,6 +1949,28 @@ public class HardwareEventRecorderGpu {
             return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
         } catch (Throwable t) {
             return false;
+        }
+    }
+
+    /**
+     * {@link #initOnce} with one retry (create + configure + surface + start) after 200 ms, only when
+     * it failed while a background export held hardware codecs within the last second.
+     */
+    private void initOnceAfterBackgroundExport() throws Exception {
+        try {
+            initOnce();
+        } catch (InterruptedException | CpuInputRejectedException e) {
+            throw e;
+        } catch (Exception first) {
+            if (teardownWedged || !CameraLoadProbe.backgroundCodecsRecentlyHeld()) throw first;
+            logger.warn("Encoder init failed right after a background export ("
+                + first.getMessage() + ") — retrying once");
+            try { if (inputSurface != null) inputSurface.release(); } catch (Throwable ignored) {}
+            inputSurface = null;
+            try { if (encoder != null) encoder.release(); } catch (Throwable ignored) {}
+            encoder = null;
+            Thread.sleep(200L);
+            initOnce();
         }
     }
 
@@ -2089,16 +2111,7 @@ public class HardwareEventRecorderGpu {
         final Exception[] createError = {null};
         Thread createThread = new Thread(() -> {
             try {
-                MediaCodec created;
-                try {
-                    created = MediaCodec.createEncoderByType(finalCodecMimeType);
-                } catch (Exception first) {
-                    // A background export may have released its codecs a moment ago: one short retry.
-                    if (!CameraLoadProbe.backgroundCodecsRecentlyHeld()) throw first;
-                    logger.warn("Encoder create failed right after a background export; retrying once");
-                    Thread.sleep(200L);
-                    created = MediaCodec.createEncoderByType(finalCodecMimeType);
-                }
+                MediaCodec created = MediaCodec.createEncoderByType(finalCodecMimeType);
                 if (!createHandoff.publish(created) && created != null) {
                     try {
                         created.release();

@@ -16,7 +16,8 @@ public final class CameraLoadProbe {
 
     private static final AtomicLong BUSY_EPOCH = new AtomicLong();
     private static volatile String busyReason;
-    private static volatile Runnable busyListener;
+    private static final java.util.concurrent.atomic.AtomicReference<Runnable> BUSY_LISTENER =
+            new java.util.concurrent.atomic.AtomicReference<>();
 
     private CameraLoadProbe() {}
 
@@ -30,7 +31,7 @@ public final class CameraLoadProbe {
     public static void recordingStarting(String reason) {
         busyReason = reason;
         BUSY_EPOCH.incrementAndGet();
-        Runnable r = busyListener;
+        Runnable r = BUSY_LISTENER.get();
         if (r != null) {
             try {
                 r.run();
@@ -59,5 +60,8 @@ public final class CameraLoadProbe {
     public static String lastBusyReason() { return busyReason; }
 
     /** The listener must only set flags (it runs on the recorder's thread). */
-    public static void setBusyListener(Runnable listener) { busyListener = listener; }
+    public static void setBusyListener(Runnable listener) { BUSY_LISTENER.set(listener); }
+
+    /** Clears the listener only if it is still {@code listener} (a newer job keeps its own). */
+    public static void clearBusyListener(Runnable listener) { BUSY_LISTENER.compareAndSet(listener, null); }
 }
