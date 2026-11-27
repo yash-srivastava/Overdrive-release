@@ -273,10 +273,8 @@ public final class ClusterViewMirrorService extends Binder {
     }
 
     /** Snapshot for the status endpoint. */
-    public int currentState() { synchronized (lock) { return state; } }
     public int currentClusterW() { synchronized (lock) { return clusterW; } }
     public int currentClusterH() { synchronized (lock) { return clusterH; } }
-    public int currentScaleMode() { synchronized (lock) { return scaleMode; } }
     /**
      * Atomic touch-relay snapshot:
      * state,w,h,scaleMode,inputDisplayId,src(x,y,w,h),dst(x,y,w,h),
@@ -313,10 +311,6 @@ public final class ClusterViewMirrorService extends Binder {
             };
         }
     }
-    /** Last projection source rect (cluster px) — copy. {@code w==0} when not projected. */
-    public int[] projectionSrc() { int[] s = projSrc; return new int[] { s[0], s[1], s[2], s[3] }; }
-    /** Last projection destination rect (surface px) — copy. {@code w==0} when not projected. */
-    public int[] projectionDst() { int[] d = projDst; return new int[] { d[0], d[1], d[2], d[3] }; }
 
     // ── Binder dispatch ────────────────────────────────────────────────────────────
 
