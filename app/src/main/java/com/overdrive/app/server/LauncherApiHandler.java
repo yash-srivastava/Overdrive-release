@@ -828,8 +828,8 @@ public final class LauncherApiHandler {
 
     private static Object buildPower() {
         try {
-            com.overdrive.app.byd.BydVehicleData vd =
-                    com.overdrive.app.byd.BydDataCollector.getInstance().getData();
+            com.overdrive.app.byd.BydDataCollector collector = com.overdrive.app.byd.BydDataCollector.getInstance();
+            com.overdrive.app.byd.BydVehicleData vd = collector.getData();
             if (vd == null) return JSONObject.NULL;
             JSONObject o = new JSONObject();
             boolean engineFresh = vd.enginePowerAtMs > 0
@@ -837,7 +837,8 @@ public final class LauncherApiHandler {
             double pack = vd.hvBatteryPowerKw;
             // without a pack reading (DiLink 3), a battery-electric car's engine device reports the net bus power
             if (Double.isNaN(pack) && engineFresh
-                    && !com.overdrive.app.byd.BydDataCollector.getInstance().isPhevPublic()) pack = vd.enginePowerKw;
+                    && !collector.isPhevPublic()) pack = vd.enginePowerKw;
+            pack = collector.displayPackPowerKw(pack);
             o.put("packKw", Double.isNaN(pack) ? JSONObject.NULL : (Object) round1(pack));
             o.put("frontRpm", vd.frontMotorSpeed == com.overdrive.app.byd.BydVehicleData.UNAVAILABLE
                     ? JSONObject.NULL : (Object) vd.frontMotorSpeed);
@@ -847,7 +848,7 @@ public final class LauncherApiHandler {
                     ? (Object) round1(vd.enginePowerKw) : JSONObject.NULL);
             // a DiLink 3/4 plug-in hybrid's drive power, for custom widgets; packKw and the engine flow stay as they are
             o.put("driveKw", engineFresh && !Double.isNaN(vd.enginePowerKw)
-                    && com.overdrive.app.byd.BydDataCollector.getInstance().isLegacyHybridPublic()
+                    && collector.isLegacyHybridPublic()
                     ? (Object) round1(vd.enginePowerKw) : JSONObject.NULL);
             return o;
         } catch (Throwable t) {

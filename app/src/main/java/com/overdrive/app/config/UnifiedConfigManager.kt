@@ -3614,6 +3614,14 @@ object UnifiedConfigManager {
         )
     }
 
+    /** In-process selection for display-frame reads. Unloaded and unconfirmed models are unavailable. */
+    internal fun cachedUserSelectedVehicleModelIs(expected: String): Boolean {
+        val vehicle = cachedConfig?.optJSONObject("vehicle") ?: return false
+        val id = vehicle.optString("modelId")
+        val source = VehicleModelSelection.normalizeSource(vehicle.optString("modelSource"), id)
+        return source == VehicleModelSelection.SOURCE_USER && expected.equals(id.trim(), ignoreCase = true)
+    }
+
     /**
      * Critical model-lineage read. Null means the durable config genuinely has
      * no resolved selection; lock, byte-read, shape, and parse failures throw.
