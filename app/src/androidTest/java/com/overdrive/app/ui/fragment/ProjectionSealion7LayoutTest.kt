@@ -46,6 +46,9 @@ class ProjectionSealion7LayoutTest {
         })
         val context = ContextThemeWrapper(landscape, R.style.Theme_Overdrive_M3)
         val root = LayoutInflater.from(context).inflate(R.layout.fragment_projection, null) as ViewGroup
+        // Settings may live in a side panel that starts hidden; show it like the gear does.
+        context.resources.getIdentifier("projectionSettingsPanel", "id", context.packageName)
+            .takeIf { it != 0 }?.let { root.findViewById<View?>(it)?.visibility = View.VISIBLE }
         val row = root.findViewById<View>(R.id.projectionSealion7HdmiRow)
         val toggle = root.findViewById<MaterialSwitch>(R.id.projectionSealion7HdmiSwitch)
 
@@ -54,7 +57,8 @@ class ProjectionSealion7LayoutTest {
             it.parent as? View
         }.filterIsInstance<MaterialCardView>().first()
         val settings = adasCard.parent as LinearLayout
-        assertEquals(LinearLayout.HORIZONTAL, settings.orientation)
+        // One column of settings cards (the Full HDMI card first), not a side-by-side row.
+        assertEquals(LinearLayout.VERTICAL, settings.orientation)
         val clusterBars = MaterialCardView(context)
         settings.addView(
             clusterBars, settings.indexOfChild(adasCard) + 1, LinearLayout.LayoutParams(

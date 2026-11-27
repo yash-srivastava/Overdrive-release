@@ -875,6 +875,63 @@
                     app:cardCornerRadius="@dimen/dashboard_modern_radius"
                     app:cardElevation="0dp">
                     <LinearLayout
+                        android:id="@+id/projectionToolsRow"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:gravity="center_vertical"
+                        android:minHeight="@dimen/dashboard_modern_touch_target"
+                        android:orientation="horizontal"
+                        android:padding="@dimen/dashboard_modern_card_padding">
+
+                        <ImageView
+                            android:layout_width="@dimen/od_icon_md"
+                            android:layout_height="@dimen/od_icon_md"
+                            android:importantForAccessibility="no"
+                            android:src="@drawable/ic_settings"
+                            app:tint="?attr/colorOnSurfaceVariant" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/od_space_16"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/projection_tools_dialog_title"
+                                android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
+                                android:textColor="?attr/colorOnSurface" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/projection_tools_description"
+                                android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta"
+                                android:textColor="?attr/colorOnSurfaceVariant" />
+                        </LinearLayout>
+
+                        <ImageView
+                            android:layout_width="@dimen/od_icon_md"
+                            android:layout_height="@dimen/od_icon_md"
+                            android:importantForAccessibility="no"
+                            android:src="@drawable/ic_chevron_right"
+                            app:tint="?attr/colorOnSurfaceVariant" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dashboard_modern_gap"
+                    app:cardBackgroundColor="?attr/colorSurfaceContainer"
+                    app:cardCornerRadius="@dimen/dashboard_modern_radius"
+                    app:cardElevation="0dp">
+                    <LinearLayout
                         android:id="@+id/projectionLayoutsRow"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"

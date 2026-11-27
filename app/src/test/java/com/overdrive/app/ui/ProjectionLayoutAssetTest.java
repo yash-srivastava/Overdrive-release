@@ -368,10 +368,19 @@ public class ProjectionLayoutAssetTest {
     public void dockUsesTheSharedTouchTargetAndIcons() throws IOException {
         for (String path : new String[] {PORTRAIT, LAND}) {
             String xml = readRepositoryFile(path);
-            assertTrue(path, openingTag(xml, "projectionStopButton")
-                    .contains("android:layout_height=\"@dimen/od_touch_standard\""));
-            assertTrue(path, openingTag(xml, "projectionKeyBack")
-                    .contains("android:layout_height=\"@dimen/od_touch_standard\""));
+            int dock = xml.indexOf("@+id/projectionDock");
+            String dockXml = xml.substring(dock,
+                    xml.indexOf("</com.google.android.material.card.MaterialCardView>", dock));
+            java.util.regex.Matcher button = java.util.regex.Pattern
+                    .compile("<com\\.google\\.android\\.material\\.button\\.MaterialButton[^>]*>")
+                    .matcher(dockXml);
+            int buttons = 0;
+            while (button.find()) {
+                buttons++;
+                assertTrue(path + " " + button.group(),
+                        button.group().contains("android:layout_height=\"@dimen/od_touch_standard\""));
+            }
+            assertTrue(path, buttons >= 7);
             assertTrue(path, xml.contains("app:icon=\"@drawable/ic_saved_home\""));
             assertTrue(path, xml.contains("app:icon=\"@drawable/ic_volume_on\""));
             assertTrue(path, xml.contains("app:icon=\"@drawable/ic_clear\""));
@@ -379,6 +388,30 @@ public class ProjectionLayoutAssetTest {
         }
         assertTrue(readRepositoryFile(FRAGMENT)
                 .contains("if (favorite) R.drawable.ic_star_filled else R.drawable.ic_star"));
+    }
+
+    /** Tiles and mirror swap places from the top; tile taps wait a beat after a cast ends. */
+    @Test
+    public void pageSwitchResetsScrollAndGuardsTileTaps() throws IOException {
+        String fragment = readRepositoryFile(FRAGMENT);
+        int render = fragment.indexOf("private fun renderLiveState(");
+        assertTrue(fragment.indexOf("scroll?.scrollTo(0, 0)", render) > render);
+        int tap = fragment.indexOf("private fun onAppTapped(");
+        assertTrue(fragment.indexOf("TILE_TAP_GUARD_MS", tap) > tap);
+        assertTrue(fragment.contains(
+                "val canEdit = !aaosHostedMap && !layoutActive && !layoutBusy && !castInFlight"));
+    }
+
+    /** Projection tools keep an always-visible entry next to Layouts. */
+    @Test
+    public void projectionToolsKeepAnEntryNextToLayouts() throws IOException {
+        for (String path : new String[] {PORTRAIT, LAND}) {
+            String xml = readRepositoryFile(path);
+            int tools = xml.indexOf("@+id/projectionToolsRow");
+            int layouts = xml.indexOf("@+id/projectionLayoutsRow");
+            assertTrue(path, tools >= 0 && layouts > tools);
+        }
+        assertTrue(readRepositoryFile(FRAGMENT).contains("R.id.projectionToolsRow"));
     }
 
     /** The opening tag (attributes) of the view carrying {@code id}. */

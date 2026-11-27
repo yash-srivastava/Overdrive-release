@@ -131,6 +131,10 @@ class ProjectionFragment : Fragment() {
     private var pendingAdjustPackage: String? = null
     // The live package the tiles and dock were last rendered for (null = render on next pass).
     private var renderedLivePackage: String? = null
+    // Whether the page last showed the mirror (true) or the tiles (false); null = not yet.
+    private var renderedLive: Boolean? = null
+    // When the tiles last came back after a cast ended (uptime ms), for the tap guard.
+    private var tilesShownAtMs = 0L
     private var statusText: TextView? = null
     private var statusDot: View? = null
     private var appToast: AppToast? = null
@@ -572,6 +576,7 @@ class ProjectionFragment : Fragment() {
             now.setOnLongClickListener { now.performClick() }
         }
         renderedLivePackage = null
+        renderedLive = null
     }
 
     /** A grid whose column count follows its width, so tiles keep a car-friendly size. */
@@ -613,6 +618,13 @@ class ProjectionFragment : Fragment() {
         // The dock holds the only exit from full screen (the rail is hidden too): leave it as
         // soon as nothing is live, e.g. Stop pressed in full screen or the cast ending on its own.
         if (!live && theater) setTheater(false)
+        if (live != renderedLive) {
+            // Tiles and mirror swap places: start from the top so the mirror and Stop (or the first
+            // tiles) are on screen, not wherever a long app list had been scrolled to.
+            if (renderedLive == true && !live) tilesShownAtMs = android.os.SystemClock.uptimeMillis()
+            renderedLive = live
+            scroll?.scrollTo(0, 0)
+        }
         setVisible(pickerHero, !live)
         setVisible(appPicker, !live)
         setVisible(idleNotice, !live && idleNoticeMessage != null)
@@ -658,6 +670,9 @@ class ProjectionFragment : Fragment() {
     /** Tap: cast that app (the daemon replaces whatever is on the cluster). Tapping the app that
      *  is already live opens its menu instead of re-casting it. */
     private fun onAppTapped(pkg: String) {
+        // Driving: a tap aimed at Stop or Volume as a cast ends must not land on the tile that
+        // just slid under the finger and start a new cast.
+        if (!casting && android.os.SystemClock.uptimeMillis() - tilesShownAtMs < TILE_TAP_GUARD_MS) return
         if (casting && castPackage == pkg) {
             showAppActions(pkg)
             return
@@ -691,7 +706,8 @@ class ProjectionFragment : Fragment() {
         val v = LayoutInflater.from(ctx).inflate(R.layout.dialog_projection_app_actions, null)
         val dialog = MaterialAlertDialogBuilder(ctx).setView(v).create()
         val isLive = casting && castPackage == pkg
-        val canEdit = !aaosHostedMap && !layoutActive && !layoutBusy
+        // Not while a first cast is in flight: the frame would move but the cluster keep its window.
+        val canEdit = !aaosHostedMap && !layoutActive && !layoutBusy && !castInFlight
         v.findViewById<ImageView>(R.id.projectionActionsIcon)?.let { iv ->
             val icon = entry.icon?.constantState?.newDrawable(iv.resources)?.mutate() ?: entry.icon
             if (icon != null) iv.setImageDrawable(icon)
@@ -789,7 +805,7 @@ class ProjectionFragment : Fragment() {
     /** Live app: move its window now (the path the old preset buttons used). Any other app: save
      *  the window locally and in the daemon store, so its next cast (headless too) lands there. */
     private fun applyPresetFor(pkg: String, which: Int) {
-        if (aaosHostedMap || layoutActive || layoutBusy) return
+        if (aaosHostedMap || layoutActive || layoutBusy || castInFlight) return
         // The live app, or the app the resize frame still describes (the last one used): move
         // the frame, so the normal commit path persists it. Writing prefs behind the frame's back
         // would be overwritten by the frame on the next onPause → persistWindow.
@@ -848,6 +864,12 @@ class ProjectionFragment : Fragment() {
             val open = advancedContent?.visibility != View.VISIBLE
             setVisible(advancedContent, open)
             advancedChevron?.animate()?.rotation(if (open) 180f else 0f)?.setDuration(SETTINGS_ANIM_MS)?.start()
+        }
+        // Projection tools stay reachable without an app: navigation guidance and the cluster
+        // keyboard are global. They act on the app on the cluster, else the last app tapped.
+        root.findViewById<View>(R.id.projectionToolsRow)?.setOnClickListener {
+            setSettingsOpen(false)
+            ProjectionAppTools.open(this) { castPackage.takeIf { casting && it.isNotEmpty() } ?: selectedPackage() }
         }
         root.findViewById<View>(R.id.projectionLayoutsRow)?.setOnClickListener {
             setSettingsOpen(false)
@@ -2818,6 +2840,8 @@ class ProjectionFragment : Fragment() {
         private const val APP_ICON_DP = 48f
         // Narrowest tile the idle grid allows before it drops a column.
         private const val TILE_MIN_DP = 132f
+        // Tile taps are ignored this long after the tiles replace the mirror.
+        private const val TILE_TAP_GUARD_MS = 600L
         private const val SETTINGS_ANIM_MS = 200L
         // Settings panel width to slide by before its first layout (landscape is 440dp).
         private const val SETTINGS_PANEL_FALLBACK_DP = 440f
