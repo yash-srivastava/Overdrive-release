@@ -116,12 +116,8 @@ class YoloDetector(private val context: Context) {
     private var shapedBuffer: TensorBuffer? = null
     private var floatOutput: FloatArray? = null
 
-    // Pre-extracted box-coords scratch reused across detect() calls. Sized
-    // numBoxes*4 = 33600 floats = 134 KB; allocating it per inference was
-    // ~1 MB/s of short-lived heap garbage feeding into the same GC that
-    // serves the encoder drainer thread. Detector is called on a single
-    // aiExecutor thread; no synchronization needed beyond interpLock.
-    private var boxesScratch: FloatArray? = null
+    // Lazily allocated only for legacy raw-anchor output. Guarded by interpLock.
+    private var legacyClassScores: LegacyClassScores? = null
     // NMS sort working copy. Replaces sortedByDescending(), which allocated
     // a fresh List + lambda per call.
     private var nmsScratch: Array<Detection?>? = null
@@ -529,7 +525,7 @@ class YoloDetector(private val context: Context) {
             }
             // parseOutput INSIDE the lock, deliberately.
             //
-            // It reads/writes `boxesScratch` and `nmsScratch` — shared instance
+            // It reads/writes `legacyClassScores` and `nmsScratch` — shared instance
             // fields, not locals. Their thread-safety previously rested on the
             // implicit invariant that every detect() caller runs on the engine's
             // single-thread aiExecutor. That is true today (all five call sites in
@@ -542,7 +538,7 @@ class YoloDetector(private val context: Context) {
             //
             // It also closes a real (if minor) race with close(), which nulls both
             // scratch fields under this lock: parseOutput would otherwise re-create
-            // a 134 KB buffer after close() and retain it until the next init().
+            // scratch buffers after close() and retain it until the next init().
             //
             // Cost: parseOutput is ~10-20 ms of pure CPU (no JNI, no I/O) on top of
             // a ~250 ms inference that already holds the lock, and the only other
@@ -635,8 +631,8 @@ class YoloDetector(private val context: Context) {
         minRelativeHeight: Float
     ): List<Detection> {
 
-        // Probed from the model in init() — 8400/80 for the shipped yolo11n
-        // asset, so this is behavior-identical to the previous hardcoding.
+        // Probed from the model in init() — 8400/80 for the legacy YOLO11n
+        // asset; the shipped YOLO26n uses the separate end-to-end parser.
         val numBoxes = legacyNumBoxes
         val numClasses = legacyNumChannels - 4
 
@@ -706,21 +702,8 @@ class YoloDetector(private val context: Context) {
                 (1L shl CLASS_AIRPLANE)
         val implausibleClassMinConf = maxOf(confThreshold, 0.55f)
 
-        // Reuse pre-extracted box-coords scratch (134 KB). Re-allocate only
-        // if numBoxes ever changes (which it can't with a fixed YOLO11n
-        // model, but the guard costs nothing).
-        var boxes = boxesScratch
-        if (boxes == null || boxes.size != numBoxes * 4) {
-            boxes = FloatArray(numBoxes * 4)
-            boxesScratch = boxes
-        }
-        for (i in 0 until numBoxes) {
-            val base = i * 4
-            boxes[base] = output[i]                       // cx
-            boxes[base + 1] = output[numBoxes + i]        // cy
-            boxes[base + 2] = output[2 * numBoxes + i]    // w
-            boxes[base + 3] = output[3 * numBoxes + i]    // h
-        }
+        val classScores = legacyClassScores ?: LegacyClassScores().also { legacyClassScores = it }
+        var blockStart = 0
 
         val detections = ArrayList<Detection>(16)
 
@@ -745,21 +728,15 @@ class YoloDetector(private val context: Context) {
         var peakPersonConf = 0f   // best person-class score BEFORE any gate
 
         for (i in 0 until numBoxes) {
-            val base = i * 4
-            val cx = boxes[base]
-            val cy = boxes[base + 1]
-            val w = boxes[base + 2]
-            val h = boxes[base + 3]
-
-            var bestConf = 0f
-            var bestClass = -1
-            for (c in 0 until numClasses) {
-                val conf = output[(4 + c) * numBoxes + i]
-                if (conf > bestConf) {
-                    bestConf = conf
-                    bestClass = c
-                }
+            // Scan each class's contiguous scores in a cache-sized block; keep
+            // the original anchor order for diagnostics, gates and NMS ties.
+            if (i % LegacyClassScores.BLOCK_SIZE == 0) {
+                blockStart = i
+                classScores.scan(output, numBoxes, numClasses, i,
+                    minOf(LegacyClassScores.BLOCK_SIZE, numBoxes - i))
             }
+            val bestConf = classScores.scores[i - blockStart]
+            val bestClass = classScores.classes[i - blockStart]
 
             // Raw peak across ALL boxes/classes, before any gate.
             if (bestConf > rawPeakConf) {
@@ -777,10 +754,11 @@ class YoloDetector(private val context: Context) {
             if ((wantedMask and (1L shl bestClass)) == 0L) { rejUnwanted++; continue }
 
             // Convert to image coordinates
-            val cxPx = cx * inputSize
-            val cyPx = cy * inputSize
-            val wPx = w * inputSize
-            val hPx = h * inputSize
+            // Coordinates are only needed after the confidence and class gates.
+            val cxPx = output[i] * inputSize
+            val cyPx = output[numBoxes + i] * inputSize
+            val wPx = output[2 * numBoxes + i] * inputSize
+            val hPx = output[3 * numBoxes + i] * inputSize
 
             val objX: Int
             val objY: Int
@@ -1202,7 +1180,7 @@ class YoloDetector(private val context: Context) {
             shapedBufferH = -1
             floatOutput = null
             floatOutputView = null
-            boxesScratch = null
+            legacyClassScores = null
             nmsScratch = null
             normalizedInput = null
             letterboxProcessor = null
