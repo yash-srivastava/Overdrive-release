@@ -129,8 +129,8 @@ public class RecordingFileFingerprintTest {
     public void sidecarNameOnlyReplacesTrailingMp4Suffix() {
         File mp4 = new File("/recordings/event_a.mp4_2.mp4");
 
-        assertTrue(RecordingFileFingerprint.sidecarFor(mp4).getPath()
-                .endsWith("/recordings/event_a.mp4_2.json"));
+        File expected = new File(mp4.getParentFile(), "event_a.mp4_2.json");
+        assertEquals(expected.getPath(), RecordingFileFingerprint.sidecarFor(mp4).getPath());
     }
 
     private static File write(Path path, String content) throws Exception {
