@@ -979,14 +979,9 @@ object UnifiedConfigManager {
         // clips well under the budget without user tuning.
         if (!oemDashcam.has("recordingQuality")) oemDashcam.put("recordingQuality", "STANDARD")
         if (!oemDashcam.has("codec")) oemDashcam.put("codec", "H264")
-        // fpsMode marker: every existing install already has fps=30 stored (seeded),
-        // which can't be told from a user pick, so they stay "fixed". Only a config
-        // with no stored fps (fresh install) follows the ACC-on recording fps. The
-        // seeded fps=30 stays the camera HAL rate; follow strides the encode.
-        if (!oemDashcam.has("fps")) {
-            if (!oemDashcam.has("fpsMode")) oemDashcam.put("fpsMode", OEM_FPS_MODE_FOLLOW)
-            oemDashcam.put("fps", 30)
-        }
+        // fps = the OEM camera HAL rate. fpsMode is NOT seeded here: the daemon's
+        // one-time migrateOemFpsMode() writes it (follow) so the choice is recorded.
+        if (!oemDashcam.has("fps")) oemDashcam.put("fps", 30)
         // ---- OEM parked-idle low-power throttle (default OFF = byte-identical) ----
         // When parked + smart surveillance + vehicle OFF, the OEM dashcam is kept
         // warm but only records event clips (triggered by the pano detector). While
@@ -2436,7 +2431,7 @@ object UnifiedConfigManager {
     const val OEM_FPS_MODE_FOLLOW = "follow"
     const val OEM_FPS_MODE_FIXED = "fixed"
 
-    /** True when the OEM DVR follows the ACC-on recording fps. Absent = fixed (existing installs). */
+    /** True when the OEM DVR follows the recording fps. Absent (migration not yet run) = fixed. */
     @JvmStatic
     fun isOemFpsFollow(): Boolean = try {
         OEM_FPS_MODE_FOLLOW == getOemDashcam().optString("fpsMode", OEM_FPS_MODE_FIXED)
@@ -3187,6 +3182,25 @@ object UnifiedConfigManager {
         sOut.put("enabled", "off" != resolvedSurvMode)
         delta.put("surveillance", sOut)
         return updateSection("oemDashcam", delta)
+    }
+
+    /**
+     * One-time: a config without oemDashcam.fpsMode gets fpsMode="follow" written,
+     * raising oemDashcam.fps (camera rate) only when the stored rate can't reach
+     * the drive follow rate. A stored fpsMode (fixed or follow) is never touched.
+     * Called only from the camera daemon's boot hook, before any OEM session
+     * starts; check and write share the cross-process config lock.
+     */
+    @JvmStatic
+    fun migrateOemFpsMode(): Boolean = withConfigFileLock {
+        val oem = forceReload().optJSONObject("oemDashcam") ?: return@withConfigFileLock false
+        if (oem.has("fpsMode")) return@withConfigFileLock false
+        val delta = JSONObject().put("fpsMode", OEM_FPS_MODE_FOLLOW)
+        val stored = oem.optInt("fps", 30)
+        val hal = com.overdrive.app.camera.OemDashcamPipeline.followHalFps(stored, 30, getOemFollowFps())
+        if (hal != stored.coerceIn(15, 60)) delta.put("fps", hal)
+        Log.i(TAG, "OEM fpsMode migration: $delta (stored fps=$stored)")
+        updateSection("oemDashcam", delta)
     }
 
     /**

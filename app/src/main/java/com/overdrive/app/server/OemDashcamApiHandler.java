@@ -1058,6 +1058,14 @@ public class OemDashcamApiHandler {
     public static void enforceStickyEnableIfRequested() {
         try {
             com.overdrive.app.config.UnifiedConfigManager.migrateOemDashcamModes();
+            // One-time fpsMode=follow for configs without a recorded choice. Boot runs
+            // before any OEM session starts, so nothing in flight is restarted.
+            try {
+                com.overdrive.app.config.UnifiedConfigManager.migrateOemFpsMode();
+            } catch (Throwable t) {
+                com.overdrive.app.daemon.CameraDaemon.log(
+                    "OemDashcam: fpsMode migration failed (stays fixed): " + t.getMessage());
+            }
             if (com.overdrive.app.config.UnifiedConfigManager.isAnyOemDashcamTriggerEnabled()) {
                 com.overdrive.app.daemon.CameraDaemon.log(
                     "OemDashcam: re-applying mirror triggers at boot");
