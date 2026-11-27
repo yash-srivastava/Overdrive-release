@@ -516,8 +516,7 @@ class OnboardingOverlayView @JvmOverloads constructor(
     }
 
     private fun resolveAccentColor(): Int {
-        // colorPrimary lives under appcompat's attr namespace in this project (see
-        // DashboardInsight / LogsAdapter convention), not material's.
+        // colorPrimary lives under appcompat's attr namespace in this project, not material's.
         val c = resolveAttr(androidx.appcompat.R.attr.colorPrimary)
         return if (c != 0) c else Color.WHITE
     }

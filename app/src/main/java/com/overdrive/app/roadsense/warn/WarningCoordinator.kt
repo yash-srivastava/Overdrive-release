@@ -1,7 +1,5 @@
 package com.overdrive.app.roadsense.warn
 
-import android.media.AudioManager
-import android.media.ToneGenerator
 import android.util.Log
 import com.overdrive.app.roadsense.config.RoadSenseConfig
 import com.overdrive.app.roadsense.detect.Pose
@@ -30,9 +28,8 @@ import com.overdrive.app.roadsense.store.RoadSenseStore
  * ## Audio
  * Uses the injected [AudioCue]. The production controller installs
  * [BridgedAudioCue] to play the bundled severity chime through the selected OEM
- * audio channels; [ToneAudioCue] remains the standalone fallback. Visual cues
- * are delegated to a [VisualSink] the overlay implements, keeping this class
- * overlay-agnostic + unit-testable.
+ * audio channels. Visual cues are delegated to a [VisualSink] the overlay
+ * implements, keeping this class overlay-agnostic + unit-testable.
  *
  * Not thread-safe; called from the single controller tick thread.
  */
@@ -40,7 +37,7 @@ class WarningCoordinator(
     private val store: RoadSenseStore,
     private val approach: ApproachEngine = ApproachEngine(),
     private val visualSink: VisualSink? = null,
-    private val audio: AudioCue = ToneAudioCue(),
+    private val audio: AudioCue,
     private val clock: () -> Long = { System.currentTimeMillis() },
 ) {
 
@@ -66,7 +63,7 @@ class WarningCoordinator(
         fun clearApproach()
     }
 
-    /** Pluggable audio so tests don't need a real ToneGenerator. */
+    /** Pluggable audio so tests do not need an Android playback service. */
     interface AudioCue {
         fun chime(severity: Severity)
         fun release()
@@ -379,38 +376,4 @@ class WarningCoordinator(
          *  jitter on the latched range without letting a behind-the-car hazard linger. */
         private const val STICKY_PASSED_EPSILON_M = 4.0
     }
-}
-
-/**
- * Default [WarningCoordinator.AudioCue] backed by [ToneGenerator] on STREAM_MUSIC
- * with a distinct tone for each severity so the chime itself conveys urgency.
- * The generator is created lazily and reused;
- * [release] frees it when the feature stops.
- */
-class ToneAudioCue : WarningCoordinator.AudioCue {
-    private var tg: ToneGenerator? = null
-
-    private fun gen(): ToneGenerator? {
-        if (tg == null) {
-            tg = try { ToneGenerator(AudioManager.STREAM_MUSIC, VOLUME) } catch (_: Throwable) { null }
-        }
-        return tg
-    }
-
-    override fun chime(severity: Severity) {
-        val tone = when (severity) {
-            Severity.MINOR -> ToneGenerator.TONE_PROP_BEEP          // single soft beep
-            Severity.MODERATE -> ToneGenerator.TONE_PROP_BEEP2      // double beep
-            Severity.SEVERE -> ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD // urgent
-        }
-        val ms = if (severity == Severity.SEVERE) 600 else 300
-        try { gen()?.startTone(tone, ms) } catch (_: Throwable) { /* never crash on a chime */ }
-    }
-
-    override fun release() {
-        try { tg?.release() } catch (_: Throwable) {}
-        tg = null
-    }
-
-    companion object { private const val VOLUME = 90 }
 }

@@ -521,6 +521,14 @@ object UnifiedConfigManager {
         readDurableConfigLockedStrict()
     }
 
+    /** Strict worker read with an elapsed-realtime deadline. Null means the config lock was busy. */
+    internal fun readDurableConfigBefore(deadlineMs: Long): JSONObject? = try {
+        withConfigFileLock(deadlineMs) { readDurableConfigLockedStrict() }
+    } catch (e: ConfigLockUnavailableException) {
+        if (!e.contended) throw e
+        null
+    }
+
     /**
      * Restore is allowed to replace a genuinely absent or malformed root, but
      * an I/O or lock failure remains transient and must abort the operation.
@@ -4600,9 +4608,12 @@ object UnifiedConfigManager {
     // outermost holder owns the OS lock; inner calls just run body().
     private val holdingFileLock = ThreadLocal.withInitial { false }
 
-    private fun <T> withConfigFileLock(body: () -> T): T {
-        val waitMs = lockWaitMs()
-        val deadline = SystemClock.elapsedRealtime() + waitMs
+    private fun <T> withConfigFileLock(body: () -> T): T = withConfigFileLock(Long.MAX_VALUE, body)
+
+    private fun <T> withConfigFileLock(deadlineMs: Long, body: () -> T): T {
+        val now = SystemClock.elapsedRealtime()
+        val deadline = minOf(now + lockWaitMs(), deadlineMs)
+        val waitMs = (deadline - now).coerceAtLeast(0L)
         if (!acquireConfigLock(deadline)) {
             // The owner may itself be waiting on a peer process, so name both.
             reportStableLockUnavailable(waitMs) {

@@ -214,7 +214,7 @@ public class RecordingsApiHandler {
             applyParkingExtras(filter, params.get("parkingSessionId"),
                     params.get("camera"), params.get("minConfidence"));
             Set<String> skippedPrefixes = new HashSet<>();
-            for (String prefix : new String[] {"dvr_p", "event_", "cam_"}) {
+            for (String prefix : new String[] {"dvr_p", "dvr_", "event_", "cam_"}) {
                 if ("1".equals(params.get("skip_" + prefix))) skippedPrefixes.add(prefix);
             }
             RecordingsIndex.AdjacentResult found = idx.queryPlaylistRecording(filter, fromId,
@@ -637,7 +637,6 @@ public class RecordingsApiHandler {
      */
     private static byte[] generateThumbnail(File videoFile) {
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
-        Bitmap frame = null;
         Bitmap scaled = null;
         // The daemon has no Application: the String overload NPEs, and on Android 12+ so does the
         // FileDescriptor one, so those cases go through a MediaDataSource.
@@ -645,21 +644,12 @@ public class RecordingsApiHandler {
             if (RemovableStorageFs.needsMediaDataSource(videoFile)) RemovableStorageFs.setDataSource(retriever, videoFile);
             else retriever.setDataSource(fis.getFD());
 
-            // Get frame at 1 second (1000000 microseconds)
-            frame = retriever.getFrameAtTime(1000000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
-            if (frame == null) {
-                // Try frame at 0 if 1 second fails
-                frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+            scaled = VideoStillFrame.extract(retriever, 1000000,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 320, 180);
+            if (scaled == null) {
+                scaled = VideoStillFrame.extract(retriever, 0,
+                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 320, 180);
             }
-
-            if (frame == null) {
-                return null;
-            }
-
-            // Scale down to thumbnail size (320x180 for 16:9 aspect).
-            scaled = Bitmap.createScaledBitmap(frame, 320, 180, true);
-            // Release the full-size frame early.
-            if (scaled != frame) frame.recycle();
             // Raw (player-dewarped) clips get the same lens correction as playback.
             if (scaled != null) {
                 scaled = com.overdrive.app.surveillance.LensTag.dewarpFrameForClip(scaled, videoFile);
@@ -677,13 +667,8 @@ public class RecordingsApiHandler {
             CameraDaemon.log("Thumbnail generation failed: " + e.getMessage());
             return null;
         } finally {
-            // Release both bitmaps even when scaling or compression throws.
-            // createScaledBitmap may return the source unchanged, so recycle it once.
-            if (scaled != null && scaled != frame && !scaled.isRecycled()) {
+            if (scaled != null && !scaled.isRecycled()) {
                 scaled.recycle();
-            }
-            if (frame != null && !frame.isRecycled()) {
-                frame.recycle();
             }
             try {
                 retriever.release();

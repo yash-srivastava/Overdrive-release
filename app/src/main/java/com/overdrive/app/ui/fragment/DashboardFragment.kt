@@ -1062,8 +1062,7 @@ class DashboardFragment : Fragment() {
         val clamped = socPercent.coerceIn(0.0, 100.0).toInt()
         gauge.setProgressCompat(clamped, /* animated = */ true)
         // colorError/colorPrimary live under appcompat's attr namespace in this
-        // project (nonTransitiveRClass — see OnboardingOverlayView / LogsAdapter
-        // convention), not material's.
+        // project (nonTransitiveRClass), not material's.
         val colorAttr = if (clamped <= LOW_SOC_THRESHOLD_PERCENT) {
             androidx.appcompat.R.attr.colorError
         } else {

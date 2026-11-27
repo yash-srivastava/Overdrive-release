@@ -920,22 +920,6 @@ public class OemDashcamPipeline {
     }
 
     /**
-     * Segment rotation phase offset (ms) for continuous mode. Read from UCM
-     * at start time and applied by the continuous-segment scheduler so the
-     * OEM pipeline's MediaMuxer.stop() bursts (~50–200 ms) don't collide
-     * with the pano pipeline's segment-stop bursts. Default 30 s into the
-     * pano cycle.
-     */
-    public int getSegmentRotateOffsetMs() {
-        try {
-            return UnifiedConfigManager.getOemDashcam()
-                .optInt("segmentRotateOffsetMs", 30_000);
-        } catch (Throwable t) {
-            return 30_000;
-        }
-    }
-
-    /**
      * Re-arm the parked-idle encode stride after a clip finalizes. Event/
      * continuous starts snap the stride to 1 for a full-rate clip; once the clip
      * ends we must return to the throttled idle stride if we are still on the

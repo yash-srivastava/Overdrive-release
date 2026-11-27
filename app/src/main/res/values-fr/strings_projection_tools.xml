@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="projection_app_density">DPI de l’app</string>
+    <string name="projection_app_keyboard">Clavier</string>
+    <string name="projection_app_guidance">Outils de l’application</string>
+    <string name="projection_tools_select_app">Sélectionnez d’abord une application projetée.</string>
+    <string name="projection_tools_daemon_unavailable">Le service du combiné est indisponible. Réessayez quand il est connecté.</string>
+    <string name="projection_tools_save">Enregistrer</string>
+    <string name="projection_tools_save_failed">Impossible d’enregistrer le réglage. Veuillez réessayer.</string>
+    <string name="projection_density_description">Densité pour %1$s lors de sa prochaine projection. Utilisez 0 pour conserver la densité de l’écran, ou 96–480 DPI.\n\nLa densité affecte toutes les cartes et superpositions de cet écran pendant la projection. Après l’arrêt, le réglage précédent est rétabli dès que l’écran est disponible en toute sécurité.</string>
+    <string name="projection_density_range">Saisissez 0 ou un entier de 96 à 480.</string>
+    <string name="projection_density_saved">Enregistré. Arrêtez puis relancez la projection de l’application pour appliquer sa densité.</string>
+    <string name="projection_density_not_applied">La dernière projection n’a pas pu appliquer cette densité : %1$s</string>
+    <string name="projection_guidance_di3">Bandeau du combiné DI3 et guidage sur le pare-brise (à vérifier dans la voiture)</string>
+    <string name="projection_guidance_di5">Bandeau du combiné DI5 expérimental</string>
+    <string name="projection_guidance_notifications">Accès aux notifications de carte</string>
+    <string name="projection_guidance_setup">Enregistrez, puis lancez la navigation dans RoadSense. Google Maps ou Waze nécessitent aussi l’accès aux notifications de carte.\n\nGardez le HUD DI3 allumé et arrêtez toute navigation intégrée. Si votre voiture propose un réglage HUD pour le contenu de navigation, activez-le ; tous les modèles n’en ont pas. Cette option n’allume pas le HUD, et l’affichage des flèches reste à vérifier dans la voiture.</string>
+    <string name="projection_guidance_setup_di5">Enregistrez, puis lancez la navigation dans RoadSense. Google Maps ou Waze nécessitent aussi l’accès aux notifications de carte.\n\nLe bandeau du combiné DI5 est expérimental. Arrêtez toute projection ou carte plein combiné avant de le tester. Le guidage sur le pare-brise n’est pas disponible en DI5.</string>
+    <string name="projection_keyboard_auto">Ouvrir automatiquement le clavier DI5 sur les champs de texte du combiné</string>
+    <string name="projection_guidance_saved">Enregistré. Le guidage sur le pare-brise est réservé au DI3 ; l’affichage du bandeau DI5 reste à vérifier dans la voiture.</string>
+    <string name="projection_tools_title">Outils</string>
+    <string name="projection_tools_dialog_title">Outils de projection</string>
+    <string name="projection_tools_description">Configurez la navigation, la taille des apps et la saisie de texte pour le combiné.</string>
+    <string name="projection_tools_navigation">Guidage de navigation</string>
+    <string name="projection_tools_navigation_description">Choisissez où s’affichent les indications de RoadSense ou des notifications de carte.</string>
+    <string name="projection_tools_density">Taille d’affichage de l’app</string>
+    <string name="projection_tools_density_description">Ajuster la densité d’affichage de l’app sélectionnée lors de sa prochaine projection.</string>
+    <string name="projection_tools_keyboard_description">Saisir du texte dans une app projetée et gérer l’ouverture automatique. DI5 uniquement.</string>
+    <string name="projection_tools_density_value">Densité d’affichage (DPI)</string>
+    <string name="projection_tools_density_default">0 conserve la densité de l’écran · 96–480 définit une taille personnalisée</string>
+    <string name="projection_tools_di3_title">HUD et combiné DI3</string>
+    <string name="projection_tools_di3_description">Envoyer les indications au HUD du pare-brise et au bandeau du combiné. Vérifiez l’affichage des flèches dans la voiture.</string>
+    <string name="projection_tools_di3_only">Disponible en mode DI3.</string>
+    <string name="projection_tools_di5_title">Bandeau du combiné DI5</string>
+    <string name="projection_tools_di5_description">Indications expérimentales sur le bandeau du combiné. Le guidage sur le pare-brise n’est pas disponible en DI5.</string>
+    <string name="projection_tools_di5_only">Disponible en mode DI5.</string>
+    <string name="projection_tools_setup">Premiers pas</string>
+</resources>

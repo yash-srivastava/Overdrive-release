@@ -261,7 +261,12 @@
     display: flex;
     flex-wrap: wrap;
     margin-bottom: 5px;
-    flex: 1;
+    /* Basis + min-width:0: a wide child (a nested If/Loop block) used to stretch the
+       column past a phone's card edge (flex items default to min-width:auto). When the
+       row is too narrow for icon + fields + row controls, the controls wrap below
+       instead of squeezing the fields. */
+    flex: 1 1 220px;
+    min-width: 0;
     align-items: center;
 }
 /* Inter-input spacing is a sibling margin (flex gap is ignored on Chrome-58); the
@@ -684,6 +689,7 @@
        background" — the tinted track ran the whole row with the buttons bunched left).
        margin-bottom stands in for the column gap (Chrome-58 has no flex gap). */
     display: inline-flex;
+    flex-wrap: wrap;
     align-self: flex-start;
     max-width: 100%;
     background: var(--surface-2, rgba(255,255,255,0.05));

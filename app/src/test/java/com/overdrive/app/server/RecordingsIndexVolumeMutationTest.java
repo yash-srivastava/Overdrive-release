@@ -165,6 +165,48 @@ public class RecordingsIndexVolumeMutationTest {
                 -1, true, false, Collections.emptySet()).recording.getString("id"));
     }
 
+    @Test
+    public void playlistSkipsPoweredOnAndParkedDvrIndependently() throws Exception {
+        RecordingsIndex index = newIndex("playlist-dvr");
+        Path dir = Files.createTempDirectory("recordings-playlist-dvr");
+        for (String name : Arrays.asList("dvr_20260810_120000.mp4",
+                "dvr_p_20260810_120001.mp4", "event_20260810_120002.mp4")) {
+            assertTrue(index.upsert(write(dir.resolve(name))));
+        }
+        RecordingsIndex.Filter filter = new RecordingsIndex.Filter();
+        List<JSONObject> rows = index.queryRecordings(filter, 10, 0);
+        String poweredOn = rows.get(2).getString("id");
+        String parked = rows.get(1).getString("id");
+        JSONObject event = rows.get(0);
+        String newest = event.getString("id");
+        assertTrue(index.markWatched(newest, event.getLong("size"), event.getLong("mp4Mtime")));
+
+        Set<String> skipOn = Collections.singleton("dvr_");
+        Set<String> skipParked = Collections.singleton("dvr_p");
+        Set<String> skipBoth = new HashSet<>(Arrays.asList("dvr_", "dvr_p"));
+        assertEquals(poweredOn, index.queryPlaylistRecording(filter, null,
+                -1, true, false, Collections.emptySet()).recording.getString("id"));
+        for (int step : new int[] {-1, 1}) {
+            assertEquals(parked, index.queryPlaylistRecording(filter, null,
+                    step, true, false, skipOn).recording.getString("id"));
+            assertEquals(poweredOn, index.queryPlaylistRecording(filter, null,
+                    step, true, false, skipParked).recording.getString("id"));
+            assertEquals(RecordingsIndex.AdjacentResult.Status.END, index.queryPlaylistRecording(
+                    filter, null, step, true, false, skipBoth).status);
+        }
+        assertEquals(parked, index.queryPlaylistRecording(filter, newest,
+                1, false, false, skipOn).recording.getString("id"));
+        assertEquals(poweredOn, index.queryPlaylistRecording(filter, newest,
+                1, false, false, skipParked).recording.getString("id"));
+        assertEquals(parked, index.queryPlaylistRecording(filter, poweredOn,
+                -1, false, false, skipOn).recording.getString("id"));
+        assertEquals(RecordingsIndex.AdjacentResult.Status.END, index.queryPlaylistRecording(
+                filter, newest, 1, false, false, skipBoth).status);
+        assertEquals(poweredOn, index.queryAdjacentRecording(filter, parked, 1)
+                .recording.getString("id"));
+        assertEquals(3, index.queryCount(filter));
+    }
+
     private RecordingsIndex newIndex(String name) throws Exception {
         Class.forName("org.h2.Driver");
         connection = DriverManager.getConnection(

@@ -589,7 +589,7 @@ html.has-bottom-nav[dir="rtl"] .mobile-header.has-lead .mh-home { margin-left: 4
 
 /* Sidebar footer: status line plus a 2×2 grid of tiles (mock "Head unit online"). */
 .sidebar-footer { border-top-color: transparent; }
-.sidebar-footer .status-card:not(.ev-card) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-gap: 8px; gap: 8px; padding: 0; background: transparent; }
+.sidebar-footer .status-card:not(.ev-card):not(.fuel-card) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-gap: 8px; gap: 8px; padding: 0; background: transparent; }
 .sidebar-footer .status-card > .status-row { display: block; min-width: 0; padding: 10px 12px; border-radius: 12px; background: var(--well); }
 .sidebar-footer .status-card > .status-row:first-child { grid-column: 1 / -1; display: flex; align-items: center; }
 .sidebar-footer .status-card > .status-row:first-child > .status-value { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -351,8 +351,10 @@ public class CameraDaemon {
     private static final class AccProbeResult {
         final boolean accIsOff;
         final boolean trustworthy;
+        final long sourceElapsedMs;
 
-        AccProbeResult(boolean accIsOff, boolean trustworthy) {
+        AccProbeResult(boolean accIsOff, boolean trustworthy, long sourceElapsedMs) {
+            this.sourceElapsedMs = sourceElapsedMs;
             this.accIsOff = accIsOff;
             this.trustworthy = trustworthy;
         }
@@ -1486,7 +1488,7 @@ public class CameraDaemon {
                 log("RECOVERY: hardware probe superseded by live ACC admission");
             } else if (accIsOff) {
                 log("RECOVERY: Hardware probe shows ACC OFF — entering sentry mode");
-                onObservedAccStateChanged(true, recoveryProbeGeneration, "startup-recovery");
+                onObservedAccStateChanged(true, recoveryProbeGeneration, "startup-recovery", recoveryProbe.sourceElapsedMs);
                 // The ACC transition normally starts the heartbeat itself.
                 // Reconcile once more from the now-admitted state so a daemon
                 // restart cannot leave the provider idle if cloud startup and
@@ -1495,7 +1497,13 @@ public class CameraDaemon {
                         "confirmed startup recovery");
             } else if (!hasPendingAccState(false)
                     && recordingModeManager != null
-                    && !recordingModeManager.isAccOn()) {
+                    && (!recordingModeManager.isAccOn()
+                        || (!Boolean.FALSE.equals(latestAccIsOff)
+                            && com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                            && com.overdrive.app.launcher.dilink5.cluster.Sealion7HdmiProjection
+                                    .isIgnitionEvidenceEnabled()))) {
+                // Recording can already be drive-safe ON from an earlier undecided read.
+                // Admit the first trustworthy Sealion 7 startup probe for the cluster as well.
                 // Symmetric ACC ON recovery: daemon restarted while car is on.
                 // RecordingModeManager hasn't been seeded by an ACC IPC, so the
                 // recording-mode dispatcher won't start CONTINUOUS / DRIVE_MODE
@@ -1510,7 +1518,7 @@ public class CameraDaemon {
                 // restart). lastDispatchedAccIsOff is null on cold boot, so the
                 // dedup short-circuit can't fire and the full chain runs once.
                 log("RECOVERY: Hardware probe shows ACC ON — dispatching full ACC ON chain");
-                onObservedAccStateChanged(false, recoveryProbeGeneration, "startup-recovery");
+                onObservedAccStateChanged(false, recoveryProbeGeneration, "startup-recovery", recoveryProbe.sourceElapsedMs);
             } else if (!accIsOff && recordingModeManager == null) {
                 // FIX (audit R1): initSurveillance early-returned with
                 // sharedAppContext null, leaving rmm uncreated. The previous
@@ -1524,7 +1532,7 @@ public class CameraDaemon {
                     + "queuing pendingAccOn for delayed seed");
                 onObservedAccStateChanged(
                     false, recoveryProbeGeneration,
-                    "startup-recovery/deferred");
+                    "startup-recovery/deferred", recoveryProbe.sourceElapsedMs);
             }
         } catch (Exception e) {
             log("ACC hardware probe error: " + e.getMessage());
@@ -1994,14 +2002,6 @@ public class CameraDaemon {
         }
     }
 
-    /**
-     * Force stop a camera, even if recording.
-     * Use this when user explicitly wants to stop everything.
-     */
-    public static void forceStopCamera(int viewId) {
-        stopCamera(viewId, true);
-    }
-
     public static boolean stopAllCameras() {
         return stopAllCameras(true);
     }
@@ -2170,10 +2170,11 @@ public class CameraDaemon {
      */
     private static AccProbeResult probeAccStateWithBackoff(String tag) {
         boolean lastReading = !com.overdrive.app.monitor.AccMonitor.isAccOn();
+        java.util.concurrent.atomic.AtomicLong sourceElapsedMs = new java.util.concurrent.atomic.AtomicLong();
         for (int attempt = 0; attempt < 3; attempt++) {
             Integer level;
             synchronized (ACC_HARDWARE_PROBE_LOCK) {
-                level = readRawAccPowerLevelBounded();
+                level = readRawAccPowerLevelBounded(sourceElapsedMs);
             }
             if (level != null && level >= 0 && level <= 3) {
                 boolean reading = level < 2;
@@ -2185,7 +2186,7 @@ public class CameraDaemon {
                 lastReading = reading;
                 log("ACC HW probe (" + tag + ") returned trustworthy accIsOff="
                     + reading + " level=" + level + " on attempt " + (attempt + 1));
-                return new AccProbeResult(reading, true);
+                return new AccProbeResult(reading, true, sourceElapsedMs.get());
             }
             log("WARN: ACC HW probe (" + tag + ") attempt " + attempt
                 + " returned no clean power level; retrying");
@@ -2199,7 +2200,7 @@ public class CameraDaemon {
         boolean cacheFallback = !com.overdrive.app.monitor.AccMonitor.isAccOn();
         log("WARN: ACC HW probe (" + tag + ") remained untrustworthy; "
             + "preserving state instead of admitting accIsOff=" + cacheFallback);
-        return new AccProbeResult(cacheFallback, false);
+        return new AccProbeResult(cacheFallback, false, 0L);
     }
 
     /**
@@ -2280,6 +2281,10 @@ public class CameraDaemon {
     }
 
     private static Integer readRawAccPowerLevelBounded() {
+        return readRawAccPowerLevelBounded(null);
+    }
+
+    private static Integer readRawAccPowerLevelBounded(java.util.concurrent.atomic.AtomicLong sourceElapsedMs) {
         Thread existing = RAW_ACC_PROBE_WORKER.get();
         if (existing != null && existing.isAlive()) {
             existing.interrupt();
@@ -2296,7 +2301,7 @@ public class CameraDaemon {
         try {
             worker = new Thread(() -> {
                 try {
-                    result.set(readRawAccPowerLevel());
+                    result.set(readRawAccPowerLevel(sourceElapsedMs));
                 } catch (Throwable failure) {
                     log("Raw ACC power probe failed: " + failure.getMessage());
                 } finally {
@@ -2375,7 +2380,7 @@ public class CameraDaemon {
             "hardware query recovery: " + reason);
     }
 
-    private static Integer readRawAccPowerLevel() throws Exception {
+    private static Integer readRawAccPowerLevel(java.util.concurrent.atomic.AtomicLong sourceElapsedMs) throws Exception {
         if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
             Boolean accOn = com.overdrive.app.monitor.AccMonitor
                     .probeDiLink5AccOnForTransition(
@@ -2383,7 +2388,7 @@ public class CameraDaemon {
                             com.overdrive.app.monitor.AccMonitor
                                     .isAccStateAuthoritative()
                                     && com.overdrive.app.monitor.AccMonitor
-                                            .isAccOn());
+                                            .isAccOn(), false, sourceElapsedMs);
             return accOn == null ? null : Integer.valueOf(accOn ? 2 : 0);
         }
         if (!rawAccReflectionResolved && !rawAccReflectionFailed) {
@@ -2502,11 +2507,6 @@ public class CameraDaemon {
     }
 
     // ==================== GETTERS ====================
-
-    public static java.util.Map<Integer, Object> getVirtualViews() {
-        // GPU pipeline doesn't use VirtualView - return empty map for compatibility
-        return new java.util.HashMap<>();
-    }
 
     public static boolean isRunning() {
         return running.get();
@@ -5145,7 +5145,7 @@ public class CameraDaemon {
                                     onObservedAccStateChanged(
                                         false,
                                         replayProbeGeneration,
-                                        "retry-replay");
+                                        "retry-replay", replayProbe.sourceElapsedMs);
                                     // Release the power latch the queued edge already set, same as the
                                     // main() drain — otherwise a retracted "off" keeps suppressing the
                                     // true state until the next ACC dispatch.
@@ -5166,7 +5166,7 @@ public class CameraDaemon {
                                     onObservedAccStateChanged(
                                         true,
                                         replayProbeGeneration,
-                                        "retry-replay");
+                                        "retry-replay", replayProbe.sourceElapsedMs);
                                     // Symmetric to the ACC OFF replay above — release the retracted edge.
                                     com.overdrive.app.automation.condition.BydEvent
                                         .resetPowerEdge(true);
@@ -6063,12 +6063,13 @@ public class CameraDaemon {
                                 com.overdrive.app.power
                                     .IgnitionBroadcastHint
                                     .isFresh(offEnteredAtElapsedMs);
+                            java.util.concurrent.atomic.AtomicLong since = new java.util.concurrent.atomic.AtomicLong();
                             Boolean isOn =
                                 com.overdrive.app.monitor.AccMonitor
                                     .probeDiLink5AccOnForTransition(
                                         sharedAppContext,
                                         false,
-                                        ignitionHint);
+                                        ignitionHint, since);
                             if (!isAccObservationCurrent(
                                     observationGeneration)) {
                                 return;
@@ -6087,7 +6088,7 @@ public class CameraDaemon {
                                 onObservedAccStateChanged(
                                     false,
                                     observationGeneration,
-                                    "di5-disarm-watchdog");
+                                    "di5-disarm-watchdog", since.get());
                                 return;
                             }
                             // A weak IVI-awake row without the independent
@@ -8020,7 +8021,7 @@ public class CameraDaemon {
                 } else {
                     trustedAccHardwareRecoveryRequested = false;
                     onObservedAccStateChanged(
-                        probe.accIsOff, generation, "autonomous-recovery");
+                        probe.accIsOff, generation, "autonomous-recovery", probe.sourceElapsedMs);
                 }
             } else if (accIsOff != null) {
                 onAccStateChanged(accIsOff.booleanValue(), generation);
@@ -8081,7 +8082,7 @@ public class CameraDaemon {
         onObservedAccStateChanged(
             probe.accIsOff,
             observationGeneration,
-            "pending-reconcile");
+            "pending-reconcile", probe.sourceElapsedMs);
         com.overdrive.app.automation.condition.BydEvent
             .resetPowerEdge(!pendingIsOff);
         return true;
@@ -8348,6 +8349,14 @@ public class CameraDaemon {
      *        claimed from a pending queue replay
      */
     private static void onAccStateChanged(boolean accIsOff, long requiredGeneration) {
+        onAccStateChanged(accIsOff, requiredGeneration, 0L);
+    }
+
+    public static void onSentryAccStateChanged(boolean accIsOff, long edgeElapsedMs) {
+        onAccStateChanged(accIsOff, 0L, edgeElapsedMs);
+    }
+
+    private static void onAccStateChanged(boolean accIsOff, long requiredGeneration, long edgeElapsedMs) {
         final long transitionGeneration;
         synchronized (parkTerminateLock) {
             if (requiredGeneration != 0L
@@ -8369,6 +8378,11 @@ public class CameraDaemon {
                 accTransitionGeneration++;
                 latestAccTransitionAdmittedAtElapsedMs =
                     android.os.SystemClock.elapsedRealtime();
+                if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                    long since = edgeElapsedMs > 0L && edgeElapsedMs <= latestAccTransitionAdmittedAtElapsedMs
+                            ? edgeElapsedMs : latestAccTransitionAdmittedAtElapsedMs;
+                    AccMonitor.noteDiLink5IgnitionAdmission(!accIsOff, since);
+                }
                 // The old latch describes the previous completed phase. Clear
                 // it until this generation finishes so a heartbeat can retry if
                 // this invocation is interrupted before publishing completion.
@@ -8392,6 +8406,11 @@ public class CameraDaemon {
      */
     private static void onObservedAccStateChanged(
             boolean accIsOff, long observationGeneration, String source) {
+        onObservedAccStateChanged(accIsOff, observationGeneration, source, 0L);
+    }
+
+    private static void onObservedAccStateChanged(
+            boolean accIsOff, long observationGeneration, String source, long sourceElapsedMs) {
         final long transitionGeneration;
         synchronized (parkTerminateLock) {
             if (observationGeneration != accTransitionGeneration) {
@@ -8409,6 +8428,10 @@ public class CameraDaemon {
                 accTransitionGeneration++;
                 latestAccTransitionAdmittedAtElapsedMs =
                     android.os.SystemClock.elapsedRealtime();
+                if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                    AccMonitor.noteDiLink5IgnitionAdmission(!accIsOff,
+                            sourceElapsedMs > 0L ? sourceElapsedMs : latestAccTransitionAdmittedAtElapsedMs);
+                }
                 lastDispatchedAccIsOff = null;
                 if (accIsOff) {
                     pendingAccOn = false;
@@ -9901,21 +9924,10 @@ public class CameraDaemon {
 
     /**
      * Get current recording quality tier (ECONOMY..MAX).
-     * Canonical accessor — prefer this over the deprecated bitrate alias.
      */
     public static String getRecordingQuality() {
         if (gpuPipeline == null || gpuPipeline.getConfig() == null) return "STANDARD";
         return gpuPipeline.getConfig().getRecordingQuality().name();
-    }
-
-    /**
-     * Get current recording bitrate setting.
-     * @deprecated Use {@link #getRecordingQuality()} for the canonical tier.
-     */
-    @Deprecated
-    public static String getRecordingBitrate() {
-        if (gpuPipeline == null) return "MEDIUM";
-        return gpuPipeline.getConfig().getBitratePreset().name();
     }
 
     /**

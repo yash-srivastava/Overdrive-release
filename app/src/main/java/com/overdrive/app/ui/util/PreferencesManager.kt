@@ -22,7 +22,6 @@ object PreferencesManager {
     private const val KEY_LAST_ZROK_URL = "last_zrok_url"
     private const val KEY_ZROK_UNIQUE_NAME = "zrok_unique_name"
     private const val KEY_ZROK_ENABLE_TOKEN = "zrok_enable_token"
-    private const val KEY_LOGS_EXPANDED = "logs_expanded"
     private const val KEY_NAVIGATION_VISIBLE_V1 = "navigation_visible_v1"
     /** Rail keys the user has already been offered, so a NEW one can default to
      *  visible without un-hiding something they deliberately switched off. */
@@ -199,15 +198,6 @@ object PreferencesManager {
         requirePrefs().edit().remove(KEY_ZROK_ENABLE_TOKEN).commit()
     }
     
-    // Logs Panel State
-    fun isLogsExpanded(): Boolean {
-        return requirePrefs().getBoolean(KEY_LOGS_EXPANDED, false)
-    }
-    
-    fun setLogsExpanded(expanded: Boolean) {
-        requirePrefs().edit().putBoolean(KEY_LOGS_EXPANDED, expanded).apply()
-    }
-
     /**
      * Missing preference means the complete current catalog, preserving the
      * navigation users had before customization existed. Once customized, new
