@@ -1532,20 +1532,10 @@ public class Automations {
             byte[] bytes = toJson().toString().getBytes(StandardCharsets.UTF_8);
             // Only parseable live data may replace the last-known-good backup.
             if (!AutomationStoreFiles.save(AUTOMATION_TMP, AUTOMATION_CONFIG, AUTOMATION_BACKUP,
-                    bytes, Automations::isParseable, "automations", logger::error)) return false;
+                    bytes, file -> AutomationStoreFiles.isParseable(file, "automation", logger::warn),
+                    "automations", logger::error)) return false;
             logger.info("Saved " + automations.size() + " Automations to " + AUTOMATION_CONFIG);
             return true;
-        }
-    }
-
-    /** Whether a file holds parseable JSON, so it is fit to become the last-known-good backup. */
-    private static boolean isParseable(File file) {
-        try {
-            AutomationStoreFiles.readObject(file);
-            return true;
-        } catch (Exception e) {
-            logger.warn("Live automation config is unparseable — keeping the existing backup");
-            return false;
         }
     }
 
