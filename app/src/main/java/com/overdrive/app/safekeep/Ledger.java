@@ -23,7 +23,7 @@ public final class Ledger {
     private static final DaemonLogger logger = DaemonLogger.getInstance("SafeKeepLedger");
     private static final String DB_PATH = com.overdrive.app.util.ScratchRoot.path("overdrive_safekeep_h2");
     private static final String JDBC_URL = "jdbc:h2:file:" + DB_PATH
-            + ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE"
+            + ";FILE_LOCK=FS;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE"
             + ";WRITE_DELAY=0;AUTO_COMPACT_FILL_RATE=50";
 
     public static final String PENDING = "PENDING";

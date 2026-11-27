@@ -18,7 +18,7 @@ import java.util.List;
  * — a disabled feature never opens a database (the same posture the other
  * daemon stores take: one store per feature, {@code AUTO_COMPACT_FILL_RATE=50}
  * for idle CPU, {@code DB_CLOSE_ON_EXIT=FALSE} so the JVM shutdown hook can't
- * race the daemon's explicit close, {@code FILE_LOCK=SOCKET} for cross-process
+ * race the daemon's explicit close, {@code FILE_LOCK=FS} for cross-process
  * safety).
  *
  * <p>Single-writer (the parking worker thread); the HTTP handler reads through
@@ -33,7 +33,7 @@ public final class ParkingStore {
 
     public static String defaultJdbcUrl() {
         return "jdbc:h2:file:" + DEFAULT_DB_PATH
-                + ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE"
+                + ";FILE_LOCK=FS;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE"
                 + ";AUTO_COMPACT_FILL_RATE=50";
     }
 
@@ -65,7 +65,8 @@ public final class ParkingStore {
             return false;
         }
         try {
-            connection = DriverManager.getConnection(jdbcUrl, "sa", "");
+            connection = com.overdrive.app.storage.H2CommitPoint.wrap(
+                    DriverManager.getConnection(jdbcUrl, "sa", ""));
             try (Statement st = connection.createStatement()) {
                 st.execute("SET CACHE_SIZE 2048");
             }

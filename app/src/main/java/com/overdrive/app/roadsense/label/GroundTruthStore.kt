@@ -40,7 +40,7 @@ class GroundTruthStore private constructor() {
             if (initialized) return
             try {
                 Class.forName("org.h2.Driver")
-                connection = DriverManager.getConnection(JDBC_URL)
+                connection = com.overdrive.app.storage.H2CommitPoint.wrap(DriverManager.getConnection(JDBC_URL))
                 createTable()
                 initialized = true
                 logger.info("GroundTruthStore initialized at $DB_PATH")
@@ -201,7 +201,7 @@ class GroundTruthStore private constructor() {
         // AUTO_COMPACT_FILL_RATE=50: idle-CPU tuning shared by all seven H2
         // stores (see SocHistoryDatabase.JDBC_URL for the rationale).
         private val JDBC_URL: String get() =
-            "jdbc:h2:file:$DB_PATH;FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
+            "jdbc:h2:file:$DB_PATH;FILE_LOCK=FS;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
                 ";AUTO_COMPACT_FILL_RATE=50"
 
         @Volatile private var instance: GroundTruthStore? = null
