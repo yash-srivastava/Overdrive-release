@@ -128,6 +128,19 @@ static void check(int bw, int bh, int w, int h, int pad, int mode) {
                     : mode == 3 ? (int) (rng() % 256) : (int) (rng() % 3);
             for (int c = 0; c < 3; ++c) p[c] = (uint8_t) (rng() % (a + 1));
             p[3] = (uint8_t) a;
+            if (mode == 5) {
+                // Recording strip: opaque black, uniform panels (one nearly
+                // transparent), sparse opaque text. Exercises uniform reuse.
+                const uint8_t black[4] = {0, 0, 0, 255}, panel[4] = {40, 40, 40, 160},
+                              faint[4] = {1, 0, 0, 1};
+                const uint8_t* fill = x >= bw / 4 && x < bw / 2 ? panel
+                        : x >= bw / 2 && x < 3 * bw / 4 && y < bh / 2 ? faint : black;
+                memcpy(p, fill, 4);
+                if (rng() % 10 == 0) {
+                    p[3] = 255;
+                    for (int c = 0; c < 3; ++c) p[c] = (uint8_t) rng();
+                }
+            }
         }
     }
     const size_t bytes = odcpu::overlayBytes(w, h);
@@ -148,7 +161,7 @@ static void check(int bw, int bh, int w, int h, int pad, int mode) {
 }
 
 int main() {
-    for (int mode = 0; mode < 5; ++mode) {
+    for (int mode = 0; mode < 6; ++mode) {
         for (int pad : {0, 7}) {
             check(1, 1, 2, 2, pad, mode);
             check(2, 2, 32, 16, pad, mode);
@@ -158,5 +171,5 @@ int main() {
             check(1280, 80, 2560, 160, pad, mode);
         }
     }
-    std::puts("Overlay table parity passed (60 cases)");
+    std::puts("Overlay table parity passed (72 cases)");
 }
