@@ -1283,6 +1283,7 @@ const TRIPS = {
             }
         } catch (e) {
             console.warn('[Trips] Apply storage failed:', e);
+            this._toastSaveFailed();
             if (btn) { btn.disabled = false; btn.textContent = BYD.i18n.t('trip.apply_changes'); }
         }
     },
