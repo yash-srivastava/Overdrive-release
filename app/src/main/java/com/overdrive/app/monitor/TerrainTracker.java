@@ -8,7 +8,6 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayDeque;
-import java.util.Arrays;
 import java.util.Iterator;
 
 /**
@@ -43,8 +42,8 @@ public final class TerrainTracker {
     /** Nothing is shown once the car hasn't moved for this long. */
     private static final long FRESH_MS = 60_000;
 
-    // (receipt ms, altitude) for the moving median
-    private final ArrayDeque<double[]> recent = new ArrayDeque<>();
+    // Same time-window median as trip scoring, with the terrain-specific duration.
+    private final ElevationEstimator.MedianWindow recent = new ElevationEstimator.MedianWindow(MEDIAN_MS);
     // (distance m, smoothed altitude) every STEP_M of road
     private final ArrayDeque<double[]> profile = new ArrayDeque<>();
     private double distM;
@@ -83,9 +82,8 @@ public final class TerrainTracker {
         boolean altKnown = !Double.isNaN(alt) && Math.abs(alt) < 9000.0 && !(alt == 0.0 && f.verticalAccuracy == 0f);
         boolean accurate = f.verticalAccuracy <= 0f || f.verticalAccuracy <= MAX_VERTICAL_ACCURACY_M;
         if (!altKnown || !accurate) return;
-        recent.addLast(new double[] { now, alt });
-        while (!recent.isEmpty() && now - recent.peekFirst()[0] > MEDIAN_MS) recent.removeFirst();
-        smoothed = median();
+        recent.add(now, alt, 0.0);
+        smoothed = recent.medianAltitude();
 
         if (profile.isEmpty() || (moving && distM >= nextStepAt)) {
             profile.addLast(new double[] { distM, smoothed });
@@ -93,15 +91,6 @@ public final class TerrainTracker {
             while (profile.size() > PROFILE_POINTS) profile.removeFirst();
             gradePct = fitGrade();
         }
-    }
-
-    private double median() {
-        double[] a = new double[recent.size()];
-        int i = 0;
-        for (double[] s : recent) a[i++] = s[1];
-        Arrays.sort(a);
-        int n = a.length;
-        return n % 2 == 1 ? a[n / 2] : (a[n / 2 - 1] + a[n / 2]) / 2.0;
     }
 
     // least-squares slope of altitude over the last stretch of road, as a percentage

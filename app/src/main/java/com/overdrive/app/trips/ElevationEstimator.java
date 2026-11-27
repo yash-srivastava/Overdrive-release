@@ -185,9 +185,11 @@ public final class ElevationEstimator {
         direction = 0;
     }
 
-    /** FIFO expiry plus two sorted primitive windows. Typical 5 Hz input holds 51 rows;
-     * grow for denser or non-monotonic input rather than imposing a sample-count cap. */
-    static final class MedianWindow {
+    /** FIFO expiry plus two sorted primitive windows, also used by the live terrain tracker.
+     * Grow for denser input rather than imposing a sample-count cap. Callers own the
+     * window and handle discontinuity resets; it is not thread-safe. */
+    public static final class MedianWindow {
+        private final long windowMs;
         private long[] timestamps = new long[16];
         private double[] altitudes = new double[16];
         private double[] accuracies = new double[16];
@@ -197,9 +199,20 @@ public final class ElevationEstimator {
         private int size;
         private int accuracyCount;
 
-        void add(long timestamp, double altitude, double accuracy) {
+        MedianWindow() {
+            this(SMOOTHING_WINDOW_MS);
+        }
+
+        /** Keep samples up to and including windowMs milliseconds old. */
+        public MedianWindow(long windowMs) {
+            if (windowMs <= 0) throw new IllegalArgumentException("windowMs must be positive");
+            this.windowMs = windowMs;
+        }
+
+        /** Add an accepted altitude; pass zero accuracy if no accuracy median is needed. */
+        public void add(long timestamp, double altitude, double accuracy) {
             // Expire exactly the same FIFO prefix as the original time-based deque.
-            while (size > 0 && timestamp - timestamps[head] > SMOOTHING_WINDOW_MS) {
+            while (size > 0 && timestamp - timestamps[head] > windowMs) {
                 remove(sortedAltitudes, size, altitudes[head]);
                 double expiredAccuracy = accuracies[head];
                 if (expiredAccuracy > 0) {
@@ -222,11 +235,13 @@ public final class ElevationEstimator {
             }
         }
 
-        void clear() {
+        /** Discard all samples, retaining capacity for the next window. */
+        public void clear() {
             head = size = accuracyCount = 0;
         }
 
-        double medianAltitude() {
+        /** Call only after adding at least one sample since construction or clear(). */
+        public double medianAltitude() {
             return median(sortedAltitudes, size);
         }
 

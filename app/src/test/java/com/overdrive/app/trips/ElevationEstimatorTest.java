@@ -66,6 +66,48 @@ public class ElevationEstimatorTest {
     }
 
     @Test
+    public void terrainWindowKeepsFiveSecondBoundaryAndClears() {
+        ElevationEstimator.MedianWindow window = new ElevationEstimator.MedianWindow(5_000);
+        window.add(0, 10, 0);
+        window.add(1, 20, 0);
+        window.add(5_000, 30, 0);
+        assertEquals(20.0, window.medianAltitude(), 0.0);
+        window.add(5_001, 40, 0);
+        assertEquals(30.0, window.medianAltitude(), 0.0);
+        window.add(5_002, 50, 0);
+        assertEquals(40.0, window.medianAltitude(), 0.0);
+        window.clear();
+        window.add(5_003, -0.0, 0);
+        assertEquals(Double.doubleToLongBits(-0.0), Double.doubleToLongBits(window.medianAltitude()));
+    }
+
+    @Test
+    public void terrainWindowMatchesFullSortAcrossBurstsAndGaps() {
+        ElevationEstimator.MedianWindow window = new ElevationEstimator.MedianWindow(5_000);
+        ArrayDeque<double[]> reference = new ArrayDeque<>();
+        Random random = new Random(9876);
+        long time = 1_000;
+        for (int i = 0; i < 20_000; i++) {
+            if (i % 1000 == 0) {
+                window.clear();
+                reference.clear();
+            }
+            // Include equal timestamps, dense bursts, duplicate elevations and long gaps.
+            time += i % 1000 < 200 ? 0 : random.nextInt(401);
+            if (i % 701 == 0) time += 31_000;
+            double altitude = i % 17 == 0 ? -0.0 : i % 19 == 0 ? 0.0 : random.nextInt(41) - 20;
+            window.add(time, altitude, 0.0);
+            reference.addLast(new double[]{time, altitude});
+            while (time - reference.peekFirst()[0] > 5_000) reference.removeFirst();
+            double[] altitudes = new double[reference.size()];
+            int n = 0;
+            for (double[] row : reference) altitudes[n++] = row[1];
+            assertEquals(Double.doubleToLongBits(median(altitudes, n)),
+                    Double.doubleToLongBits(window.medianAltitude()));
+        }
+    }
+
+    @Test
     public void estimatorRetainsTotalsAcrossSourceAndGapResets() {
         ElevationEstimator estimator = new ElevationEstimator();
         estimator.addSample(0, 100, 0, false, true);
