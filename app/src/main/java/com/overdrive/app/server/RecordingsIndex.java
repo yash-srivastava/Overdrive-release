@@ -2061,7 +2061,10 @@ public final class RecordingsIndex {
     private static void appendPlaylistWhere(StringBuilder where, List<Object> args,
             boolean unwatchedOnly, Set<String> skippedPrefixes) {
         for (String prefix : skippedPrefixes) {
-            appendAnd(where, "SUBSTRING(filename, 1, ?) <> ?");
+            // Powered-on DVR clips share the dvr_ prefix with parked DVR clips.
+            appendAnd(where, "dvr_".equals(prefix)
+                    ? "(SUBSTRING(filename, 1, ?) <> ? OR SUBSTRING(filename, 1, 5) = 'dvr_p')"
+                    : "SUBSTRING(filename, 1, ?) <> ?");
             args.add(prefix.length());
             args.add(prefix);
         }

@@ -214,7 +214,7 @@ public class RecordingsApiHandler {
             applyParkingExtras(filter, params.get("parkingSessionId"),
                     params.get("camera"), params.get("minConfidence"));
             Set<String> skippedPrefixes = new HashSet<>();
-            for (String prefix : new String[] {"dvr_p", "event_", "cam_"}) {
+            for (String prefix : new String[] {"dvr_p", "dvr_", "event_", "cam_"}) {
                 if ("1".equals(params.get("skip_" + prefix))) skippedPrefixes.add(prefix);
             }
             RecordingsIndex.AdjacentResult found = idx.queryPlaylistRecording(filter, fromId,
