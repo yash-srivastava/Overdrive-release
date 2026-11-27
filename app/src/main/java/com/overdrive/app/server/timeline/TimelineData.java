@@ -38,6 +38,8 @@ public final class TimelineData {
         public long sizeBytes;
         public long mp4Mtime;
         public boolean available;
+        /** Span source (SpanRules.SRC_*); null when built outside the index. */
+        public String spanSrc;
 
         public ClipRef() {}
 
@@ -137,7 +139,9 @@ public final class TimelineData {
         String layout;
 
         ClipRef toClip() {
-            return new ClipRef(id, type, absPath, layout, start, end, sizeBytes, mp4Mtime, available);
+            ClipRef clip = new ClipRef(id, type, absPath, layout, start, end, sizeBytes, mp4Mtime, available);
+            clip.spanSrc = spanSrc;
+            return clip;
         }
     }
 
