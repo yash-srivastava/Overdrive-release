@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_navigation_title">Navigation</string>
+    <string name="settings_navigation_subtitle">Choisissez les destinations facultatives qui restent épinglées dans la navigation de gauche.</string>
+    <string name="settings_navigation_fixed_hint">Le tableau de bord, les Paramètres et À propos restent toujours disponibles.</string>
+    <string name="settings_navigation_reset">Rétablir par défaut</string>
+    <string name="settings_navigation_reset_done">Navigation rétablie</string>
+    <string name="settings_navigation_shown">affiché</string>
+    <string name="settings_navigation_hidden">masqué</string>
+    <string name="settings_navigation_option_state">%1$s, %2$s dans la navigation</string>
+</resources>

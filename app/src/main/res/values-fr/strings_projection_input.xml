@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="projection_cluster_controls">Commandes du combiné</string>
+    <string name="projection_cluster_back">Retour</string>
+    <string name="projection_cluster_home">Accueil</string>
+    <string name="projection_cluster_volume_down">Volume −</string>
+    <string name="projection_cluster_volume_up">Volume +</string>
+    <string name="projection_cluster_control_unavailable">Commande du combiné indisponible. Vérifiez la projection active et redémarrez le service après la mise à jour.</string>
+</resources>
