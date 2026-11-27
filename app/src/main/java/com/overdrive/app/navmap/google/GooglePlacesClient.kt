@@ -320,8 +320,9 @@ object GooglePlacesClient {
     /** Proto3 JSON omits a zero field, so a present location with one key missing means 0. */
     private fun latLng(o: JSONObject?): Pair<Double, Double>? {
         if (o == null || (!o.has("latitude") && !o.has("longitude"))) return null
-        val lat = o.optDouble("latitude", 0.0)
-        val lng = o.optDouble("longitude", 0.0)
+        // Default only omitted keys; a present but unreadable value must fail validation.
+        val lat = if (o.has("latitude")) o.optDouble("latitude", Double.NaN) else 0.0
+        val lng = if (o.has("longitude")) o.optDouble("longitude", Double.NaN) else 0.0
         if (!lat.isFinite() || !lng.isFinite() || lat < -90.0 || lat > 90.0 || lng < -180.0 || lng > 180.0) {
             return null
         }
