@@ -22,7 +22,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -196,32 +195,6 @@ public final class VoiceSessionClient {
             return type;
         }
         return KIND_UNKNOWN;
-    }
-
-    public static String proposalSummary(JSONObject proposal) {
-        JSONObject action = actionOf(proposal);
-        String kind = proposalKind(proposal);
-        if (KIND_CLIMATE.equals(kind)) {
-            double celsius = action.optDouble("temperatureC", Double.NaN);
-            int zone = action.optInt("zone", 0);
-            String zoneName = zone == 1 ? "driver zone"
-                    : (zone == 2 ? "passenger zone" : "both zones");
-            if (Double.isNaN(celsius) || Double.isInfinite(celsius)) {
-                return "Set cabin temperature · " + zoneName;
-            }
-            return "Set cabin temperature to " + formatCelsius(celsius) + " °C · " + zoneName;
-        }
-        if (KIND_SUNSHADE.equals(kind)) {
-            return "open".equals(action.optString("operation", ""))
-                    ? "Open sunshade" : "Close sunshade";
-        }
-        if (KIND_AUTOMATION.equals(kind)) {
-            String name = action.optString("automationName", "").trim();
-            return name.isEmpty() ? "Run saved automation"
-                    : "Run automation “" + clamp(name, 80) + "”";
-        }
-        String text = proposal == null ? "" : proposal.optString("text", "").trim();
-        return text.isEmpty() ? "Unknown action" : clamp(text, 120);
     }
 
     /** Runs the execute POST off-thread, then reports action_result once the model is idle. */
@@ -886,16 +859,6 @@ public final class VoiceSessionClient {
 
     private static int saneRate(int rate, int fallback) {
         return rate >= 8_000 && rate <= 48_000 ? rate : fallback;
-    }
-
-    private static String formatCelsius(double celsius) {
-        return celsius == Math.rint(celsius)
-                ? String.valueOf((long) celsius)
-                : String.format(Locale.US, "%.1f", celsius);
-    }
-
-    private static String clamp(String value, int limit) {
-        return value.length() <= limit ? value : value.substring(0, limit);
     }
 
     private static String stopMessage() {
