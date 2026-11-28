@@ -173,4 +173,53 @@
             android:layout_marginStart="@dimen/od_space_12"
             android:contentDescription="@string/timeline_continue" />
     </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:id="@+id/tlDashcamViewDivider"
+        android:background="@drawable/tl_divider" />
+
+    <LinearLayout
+        android:id="@+id/tlDashcamViewRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/selectableItemBackground"
+        android:gravity="center_vertical"
+        android:importantForAccessibility="no"
+        android:minHeight="64dp"
+        android:orientation="horizontal"
+        android:paddingTop="@dimen/od_space_8"
+        android:paddingBottom="@dimen/od_space_8">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:importantForAccessibility="no"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/timeline_dashcam_view"
+                android:textColor="?attr/colorOnSurface"
+                android:textSize="16sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/timeline_dashcam_view_desc"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/tlDashcamViewSwitch"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginStart="@dimen/od_space_12"
+            android:contentDescription="@string/timeline_dashcam_view" />
+    </LinearLayout>
 </LinearLayout>

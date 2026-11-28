@@ -40,6 +40,8 @@ class TimelinePlayer(context: Context, private val listener: Listener) {
         fun onVideoSize(w: Int, h: Int)
         /** A pending follow expired without starting: nothing will start by itself. */
         fun onFollowDropped() {}
+        /** The video decoder failed (it is being recreated or the clip skipped). */
+        fun onDecoderError() {}
     }
 
     enum class State { IDLE, BUFFERING, PLAYING, PAUSED, SCRUBBING, ENDED, ERROR }
@@ -63,6 +65,24 @@ class TimelinePlayer(context: Context, private val listener: Listener) {
     /** Wall time (epoch ms) of the frame on screen, or of the scrub target while scrubbing. */
     val positionMs: Long get() = positionWall
 
+    // Last clock-derived position and when it was taken: lets a follower read the wall between ticks.
+    @Volatile private var clockWall = Long.MIN_VALUE
+    @Volatile private var clockWallAtNs = 0L
+
+    /** Wall of the playing frame now (any thread): the last clock reading moved on by the running clock. */
+    fun wallNowMs(): Long {
+        val w = positionWall
+        if (!clock.running || w != clockWall) return w
+        val dtNs = (SystemClock.elapsedRealtimeNanos() - clockWallAtNs).coerceIn(0L, MAX_EXTRAPOLATE_NS)
+        return w + (dtNs * clock.speed / 1_000_000f).toLong()
+    }
+
+    /** Config of the running video decoder, null when none. */
+    fun decoderConfig(): CodecConfig? = pipe?.config
+
+    /** The playback clock runs (false while paused, seeking or waiting for a frame). */
+    val clockRunning: Boolean get() = clock.running
+
     // Control thread only.
     private var segments: List<TlSegment> = emptyList()
     private var marks: List<TlMark> = emptyList()
@@ -71,7 +91,7 @@ class TimelinePlayer(context: Context, private val listener: Listener) {
     private var plan = PlaybackPlan.EMPTY
     private var surface: Surface? = null
     private var graceSurface: Surface? = null
-    private var pipe: VideoPipeline? = null
+    @Volatile private var pipe: VideoPipeline? = null
     private var pipeIds = 0
     private var lastRelease: CountDownLatch? = null
     private var state = State.IDLE
@@ -1027,6 +1047,7 @@ class TimelinePlayer(context: Context, private val listener: Listener) {
     /** Recreate the decoder once per item; a second failure skips the item. */
     private fun onCodecError(item: PlanItem?, error: Throwable) {
         if (BuildConfig.DEBUG) Log.d(TAG, "decoder error: ${error.javaClass.simpleName}")
+        toMain { listener.onDecoderError() }
         val key = item?.let { itemKey(it) } ?: "-"
         if (scrubbing) {
             releasePipeline(hold = true)
@@ -1168,6 +1189,8 @@ class TimelinePlayer(context: Context, private val listener: Listener) {
     private fun updatePositionFromClock() {
         val lg = pipe?.log ?: return
         val w = lg.wallAtMedia(clock.positionUs()) ?: return
+        clockWallAtNs = SystemClock.elapsedRealtimeNanos()
+        clockWall = w
         positionWall = w
     }
 
@@ -1302,6 +1325,7 @@ class TimelinePlayer(context: Context, private val listener: Listener) {
         private const val AUDIO_RELEASE_WAIT_MS = 150L
         private const val RELEASE_WAIT_MS = 450L
         private const val SURFACE_GRACE_MS = 2_000L
+        private const val MAX_EXTRAPOLATE_NS = 200_000_000L
         private val JSON = "application/json; charset=utf-8".toMediaType()
     }
 }

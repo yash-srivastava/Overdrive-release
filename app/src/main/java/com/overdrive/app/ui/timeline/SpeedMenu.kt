@@ -28,7 +28,14 @@ class SpeedMenu(
     private val onDismiss: () -> Unit,
     private val onChange: (State) -> Unit,
 ) {
-    data class State(val speed: Int, val skipQuiet: Boolean, val continueNext: Boolean)
+    /** [dashcamOffered]: this unit can show the Dashcam view (row hidden otherwise). */
+    data class State(
+        val speed: Int,
+        val skipQuiet: Boolean,
+        val continueNext: Boolean,
+        val dashcamView: Boolean = false,
+        val dashcamOffered: Boolean = false,
+    )
 
     private var popup: PopupWindow? = null
     private var sheet: BottomSheetDialog? = null
@@ -127,6 +134,14 @@ class SpeedMenu(
         cont.isChecked = state.continueNext
         cont.setOnCheckedChangeListener { _, on -> if (on != state.continueNext) update(state.copy(continueNext = on)) }
         root.findViewById<View>(R.id.tlContinueRow).setOnClickListener { cont.toggle() }
+        val dashRow = root.findViewById<View>(R.id.tlDashcamViewRow)
+        val dashVisibility = if (state.dashcamOffered) View.VISIBLE else View.GONE
+        dashRow.visibility = dashVisibility
+        root.findViewById<View>(R.id.tlDashcamViewDivider).visibility = dashVisibility
+        val dash = root.findViewById<MaterialSwitch>(R.id.tlDashcamViewSwitch)
+        dash.isChecked = state.dashcamView
+        dash.setOnCheckedChangeListener { _, on -> if (on != state.dashcamView) update(state.copy(dashcamView = on)) }
+        dashRow.setOnClickListener { dash.toggle() }
     }
 
     private fun update(next: State) {

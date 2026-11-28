@@ -87,6 +87,15 @@ class TimelineFragment : Fragment() {
     private var skipQuiet = false
     private var continueNext = true
     private var preferSource: String? = null
+    // Dashcam view (recordings.dashcamViewDefault, on unless turned off): where it can be composed the leader
+    // plays the 360° clips and the windshield clip follows. The source chip turns it off for this session.
+    private var dashcamPref = false
+    private var dashcamView = false
+    private var dashcamSupported = false
+    private var dashcamRestored = false
+    private var appliedPrefer: String? = PREFER_UNSET
+    private var dashcamCheckedAt = 0L
+    private var compose = com.overdrive.app.ui.timeline.player.DashcamFollower.Compose.PENDING
     private var filterKey = MomentText.FILTER_ALL
     private var spanMs = DEFAULT_SPAN_MS
     private var camera = ZoomableVideoView.Quadrant.ALL
@@ -102,6 +111,7 @@ class TimelineFragment : Fragment() {
     // View-scoped.
     private var ui: Ui? = null
     private var player: TimelinePlayer? = null
+    private var follower: com.overdrive.app.ui.timeline.player.DashcamFollower? = null
     private var videoView: TimelineVideoView? = null
     private var strip: TimelineStripView? = null
     private var adapter: MomentsAdapter? = null
@@ -240,6 +250,23 @@ class TimelineFragment : Fragment() {
                 ?: ZoomableVideoView.Quadrant.ALL
             argsConsumed = s.getBoolean(KEY_ARGS_CONSUMED, false)
             reopenPickerMonth = s.getLong(KEY_DAY_PICKER, UNSET)
+            if (s.containsKey(KEY_DASHCAM_VIEW)) {
+                dashcamView = s.getBoolean(KEY_DASHCAM_VIEW, false)
+                dashcamRestored = true
+            }
+        }
+        // Codec list and config reads: off the UI thread.
+        runCatching {
+            io?.execute {
+                val ok = com.overdrive.app.ui.timeline.player.DashcamFollower.supported()
+                val pref = com.overdrive.app.config.UnifiedConfigManager.isDashcamViewDefault()
+                main.post {
+                    dashcamSupported = ok
+                    dashcamPref = pref
+                    if (!dashcamRestored) dashcamView = pref
+                    setDashcamView(dashcamView && pref && ok)
+                }
+            }
         }
     }
 
@@ -282,6 +309,11 @@ class TimelineFragment : Fragment() {
         vv.onCameraTapped = { q -> onCameraTapped(q) }
         vv.onTilesChanged = { tiles -> ui?.labels?.setTiles(tiles) }
         p.setFrameSink(vv)
+        val f = createFollower(vv, p)
+        follower = f
+        compose = com.overdrive.app.ui.timeline.player.DashcamFollower.Compose.PENDING
+        vv.onFollowerSurfaceLost = { f.onSurfaceLost() }
+        f.setEnabled(dashcamView)
         u.playerBox.addView(vv, 0, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
@@ -307,7 +339,8 @@ class TimelineFragment : Fragment() {
         p.setSpeed(speed)
         p.setSkipQuietDriving(skipQuiet)
         p.setContinueAcrossGaps(continueNext)
-        p.setPreferredSource(preferSource)
+        appliedPrefer = PREFER_UNSET
+        applyLeaderPrefer()
         updateSpeedButton()
         loadMutePreference()
 
@@ -375,6 +408,7 @@ class TimelineFragment : Fragment() {
         }
         repo?.setActive(true)
         refreshDewarpStrength()
+        follower?.setVisible(true)
     }
 
     // Leaving (paused, or hidden for the List): playback pauses and a pending "plays once saved" is cancelled.
@@ -385,6 +419,8 @@ class TimelineFragment : Fragment() {
         if (positionMs > 0L) retainedWallMs = positionMs
         liveFollow = false
         player?.pause()
+        // No windshield decode while the screen isn't shown: the follower and its Surface go now.
+        follower?.setVisible(false)
         repo?.setActive(false)
         context?.let { TimelinePrefs.saveLastPosition(it, currentWallMs, System.currentTimeMillis()) }
     }
@@ -399,6 +435,7 @@ class TimelineFragment : Fragment() {
         outState.putString(KEY_CAMERA, camera.name)
         outState.putBoolean(KEY_ARGS_CONSUMED, argsConsumed)
         outState.putLong(KEY_DAY_PICKER, dayPicker?.takeIf { it.isShowing }?.month ?: UNSET)
+        outState.putBoolean(KEY_DASHCAM_VIEW, dashcamView)
     }
 
     override fun onDestroyView() {
@@ -417,6 +454,11 @@ class TimelineFragment : Fragment() {
         if (positionMs > 0L) retainedWallMs = positionMs
         strip?.let { attachStripListener(it, null) }
         strip = null
+        // Follower before the view: its decoder stops before the renderer frees the Surface it draws into.
+        follower?.let { runCatching { it.release() } }
+        follower = null
+        compose = com.overdrive.app.ui.timeline.player.DashcamFollower.Compose.PENDING
+        videoView?.onFollowerSurfaceLost = null
         player?.let { p ->
             runCatching { p.setFrameSink(null) }
             runCatching { p.release() }
@@ -572,6 +614,116 @@ class TimelineFragment : Fragment() {
     // Player
     // ---------------------------------------------------------------
 
+    private fun createFollower(vv: TimelineVideoView, p: TimelinePlayer): com.overdrive.app.ui.timeline.player.DashcamFollower {
+        val gen = viewGen
+        val out = object : com.overdrive.app.ui.timeline.player.DashcamFollower.Output {
+            override fun open(onSurface: (android.view.Surface?) -> Unit): Boolean = vv.openFollowerInput(onSurface)
+            override fun close() = vv.closeFollowerInput()
+            override fun setShown(on: Boolean) = vv.setFollowerShown(on)
+            override fun setVideoSize(w: Int, h: Int) = vv.setFollowerVideoSize(w, h)
+            override fun frames(): Int = vv.followerFrames()
+            override fun frameNs(): Long = vv.followerFrameNs()
+        }
+        val leader = object : com.overdrive.app.ui.timeline.player.DashcamFollower.Leader {
+            override fun wallNowMs(): Long = p.wallNowMs()
+            override fun clockRunning(): Boolean = p.clockRunning
+            override fun codec() = p.decoderConfig()
+        }
+        val f = com.overdrive.app.ui.timeline.player.DashcamFollower(out, leader,
+            object : com.overdrive.app.ui.timeline.player.DashcamFollower.Listener {
+                override fun onUnavailable() = onUi(gen) {
+                    dashcamSupported = false
+                    setDashcamView(false)
+                }
+
+                override fun onCompose(state: com.overdrive.app.ui.timeline.player.DashcamFollower.Compose) = onUi(gen) {
+                    compose = state
+                    if (state == com.overdrive.app.ui.timeline.player.DashcamFollower.Compose.BLOCKED) {
+                        videoView?.cancelCompositeHold()
+                    }
+                    applyLeaderPrefer()
+                    refreshSourceChip()
+                }
+            })
+        repo?.currentSnapshot?.let { f.setSegments(it.segments) }
+        return f
+    }
+
+    /** Dashcam view on/off for this session; the leader plays the 360° clips where it can be composed. */
+    private fun setDashcamView(on: Boolean) {
+        dashcamView = on
+        follower?.setEnabled(on)
+        applyLeaderPrefer()
+        refreshSourceChip()
+    }
+
+    /** Off, or nothing to compose here: exactly the saved source choice, as before the Dashcam view. */
+    private fun applyLeaderPrefer() {
+        // The follower can't compose here (failed, bailed out, unsupported pair): the saved choice, as before.
+        val blocked = compose == com.overdrive.app.ui.timeline.player.DashcamFollower.Compose.BLOCKED
+        val want = if (dashcamView && !blocked && dashcamViewAt(currentWallMs)) null else preferSource
+        if (want == appliedPrefer) return
+        // Front -> 360° only to feed the composite: no visible 360° step, one crossfade into the Dashcam view.
+        if (want == null && appliedPrefer == TYPE_OEM && dashcamView && isOemFamily(activeFamily)) {
+            videoView?.holdForComposite(COMPOSITE_HOLD_MS)
+        }
+        appliedPrefer = want
+        player?.setPreferredSource(want)
+    }
+
+    // Availability moves with the playhead and with sidecars landing in the cache: looked at about once a second.
+    private fun recheckDashcamView() {
+        if (!dashcamView) return
+        val now = SystemClock.uptimeMillis()
+        if (now - dashcamCheckedAt < DASHCAM_CHECK_MS) return
+        dashcamCheckedAt = now
+        applyLeaderPrefer()
+        refreshSourceChip()
+    }
+
+    /** The Dashcam view is drawn now (the follower says so), not merely possible. */
+    private fun dashcamViewShown(): Boolean =
+        dashcamView && !isOemFamily(activeFamily) &&
+            compose == com.overdrive.app.ui.timeline.player.DashcamFollower.Compose.COMPOSING
+
+    private fun followerState(state: TimelinePlayer.State) = when (state) {
+        TimelinePlayer.State.PLAYING -> com.overdrive.app.ui.timeline.player.DashcamFollower.LeaderState.PLAYING
+        TimelinePlayer.State.PAUSED -> com.overdrive.app.ui.timeline.player.DashcamFollower.LeaderState.PAUSED
+        TimelinePlayer.State.BUFFERING -> com.overdrive.app.ui.timeline.player.DashcamFollower.LeaderState.BUFFERING
+        TimelinePlayer.State.SCRUBBING -> com.overdrive.app.ui.timeline.player.DashcamFollower.LeaderState.SCRUBBING
+        TimelinePlayer.State.ENDED -> com.overdrive.app.ui.timeline.player.DashcamFollower.LeaderState.ENDED
+        else -> com.overdrive.app.ui.timeline.player.DashcamFollower.LeaderState.OTHER
+    }
+
+    private fun pushFollowerState() {
+        follower?.setLeaderState(followerState(playerState), speed.toFloat(), skipQuiet)
+    }
+
+    /**
+     * Contract #1414 section 4 at [wall], the same verdict the follower reaches: a grid-tagged 360° clip and a
+     * windshield clip, both writer-anchored, |rate| <= 2, no skip quiet, a format pair that runs here. The seam
+     * the plan bridges counts only to stay in the view, never to enter it (no flip-flop at a boundary).
+     */
+    private fun dashcamViewAt(wall: Long): Boolean {
+        if (!dashcamSupported || !dashcamPref || speed > 2 || skipQuiet) return false
+        val f = follower
+        val segs = repo?.currentSnapshot?.segments ?: return false
+        var mosaic = false
+        var oem = false
+        val seam = if (compose == com.overdrive.app.ui.timeline.player.DashcamFollower.Compose.COMPOSING)
+            com.overdrive.app.ui.timeline.player.PlaybackPlan.SEAM_MS else 0L
+        for (sg in segs) {
+            val end = sg.end ?: continue
+            if (!sg.available || wall < sg.start - seam || wall >= end + seam || sg.spanSrc != "writer") continue
+            // The pair verdict for the windshield clip at this instant only.
+            if (com.overdrive.app.ui.timeline.player.PlaybackPlan.oem(sg)) {
+                if (f == null || !f.pairBlockedFor(sg)) oem = true
+            } else if (specs?.cached(sg)?.grid != null) mosaic = true
+            if (mosaic && oem) return true
+        }
+        return false
+    }
+
     private fun createPlayer(ctx: Context): TimelinePlayer {
         val gen = viewGen
         return TimelinePlayer(ctx, object : TimelinePlayer.Listener {
@@ -600,6 +752,8 @@ class TimelineFragment : Fragment() {
             override fun onVideoSize(w: Int, h: Int) = onUi(gen) { videoView?.setVideoSize(w, h) }
             // The wait expired: a clip landing later should show its frame, not wait on a follow that's gone.
             override fun onFollowDropped() = onUi(gen) { liveFollow = false }
+            // The leader never loses to the follower: drop it and its format pair.
+            override fun onDecoderError() = onUi(gen) { follower?.onLeaderDecoderError() }
         })
     }
 
@@ -614,6 +768,9 @@ class TimelineFragment : Fragment() {
 
     private fun handlePosition(wallMs: Long, isPlaying: Boolean) {
         positionMs = wallMs
+        // Paused steps and seeks: the follower answers at once rather than on its next tick.
+        if (!isPlaying && dashcamView) follower?.poke()
+        recheckDashcamView()
         if (!scrubbing && playing != isPlaying) {
             playing = isPlaying
             refreshRowsIfCurrent()
@@ -650,6 +807,7 @@ class TimelineFragment : Fragment() {
     private fun handleState(state: TimelinePlayer.State) {
         val prev = playerState
         playerState = state
+        pushFollowerState()
         val u = ui ?: return
         val isPlaying = state == TimelinePlayer.State.PLAYING
         if (!scrubbing && playing != isPlaying) {
@@ -686,6 +844,11 @@ class TimelineFragment : Fragment() {
 
     private fun handleItem(seg: TlSegment?, spec: ClipSpec?) {
         currentSeg = seg
+        follower?.setLeader(seg, seg != null && (spec ?: specs?.cached(seg))?.grid != null)
+        if (dashcamView) {
+            dashcamCheckedAt = 0L
+            recheckDashcamView()
+        }
         if (seg != null) {
             val resolved = spec ?: specs?.cached(seg) ?: ClipSpecLoader.fallback(seg)
             // While decoding continuously the player switches specs on the exact frame.
@@ -707,12 +870,22 @@ class TimelineFragment : Fragment() {
     private fun handleSources(list: List<String>, active: String?) {
         families = list
         activeFamily = active
+        refreshSourceChip()
+    }
+
+    private fun refreshSourceChip() {
+        val list = families
+        val active = activeFamily
         val chip = ui?.sourceChip ?: return
         if (list.size < 2) {
             chip.visibility = View.GONE
             return
         }
-        val label = getString(if (isOemFamily(active)) R.string.timeline_source_oem else R.string.timeline_source_mosaic)
+        val label = getString(when {
+            dashcamViewShown() -> R.string.timeline_source_dashcam_view
+            isOemFamily(active) -> R.string.timeline_source_oem
+            else -> R.string.timeline_source_mosaic
+        })
         chip.text = label
         chip.contentDescription = getString(R.string.timeline_gap_fmt, getString(R.string.timeline_source_switch), label)
         if (chip.visibility != View.VISIBLE) {
@@ -914,6 +1087,7 @@ class TimelineFragment : Fragment() {
         pendingDayMs = UNSET
         r.includeTime(t)
         hideGapHint()
+        follower?.onLeaderSeek()
         p.seekTo(t, true)
         if (play) p.play()
         positionMs = t
@@ -1154,6 +1328,11 @@ class TimelineFragment : Fragment() {
             player?.setLive(snapshot.live.isNotEmpty())
             player?.setLoadedSpans(loadedSpans(snapshot))
             player?.setSegments(snapshot.segments)
+            follower?.setSegments(snapshot.segments)
+            if (dashcamView) {
+                dashcamCheckedAt = 0L
+                recheckDashcamView()
+            }
             player?.setQuietHints(snapshot.marks, snapshot.road)
             pushStripData(snapshot)
             rebuildMoments()
@@ -1409,7 +1588,7 @@ class TimelineFragment : Fragment() {
         u.speed.setOnClickListener { anchor ->
             val menu = speedMenu ?: return@setOnClickListener
             main.removeCallbacks(hideControls)
-            val state = SpeedMenu.State(speed, skipQuiet, continueNext)
+            val state = SpeedMenu.State(speed, skipQuiet, continueNext, dashcamPref, dashcamSupported)
             if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
                 menu.showPopover(anchor, state)
             } else {
@@ -1423,10 +1602,14 @@ class TimelineFragment : Fragment() {
             if (target > 0L) jump(target, true)
         }
         u.sourceChip.setOnClickListener {
-            val toOem = !isOemFamily(activeFamily)
-            preferSource = if (toOem) TYPE_OEM else null
-            player?.setPreferredSource(preferSource)
-            context?.let { TimelinePrefs.setPreferredSource(it, preferSource) }
+            // Dashcam view -> 360° -> Dashcam front -> Dashcam view (only where it can be composed).
+            val toView = !dashcamViewShown() && isOemFamily(activeFamily) && dashcamViewAt(currentWallMs)
+            if (!toView) {
+                val toOem = !dashcamViewShown() && !isOemFamily(activeFamily)
+                preferSource = if (toOem) TYPE_OEM else null
+                context?.let { TimelinePrefs.setPreferredSource(it, preferSource) }
+            }
+            setDashcamView(toView)
         }
         u.retry.setOnClickListener { repo?.retry() }
         for (b in listOf(u.prev, u.playPause, u.next, u.fullscreen, u.share, u.speed, u.sourceChip)) {
@@ -1575,12 +1758,23 @@ class TimelineFragment : Fragment() {
             p.setSkipQuietDriving(skipQuiet)
             TimelinePrefs.setSkipQuiet(ctx, skipQuiet)
         }
+        pushFollowerState()
         if (s.continueNext != continueNext) {
             continueNext = s.continueNext
             p.setContinueAcrossGaps(continueNext)
             TimelinePrefs.setContinueNext(ctx, continueNext)
             if (continueNext) hideGapHint()
         }
+        if (s.dashcamOffered && s.dashcamView != dashcamPref) {
+            // The saved default, and this session with it.
+            dashcamPref = s.dashcamView
+            val on = s.dashcamView
+            runCatching { io?.execute { com.overdrive.app.config.UnifiedConfigManager.setDashcamViewDefault(on) } }
+            setDashcamView(on)
+        }
+        // Rate and skip quiet are part of the availability verdict.
+        applyLeaderPrefer()
+        refreshSourceChip()
         updateSpeedButton()
     }
 
@@ -1979,6 +2173,10 @@ class TimelineFragment : Fragment() {
         private const val KEY_CAMERA = "tl_camera"
         private const val KEY_ARGS_CONSUMED = "tl_args_consumed"
         private const val KEY_DAY_PICKER = "tl_day_picker_month"
+        private const val KEY_DASHCAM_VIEW = "tl_dashcam_view"
+        private const val PREFER_UNSET = "\u0000unset"
+        private const val DASHCAM_CHECK_MS = 1_000L
+        private const val COMPOSITE_HOLD_MS = 4_000L
         private const val PLAYER_PREFS = "video_player_prefs"
         private const val PLAYER_PREF_MUTED = "muted"
         private const val TYPE_OEM = "oemDashcam"
