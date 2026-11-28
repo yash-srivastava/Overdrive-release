@@ -433,6 +433,7 @@
                                     <span class="setting-badge" data-i18n="recording.applies_live">Applies live</span>
                                 </div>
                                 <div class="setting-desc" data-i18n="recording.layout_desc">Standard records the four 360 cameras as a 2×2 grid. Dashcam puts the forward road view across the top with the 360 left, rear and right cameras along the bottom. Telemetry overlay is preserved either way.</div>
+                                <div class="setting-desc" id="dashcamLayoutHint" data-i18n="recording.layout_dashcam_hint" style="display:none;">For a lighter option, record the 2x2 grid with OverDrive&#39;s dashcam on. Playback shows the same dashcam view, and the car uses far less CPU and drops no frames.</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group btn-group-vertical rec-layouts" id="recLayoutBtns">
@@ -975,7 +976,7 @@
     <script src="../shared/settings-hydration.js?v=1"></script>
     <script src="../shared/update-flow.js?v=6"></script>
     <script src="../shared/storage-budget.js?v=9"></script>
-    <script src="../shared/recording.js?v=codecavailability3"></script>
+    <script src="../shared/recording.js?v=codecavailability4"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

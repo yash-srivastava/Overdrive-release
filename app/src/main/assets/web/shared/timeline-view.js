@@ -7,7 +7,8 @@
 
     var LS = {
         mode: 'byd.events.view', speed: 'byd.tlview.speed', skip: 'byd.tlview.skipQuiet',
-        cont: 'byd.tlview.continue', prefer: 'byd.tlview.prefer', filter: 'byd.tlview.filter', tz: 'byd.tlview.tz'
+        cont: 'byd.tlview.continue', prefer: 'byd.tlview.prefer', filter: 'byd.tlview.filter', tz: 'byd.tlview.tz',
+        dash: 'byd.tlview.dashView'
     };
     var SEC = 1000, MIN = 60 * SEC, HOUR = 60 * MIN, DAY = 24 * HOUR;
     var ZOOMS = [['zoomDay', DAY], ['zoom6h', 6 * HOUR], ['zoom1h', HOUR], ['zoom10m', 10 * MIN]];
@@ -71,7 +72,9 @@
         speedTitle: 'Playback speed', speedNote: '4× and 8× play without sound',
         skipQuiet: 'Skip quiet driving', skipQuietDesc: 'Drives play at 8×, slow to 1× for events',
         continueNext: 'Continue to next event', continueNextDesc: 'Skips the empty time between clips',
-        sourceMosaic: '360°', sourceOem: 'Dashcam front', sourceSwitch: 'Switch camera source',
+        sourceMosaic: '360°', sourceOem: 'Dashcam front', sourceDash: 'Dashcam view', sourceSwitch: 'Switch camera source',
+        dashView: 'Dashcam view',
+        dashViewDesc: 'Shows the windshield camera on top and the side and rear cameras below, built from your recordings as they play, so the car does no extra work while driving. Turn off to watch one camera feed at a time.',
         nextEventIn: 'Next event in {duration}',
         emptyDay: 'No recordings on {day}', offline: "Can't reach the recorder", retry: 'Retry',
         clipError: "Couldn't play this clip", cantPlayHere: "This clip can't play in this browser", download: 'Download',
@@ -577,6 +580,7 @@
         spans: { land: 6 * HOUR, port: 2 * HOUR }, range: null, minMs: Date.now() - DAYS_BACK * DAY,
         scrubbing: false, wasPlaying: false, touched: false, deep: null, pendingFile: null, pendingDefault: false, pendingDay: null,
         playerWin: null, item: null, itemId: null, spec: null, families: [], activeFamily: null,
+        dashPref: true, dashOn: true, dashOffered: false, dashActive: false, dashPrefRead: false,
         data: null, dataRev: 0, stripMoments: null, moments: [], momentsById: {}, activeId: null, rowEls: {}, listSig: '', titleSig: '',
         camLayout: null, objSig: '', menu: null, menuAnchor: null, hideTimer: null, uiTimer: null, uiAt: 0, rowsRaf: 0,
         userScrollAt: 0, refreshTimer: null, liveKey: null, daysInfo: null, daysAt: 0, hintTo: null, bannerTimer: null,
@@ -915,7 +919,10 @@
                 b[i].setAttribute('aria-checked', on ? 'true' : 'false');
             }
             var t = m.querySelectorAll('[data-tlv="toggle"]');
-            for (var j = 0; j < t.length; j++) t[j].setAttribute('aria-checked', (t[j].getAttribute('data-v') === 'skip' ? V.skip : V.cont) ? 'true' : 'false');
+            for (var j = 0; j < t.length; j++) {
+                var id = t[j].getAttribute('data-v');
+                t[j].setAttribute('aria-checked', (id === 'skip' ? V.skip : (id === 'dash' ? V.dashPref : V.cont)) ? 'true' : 'false');
+            }
         });
     }
     function speedMenuHtml(sheet) {
@@ -928,7 +935,8 @@
         });
         return h + '</div><div class="tlv-spdnote">' + esc(tr('speedNote')) + '</div>' +
             toggleHtml('skip', tr('skipQuiet'), tr('skipQuietDesc'), V.skip) +
-            toggleHtml('cont', tr('continueNext'), tr('continueNextDesc'), V.cont);
+            toggleHtml('cont', tr('continueNext'), tr('continueNextDesc'), V.cont) +
+            toggleHtml('dash', tr('dashView'), tr('dashViewDesc'), V.dashPref);
     }
     function toggleHtml(id, title, desc, on) {
         return '<button type="button" class="tlv-tgl" role="switch" data-tlv="toggle" data-v="' + id + '" aria-checked="' + !!on + '">' +
@@ -1387,8 +1395,10 @@
         call(p, 'setSpeed', V.speed);
         call(p, 'setSkipQuiet', V.skip);
         call(p, 'setContinue', V.cont);
-        call(p, 'setPrefer', V.prefer);
+        V.dashOn = call(p, 'setDashcamView', V.dashOn, V.dashPref) === true;
+        call(p, 'setPrefer', effPrefer());
         call(p, 'setMuted', false);
+        readDashPref();
     }
     /** The player's window is a store day: it gets the store's copy (re-read unless a few seconds old), never a second fetch. */
     function playerData(win) {
@@ -1410,7 +1420,7 @@
         if (to - from > DAY) { from = clamp(t - DAY / 2, r.from, r.to - DAY); to = from + DAY; }
         V.playerWin = { key: key, from: from, to: to, at: nowMs(), segs: null, stale: false, staleFrom: null, staleTo: null };
         checkStale();
-        call(p, 'load', { from: from, to: to }, V.prefer);
+        call(p, 'load', { from: from, to: to }, effPrefer());
         // auto: playback carrying on (not a user seek), so a gap there is crossed, not held.
         call(p, 'seekWall', t, !!auto);
         if (play && V.active) call(p, 'play');
@@ -1541,9 +1551,15 @@
         updateObj();
     }
     function onSources(x) {
+        var dv = x && x.dashcam, was = V.dashActive;
         V.families = x && Array.isArray(x.families) ? x.families : [];
         V.activeFamily = x ? x.active || null : null;
+        V.dashOffered = !!(dv && dv.offered);
+        V.dashActive = !!(dv && dv.active);
+        // The player turns the mode off itself when this browser can't compose it (WebGL lost).
+        if (dv && V.dashOn && !dv.on) { V.dashOn = false; call(P(), 'setPrefer', effPrefer()); }
         renderSource();
+        if (was !== V.dashActive) layoutOverlays();
     }
     function onGap(x) {
         var to = x ? num(x.to) : null, from = x ? num(x.from) : null;
@@ -1801,29 +1817,74 @@
     function toggleOpt(id) {
         if (id === 'skip') { V.skip = !V.skip; lsSet(LS.skip, V.skip ? 1 : 0); call(P(), 'setSkipQuiet', V.skip); }
         else if (id === 'cont') { V.cont = !V.cont; lsSet(LS.cont, V.cont ? 1 : 0); call(P(), 'setContinue', V.cont); if (V.cont) hideHint(); }
+        else if (id === 'dash') setDashPref(!V.dashPref, true);
         renderSpeed();
     }
     function isOem(f) { return /oem|dash/i.test(String(f || '')); }
+    // The remembered source; the player lets the 360° clip lead only while the dashcam view is offered.
+    function effPrefer() { return V.prefer; }
+    function applySource() {
+        if (P()) V.dashOn = call(P(), 'setDashcamView', V.dashOn, V.dashPref) === true;
+        call(P(), 'setPrefer', effPrefer());
+    }
+    // recordings.dashcamViewDefault in the unified config (shared with the app's player); localStorage mirrors it.
+    function setDashPref(on, save) {
+        V.dashPref = !!on;
+        lsSet(LS.dash, V.dashPref ? 1 : 0);
+        if (save && root.fetch) {
+            root.fetch('/api/settings/unified', {
+                method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ section: 'recordings', data: { dashcamViewDefault: V.dashPref } })
+            }).catch(function () { /* the local copy still applies here */ });
+        }
+        if (V.dashOn !== V.dashPref) { V.dashOn = V.dashPref; applySource(); }
+        renderSpeed();
+        renderSource();
+    }
+    function readDashPref() {
+        if (V.dashPrefRead || !root.fetch) return;
+        V.dashPrefRead = true;
+        root.fetch('/api/settings/unified', { cache: 'no-store', credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (j) {
+                var cfg = j && (j.config || j), rec = cfg && cfg.recordings, v = rec ? rec.dashcamViewDefault : undefined;
+                if (typeof v === 'boolean' && v !== V.dashPref) setDashPref(v, false);
+            })
+            .catch(function () { /* keep the local copy */ });
+    }
     function renderSource() {
         var fams = V.families || [];
         els.src.hidden = fams.length < 2;
         if (fams.length < 2) return;
-        var label = tr(isOem(V.activeFamily || fams[0]) ? 'sourceOem' : 'sourceMosaic');
+        var label = tr(V.dashActive ? 'sourceDash' : (isOem(V.activeFamily || fams[0]) ? 'sourceOem' : 'sourceMosaic'));
         els.src.innerHTML = ICON.swap + '<span>' + esc(label) + '</span>';
         els.src.setAttribute('aria-label', tr('sourceSwitch') + ': ' + label);
     }
+    // 360° -> Dashcam front -> Dashcam view (when on and offered) -> 360°; a choice made here lasts this session.
     function switchSource() {
-        var next = isOem(V.activeFamily || (V.families || [])[0]) ? null : 'oemDashcam';
-        V.prefer = next;
-        lsSet(LS.prefer, next || '');
-        call(P(), 'setPrefer', next);
+        if (V.dashActive) {
+            V.dashOn = false;
+            V.prefer = null;
+            lsSet(LS.prefer, '');
+        } else if (!isOem(V.activeFamily || (V.families || [])[0])) {
+            V.dashOn = false;
+            V.prefer = 'oemDashcam';
+            lsSet(LS.prefer, 'oemDashcam');
+        } else if (V.dashPref && V.dashOffered) {
+            V.dashOn = true;
+        } else {
+            V.dashOn = false;
+            V.prefer = null;
+            lsSet(LS.prefer, '');
+        }
+        applySource();
     }
 
     // ------------------------------------------------------------------ overlays on the video
 
     function contentRect() {
         var box = els.video, W = box.clientWidth, H = box.clientHeight;
-        var v = box.querySelector('video'), c = v ? null : box.querySelector('canvas');
+        var v = box.querySelector('video.tlv-video'), c = v ? null : box.querySelector('canvas');
         var vw = v ? v.videoWidth : (c ? c.width : 0), vh = v ? v.videoHeight : (c ? c.height : 0);
         if (!vw || !vh || !W || !H) return { x: 0, y: 0, w: W, h: H };
         var s = Math.min(W / vw, H / vh);
@@ -1831,6 +1892,7 @@
     }
     function clipLayout() {
         var sp = V.spec, seg = V.item;
+        if (V.dashActive) return 'dashcam';
         if (sp && (sp.single || sp.layout === 'single')) return 'single';
         if (sp && typeof sp.layout === 'string' && LAYOUTS[sp.layout.toLowerCase()]) return sp.layout.toLowerCase();
         if (!seg) return 'standard';
@@ -2637,6 +2699,8 @@
         V.skip = lsGet(LS.skip) === '1';
         V.cont = lsGet(LS.cont) !== '0';
         V.prefer = lsGet(LS.prefer) || null;
+        V.dashPref = lsGet(LS.dash) !== '0';
+        V.dashOn = V.dashPref;
         var f = lsGet(LS.filter);
         V.filter = FILTERS[f] ? f : 'all';
     }

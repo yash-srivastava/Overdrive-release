@@ -47,6 +47,22 @@
     const QUIET_TYPES = { normal: true, oemDashcam: true };
     const MOMENT_TYPES = { sentry: true, proximity: true, replay: true };
     const SPEEDS = [1, 2, 4, 8];
+    // Dashcam view follower sync (leader = grid clip, follower = OEM windshield clip).
+    const DV_TOL_MIN_S = 0.034;
+    const DV_TOL_MAX_S = 0.100;
+    const DV_HARD_S = 0.5;
+    const DV_NUDGE_MAX = 0.10;
+    const DV_SEEK_GAP_MS = 2000;
+    const DV_SEEKS_MAX = 3;
+    const DV_POLL_MS = 250;
+    const DV_RATE_MAX = 2;
+    // A follower hole this short is a clip seam: hold the picture, don't drop to one source.
+    const DV_SEAM_MS = 1000;
+    const DV_PENDING = { pending: true };
+    const GRID_ROLES = ['front', 'right', 'rear', 'left'];
+    // Events that count as user activation everywhere (iOS: not pointerdown).
+    const DV_GESTURES = ['touchend', 'click', 'keydown', 'pointerup'];
+    const MOSAIC_RANK = { normal: 0, sentry: 1, proximity: 2, replay: 4 };
     const GENERIC_CODECS = {
         avc1: 'avc1.42E01E', avc3: 'avc3.42E01E', hvc1: 'hvc1.1.6.L93.B0', hev1: 'hev1.1.6.L93.B0',
         av01: 'av01.0.04M.08', vp09: 'vp09.00.10.08'
@@ -567,16 +583,18 @@
 
     const CSS = [
         '.tlv-player{position:relative;width:100%;height:100%;overflow:hidden;background:#000}',
-        '.tlv-player>.tlv-video,.tlv-player>.tlv-lens,.tlv-player>.tlv-hold,.tlv-player>.tlv-scrub-frame{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;display:block;margin:0;padding:0;border:0}',
-        '.tlv-player>.tlv-lens,.tlv-player>.tlv-hold,.tlv-player>.tlv-scrub-frame{pointer-events:none}',
-        '.tlv-player>.tlv-hold{transition:opacity ' + HOLD_FADE_MS + 'ms cubic-bezier(.23,1,.32,1)}',
+        '.tlv-player>.tlv-video,.tlv-player>.tlv-lens,.tlv-player>.tlv-dv,.tlv-player>.tlv-hold,.tlv-player>.tlv-scrub-frame{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;display:block;margin:0;padding:0;border:0}',
+        '.tlv-player>.tlv-lens,.tlv-player>.tlv-dv,.tlv-player>.tlv-hold,.tlv-player>.tlv-scrub-frame{pointer-events:none}',
+        // Follower decodes under the picture, box-sized and near-transparent so engines treat it as visible.
+        '.tlv-player>.tlv-dvf{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;opacity:.01;margin:0;padding:0;border:0;pointer-events:none}',
+        '.tlv-player>.tlv-hold,.tlv-player>.tlv-dv{transition:opacity ' + HOLD_FADE_MS + 'ms cubic-bezier(.23,1,.32,1)}',
         '.tlv-player [hidden]{display:none!important}',
         '.tlv-unsupported{position:absolute;left:0;top:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;box-sizing:border-box;text-align:center;background:rgba(14,19,17,.9);color:#DEE4E0;font:500 15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}',
         '.tlv-unsupported-msg{margin:0;max-width:32em}',
         '.tlv-unsupported-dl{display:inline-flex;align-items:center;justify-content:center;min-height:48px;min-width:48px;padding:0 24px;box-sizing:border-box;border-radius:24px;background:#242927;color:#DEE4E0;font-weight:600;text-decoration:none;transition:transform 100ms ease-out}',
         '.tlv-unsupported-dl:active{transform:scale(.97)}',
         '.tlv-unsupported-dl:focus-visible{outline:2px solid #DEE4E0;outline-offset:2px}',
-        '@media (prefers-reduced-motion:reduce){.tlv-player>.tlv-hold{transition-duration:150ms}}'
+        '@media (prefers-reduced-motion:reduce){.tlv-player>.tlv-hold,.tlv-player>.tlv-dv{transition-duration:150ms}}'
     ].join('\n');
 
     // Inserted first in <head> so any page stylesheet overrides these defaults.
@@ -697,6 +715,19 @@
         this.watch = null;
         this.watchedPosted = new Set();
         this.watchedRetried = new Set();
+        this.dv = null;
+        this.dvAllowed = false;
+        this.dvFailed = false;
+        this.dvReplaced = false;
+        // Remembered OEM source: the grid clip leads only while the composite is offered (dvLead);
+        // dvHoldLead keeps the previous picture up until the composite has drawn.
+        this.dvLead = false;
+        this.dvHoldLead = false;
+        this.dvLeadAt = -1e9;
+        this.dvLeadGap = 3000;
+        this.dvGeo = new Map();
+        // OEM clips the follower could not decode (after recovery): not composed for this player.
+        this.dvBad = new Set();
         this._buildDom();
         this._bindVideo();
         this._setState('idle');
@@ -907,6 +938,7 @@
         ms = clamp(ms, this.outer.from, this.outer.to);
         // A user seek that must wait for a table still holds in a gap once the table lands.
         this.pendingUser = keepIntent ? null : { wall: ms };
+        if (!keepIntent && this.dv) this._dvUserSeek();
         if (!this.win) {
             this.pendingWall = ms;
             this._kick();
@@ -986,6 +1018,7 @@
             this.suspended = true;
             this._stopHls();
         }
+        if (this.dv) this._dvSleep(true);
     };
 
     Player.prototype.setSpeed = function (s) {
@@ -1010,6 +1043,8 @@
         const p = type || null;
         if (p === this.prefer) return;
         this.prefer = p;
+        this.dvLead = false;
+        this.dvHoldLead = false;
         this.sourcesKey = null;
         if (this.win && !this.dead) this._openSource(this._currentWall());
     };
@@ -1040,6 +1075,7 @@
         if (this.frameReq) this.frameReq.ctl.abort();
         this.frameReq = null;
         this._closeSource();
+        if (this.dv) this._dvLeave(true);
         if (this.dewarp) { try { this.dewarp.detach(); } catch (e) { /* gone */ } }
         this.dewarp = null;
         const self = this;
@@ -1257,7 +1293,7 @@
             const m = self._skimFor(self._effectiveSpeed());
             if (m !== self.mode) { self.mode = m; self._applyRate(); }
             if (sg !== self.srcGen || self.dead) return;
-            const url = timelineUrl(self.win, self.prefer, self.mode);
+            const url = timelineUrl(self.win, self.dv && self.dvLead ? null : self.prefer, self.mode);
             if (kind === 'hls') self._openHls(url, sg);
             else if (kind === 'native') self._openNative(url, sg);
             else self._fail(null, 'unsupported');
@@ -1296,6 +1332,8 @@
             try { v.load(); } catch (e) { /* idle */ }
         }
         this.loadingSource = false;
+        // The follower plays the leader's window: it reopens with the next table.
+        if (this.dv) this._dvCloseF();
     };
 
     Player.prototype._hlsConfig = function () {
@@ -1830,7 +1868,7 @@
                 if (!this._isBlocked(it)) { this.blockedRun = 0; this.fenceTries = 0; }
             }
         }
-        if (this.holding && !this.loadingSource && !this.video.seeking) this._releaseHold();
+        if (this.holding && !this.loadingSource && !this.video.seeking && !this.dvHoldLead) this._releaseHold();
         if (this.scrubRelease && !this.video.seeking) this._hideScrubFrame();
     };
 
@@ -1841,7 +1879,7 @@
             requestAnimationFrame(function () {
                 requestAnimationFrame(function () {
                     if (self.dead) return;
-                    if (self.holding) self._releaseHold();
+                    if (self.holding && !self.dvHoldLead) self._releaseHold();
                     if (self.scrubRelease) self._hideScrubFrame();
                 });
             });
@@ -2134,6 +2172,7 @@
                 const changed = v !== self.strength;
                 self.strength = isFinite(v) ? v : 0;
                 if (changed && !self.dead && self.lensItem) self._applyLens(self.lensItem, true);
+                if (changed && !self.dead && self.dv) self._dvEval();
             }, function () { self.strength = 0; });
         }
         const cached = this.sidecars.get(it.key);
@@ -2170,7 +2209,7 @@
 
     Player.prototype._lensOn = function (spec) {
         const LD = BYD.LensDewarp;
-        if (this.lensFailed || !LD) { this._lensOff(); return; }
+        if (this.lensFailed || !LD || (this.dv && this.dv.shown)) { this._lensOff(); return; }
         if (!this.dewarp) {
             let d;
             try { d = new LD(this.lensCanvas); } catch (e) { this.lensFailed = true; this._lensOff(); return; }
@@ -2217,10 +2256,13 @@
         const families = this.dataReady && isNum(w) ? sourcesAt(this.segs, w, this.blocked) : [];
         const it = this.curItem;
         const active = it && it.type ? familyOf(it.seg || { type: it.type }) : null;
-        const key = families.join(',') + '|' + active + '|' + this.prefer;
+        const offer = families.length > 1 ? this._dvOffer(w) : null;
+        if (this.dv) this._dvEval(offer);
+        const dv = { offered: !!offer && offer !== DV_PENDING, on: !!this.dv, active: !!(this.dv && this.dv.shown) };
+        const key = families.join(',') + '|' + active + '|' + this.prefer + '|' + dv.offered + dv.on + dv.active;
         if (key === this.sourcesKey) return;
         this.sourcesKey = key;
-        this._emit('sources', { families: families, active: active, prefer: this.prefer });
+        this._emit('sources', { families: families, active: active, prefer: this.prefer, dashcam: dv });
     };
 
     Player.prototype._emitPosition = function (force) {
@@ -2584,7 +2626,7 @@
 
     Player.prototype._holdFrame = function () {
         const v = this.video;
-        if (!this.lensCanvas.hidden) return;
+        if (!this.lensCanvas.hidden || (this.dv && this.dv.shown) || this.dvHoldLead) return;
         if (!(v.readyState >= 2) || !v.videoWidth) return;
         const c = this.holdCanvas;
         const w = Math.min(v.videoWidth, 1280);
@@ -2603,7 +2645,7 @@
         this.holding = true;
         const self = this;
         // A frozen picture must not outlive a slow reload.
-        this.holdSafety = setTimeout(function () { self._releaseHold(); }, HOLD_MAX_MS);
+        this.holdSafety = setTimeout(function () { self.dvHoldLead = false; self._releaseHold(); }, HOLD_MAX_MS);
     };
 
     Player.prototype._releaseHold = function () {
@@ -2710,6 +2752,852 @@
         if (hideImg) this._hideScrubFrame();
     };
 
+    // ---------------------------------------------------------------- dashcam view
+
+    // Sidecar "grid" block v1 -> compositor geometry. Anything unexpected: null (the mode is not offered).
+    function gridGeometry(sc) {
+        const g = sc && sc.grid;
+        if (!g || typeof g !== 'object' || g.v !== 1) return null;
+        const fr = g.frame || {};
+        const W = Number(fr.width), H = Number(fr.height);
+        if (!(W % 1 === 0 && H % 1 === 0 && W >= 2 && W <= 8192 && H >= 2 && H <= 8192)) return null;
+        const tiles = g.tiles;
+        if (!Array.isArray(tiles) || tiles.length !== 4) return null;
+        for (let i = 0; i < 4; i++) if (tiles.indexOf(GRID_ROLES[i]) < 0) return null;
+        const aspect = Number(g.aspect);
+        if (!(aspect >= 0.25 && aspect <= 1)) return null;
+        const dc = g.dashcam || {};
+        const split = Number(dc.split);
+        if (!(split > 0 && split < 1) || !Array.isArray(dc.cells) || dc.cells.length !== 3) return null;
+        const cells = [];
+        for (let k = 0; k < 3; k++) {
+            const i = tiles.indexOf(dc.cells[k]);
+            if (i < 0) return null;
+            cells.push([(i % 2) * 0.5, Math.floor(i / 2) * 0.5]);
+        }
+        const rows = Number(g.strip);
+        const strip = rows > 0 && rows * 2 < H ? rows / H : 0;
+        const raw = g.raw === true;
+        return {
+            W: W, H: H, aspect: aspect, raw: raw, strip: strip, split: split, cells: cells,
+            sig: [W, H, aspect, raw, strip, split, cells.join(';')].join(',')
+        };
+    }
+
+    // Media time of wall w inside a fragment of tb, else -1 (gap, before or past). out.item = its item index.
+    function mediaInside(tb, w, out) {
+        const n = tb ? tb.n : 0;
+        if (!n || !isNum(w)) return -1;
+        let lo = 0, hi = n;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (tb.weMax[mid] > w) hi = mid; else lo = mid + 1;
+        }
+        if (lo >= n || w < tb.ws[lo]) return -1;
+        if (out) out.item = tb.itemOf[lo];
+        const wspan = tb.we[lo] - tb.ws[lo], mspan = tb.me[lo] - tb.ms[lo];
+        return wspan > 0 ? Math.min(tb.ms[lo] + (w - tb.ws[lo]) * mspan / wspan, tb.me[lo]) : tb.ms[lo];
+    }
+
+    // w sits in a hole of at most DV_SEAM_MS between two fragments of tb.
+    function inSeam(tb, w) {
+        const n = tb ? tb.n : 0;
+        if (!n || !isNum(w)) return false;
+        let lo = 0, hi = n;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (tb.weMax[mid] > w) hi = mid; else lo = mid + 1;
+        }
+        return lo > 0 && lo < n && w < tb.ws[lo] && tb.ws[lo] - tb.weMax[lo - 1] <= DV_SEAM_MS;
+    }
+
+    function mosaicRank(s) {
+        const r = MOSAIC_RANK[s.type];
+        return r === undefined ? 5 : r;
+    }
+
+    function setRate(v, r) {
+        if (!(r > 0) || Math.abs(v.playbackRate - r) <= 1e-4) return;
+        try { v.playbackRate = r; } catch (e) { /* refused: stays on hard seeks */ }
+    }
+
+    // Runs fn once the next frames are painted (or soon, if frames are not painted while hidden).
+    function afterPaint(fn) {
+        let done = false;
+        const run = function () { if (!done) { done = true; fn(); } };
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(function () { requestAnimationFrame(run); });
+        setTimeout(run, 250);
+    }
+
+    /**
+     * Dashcam view: windshield clip over the grid's side and rear tiles, composed at playback where both are
+     * recorded (single source elsewhere). allowed (default: on) keeps reporting where it is offered while off.
+     * Returns whether the mode is on.
+     */
+    Player.prototype.setDashcamView = function (on, allowed) {
+        if (this.dead) return false;
+        this.dvAllowed = allowed === undefined ? !!on : !!allowed;
+        const want = !!on && !this.dvFailed;
+        if (want !== !!this.dv) {
+            if (want) this._dvEnter(); else this._dvLeaveToPrefer();
+        }
+        this._emitSources(true);
+        return !!this.dv;
+    };
+
+    // Offered at wall w: grid clip + OEM clip both cover w, both writer-anchored, the grid clip has a v1 grid block.
+    Player.prototype._dvOffer = function (w) {
+        if ((!this.dv && !this.dvAllowed) || this.dvFailed || !BYD.LensDewarp || !BYD.DashcamView || !this.dataReady || !isNum(w)) return null;
+        if (this.mode || this._effectiveSpeed() > DV_RATE_MAX) return null;
+        const ci = this.curItem, segs = this.segs;
+        // The playing grid item counts across its own seams (index end and playlist end may differ slightly).
+        const cur = ci && ci.seg && familyOf(ci.seg) === MOSAIC && mosaicRank(ci.seg) < 3 && isPlayable(ci.seg) && ci.ws - DV_SEAM_MS <= w && w < ci.we + DV_SEAM_MS ? ci.seg : null;
+        let m = cur, o = null;
+        for (let i = 0; i < segs.length; i++) {
+            const s = segs[i];
+            if (s.start > w + DV_SEAM_MS) break;
+            if (!isPlayable(s) || hasKey(this.blocked, s)) continue;
+            // OEM coverage within a seam here; the follower's own playlist decides exactly.
+            if (familyOf(s) === OEM) { if (!o && s.end + DV_SEAM_MS > w && !this.dvBad.has(s.id + '|' + s.fp)) o = s; continue; }
+            if (cur || s.start > w || !(s.end > w) || mosaicRank(s) >= 3) continue;
+            if (!m || mosaicRank(s) < mosaicRank(m)) m = s;
+        }
+        if (!m || !o || m.spanSrc !== 'writer' || o.spanSrc !== 'writer') return null;
+        const key = m.id + '|' + m.fp;
+        const sc = this.sidecars.get(key);
+        if (sc === undefined) {
+            const self = this;
+            this._loadSidecar(this._segItem(m)).then(function () { if (!self.dead) self._emitSources(true); });
+            return DV_PENDING;
+        }
+        if (sc && typeof sc.then === 'function') return DV_PENDING;
+        let geo = this.dvGeo.get(key);
+        if (geo === undefined) {
+            geo = gridGeometry(sc);
+            this.dvGeo.set(key, geo);
+            if (this.dvGeo.size > 200) this.dvGeo.delete(this.dvGeo.keys().next().value);
+        }
+        if (!geo) return null;
+        if (geo.raw && this.strength === null) return DV_PENDING;
+        return { key: key, geo: geo };
+    };
+
+    Player.prototype._dvEnter = function () {
+        const DV = BYD.DashcamView;
+        if (!DV || typeof document === 'undefined') { this.dvFailed = true; return; }
+        const canvas = document.createElement('canvas');
+        canvas.className = 'tlv-dv';
+        canvas.hidden = true;
+        canvas.setAttribute('aria-hidden', 'true');
+        let comp;
+        try { comp = new DV(canvas, this.el); } catch (e) { this.dvFailed = true; return; }
+        const f = document.createElement('video');
+        f.className = 'tlv-dvf';
+        f.muted = true;
+        f.setAttribute('muted', '');
+        f.playsInline = true;
+        f.setAttribute('playsinline', '');
+        f.setAttribute('webkit-playsinline', '');
+        f.setAttribute('aria-hidden', 'true');
+        f.preload = 'auto';
+        f.style.visibility = 'hidden';
+        // Under the leader (DOM order), the composite canvas above the lens canvas.
+        this.el.insertBefore(f, this.video);
+        this.el.insertBefore(canvas, this.holdCanvas);
+        const self = this, v = this.video;
+        const dv = {
+            comp: comp, canvas: canvas, el: f, hls: null, fLoading: false, fKey: null, fGen: 0, fCtl: null,
+            tb: null, tbDirty: false, tbAt: 0, fStart: null, fFailed: false, failN: 0, failWin: null, failTimer: 0,
+            netTries: 0, mediaTries: 0, needGesture: false, onGesture: null, noOemWin: null, suspect: null,
+            engaged: false, shown: false, ready: false, readySeq: 0, hideSeq: 0, unsynced: false, unsyncKey: null,
+            seekPending: false, settle: 0, seeks: 0, seekAt: -1e9, nudge: false, fWaiting: false, fMT: -1,
+            ring: new Float64Array(8), ringN: 0, ringI: 0, scratch: new Float64Array(8), frameDur: 1 / 15,
+            geoSig: null, poll: 0, playing: false, playFails: 0, sleepView: false, sleepPage: !!document.hidden, out: { item: -1 }, emitQueued: false
+        };
+        this.dv = dv;
+        const mine = function () { return self.dv === dv && !self.dead; };
+        comp.onFrame = function (which, mt) {
+            if (!mine()) return;
+            if (which === 0) self._dvMeasure(mt); else self._dvFollowerFrame(mt);
+        };
+        comp.onDraw = function () {
+            if (mine() && dv.engaged && dv.ready && !dv.shown && comp.followerUploads > dv.readySeq) self._dvShow();
+        };
+        comp.onFail = function (reason) { if (mine()) self._dvGlFail(reason); };
+        const pauseF = function () { if (mine()) self._dvPauseF(); };
+        dv.lh = {
+            pause: function () { if (mine()) { self._dvPauseF(); if (dv.engaged) self._dvAlignF(false); } },
+            playing: function () {
+                if (!mine()) return;
+                dv.sleepView = false;
+                if (dv.engaged) self._dvAlignF(true); else self._dvEval();
+            },
+            seeking: pauseF,
+            seeked: function () { if (mine()) { if (dv.engaged) self._dvAlignF(!v.paused, true); else self._dvEval(); } },
+            waiting: pauseF,
+            ended: pauseF,
+            ratechange: function () {
+                if (!mine()) return;
+                self._dvEval();
+                if (self.dv === dv && dv.engaged) { dv.nudge = false; setRate(f, v.playbackRate || 1); }
+            }
+        };
+        const settled = function () { if (mine()) self._dvFSettled(); };
+        dv.fh = {
+            seeked: function () { dv.fWaiting = false; settled(); },
+            canplay: function () { dv.fWaiting = false; settled(); },
+            loadeddata: settled,
+            waiting: function () { dv.fWaiting = true; },
+            playing: function () { dv.fWaiting = false; },
+            loadedmetadata: function () {
+                if (dv.fStart === null) return;
+                const t = dv.fStart;
+                dv.fStart = null;
+                try { f.currentTime = t; } catch (e) { /* not seekable yet */ }
+            },
+            ended: function () { if (mine()) self._dvEval(); },
+            error: function () {
+                if (!mine() || self.engineKind !== 'native' || !f.getAttribute('src')) return;
+                const code = f.error ? f.error.code : 0;
+                if (code === 3 || code === 4) self._dvBadClip(null, false);
+                self._dvSoftFail(code === 3 || code === 4 ? 2000 : 0);
+            }
+        };
+        Object.keys(dv.lh).forEach(function (k) { v.addEventListener(k, dv.lh[k]); });
+        Object.keys(dv.fh).forEach(function (k) { f.addEventListener(k, dv.fh[k]); });
+        dv.onVis = function () {
+            if (!mine()) return;
+            dv.sleepPage = !!document.hidden;
+            if (dv.sleepPage) { self._dvSleep(false); return; }
+            self._dvEval();
+        };
+        document.addEventListener('visibilitychange', dv.onVis);
+        this._dvEval();
+    };
+
+    // Leaving the mode: the follower decoder goes now, the canvas once the single-source picture is up.
+    Player.prototype._dvLeave = function (now) {
+        const dv = this.dv;
+        if (!dv) return;
+        this._dvDisengage(true);
+        this._dvCloseF();
+        this._dvGestureOff(dv);
+        this.dv = null;
+        const v = this.video, f = dv.el;
+        Object.keys(dv.lh).forEach(function (k) { v.removeEventListener(k, dv.lh[k]); });
+        Object.keys(dv.fh).forEach(function (k) { f.removeEventListener(k, dv.fh[k]); });
+        document.removeEventListener('visibilitychange', dv.onVis);
+        clearTimeout(dv.failTimer);
+        if (f.parentNode) f.parentNode.removeChild(f);
+        const wasShown = dv.shown;
+        dv.shown = false;
+        if (wasShown && !this.dead) this._applyLens(this.lensItem);
+        const fin = function () {
+            dv.comp.release();
+            if (dv.canvas.parentNode) dv.canvas.parentNode.removeChild(dv.canvas);
+        };
+        if (now || !wasShown) fin(); else this._dvWhenLeaderReady(fin);
+    };
+
+    // fn once the leader element shows a frame of its current source (bounded like the hold frame).
+    Player.prototype._dvWhenLeaderReady = function (fn) {
+        const self = this, v = this.video, t0 = perfNow();
+        const step = function () {
+            const ready = self.dead || (!self.loadingSource && v.readyState >= 2 && !v.seeking);
+            if (ready || perfNow() - t0 > HOLD_MAX_MS) fn(); else afterPaint(step);
+        };
+        afterPaint(step);
+    };
+
+    // Off: back to the remembered source (reopened while the composite still covers the picture).
+    Player.prototype._dvLeaveToPrefer = function () {
+        if (this.dvLead) {
+            this.dvLead = false;
+            this.dvHoldLead = false;
+            if (this.win && !this.dead) this._openSource(this._currentWall());
+        }
+        this._dvLeave(false);
+    };
+
+    Player.prototype._dvGlFail = function (reason) {
+        // A lost context stays lost on its canvas: one fresh canvas, then single-source playback.
+        const replace = reason === 'contextlost' && !this.dvReplaced;
+        if (!replace && this.dvLead) { this._dvLeaveToPrefer(); this.dvFailed = true; this._emitSources(true); return; }
+        this._dvLeave(true);
+        if (replace) { this.dvReplaced = true; this._dvEnter(); } else this.dvFailed = true;
+        this._emitSources(true);
+    };
+
+    // View hidden (view=true, until the leader plays again) or page hidden: no follower decode.
+    Player.prototype._dvSleep = function (view) {
+        const dv = this.dv;
+        if (!dv) return;
+        if (view) dv.sleepView = true;
+        this._dvDisengage();
+        this._dvCloseF();
+    };
+
+    Player.prototype._dvUserSeek = function () {
+        const dv = this.dv;
+        dv.unsynced = false;
+        dv.sleepView = false;
+        if (dv.fFailed) this._dvClearFail();
+    };
+
+    Player.prototype._dvClearFail = function () {
+        const dv = this.dv;
+        clearTimeout(dv.failTimer);
+        dv.failTimer = 0;
+        dv.fFailed = false;
+        dv.failN = 0;
+        dv.failWin = null;
+    };
+
+    // A follower failure that may pass (busy, offline, refused play): single source, then retry after a
+    // bounded backoff (or the server's Retry-After), and at once in another window.
+    Player.prototype._dvSoftFail = function (delayMs) {
+        const dv = this.dv;
+        if (!dv) return;
+        const win = dv.fKey;
+        this._dvCloseF();
+        dv.fFailed = true;
+        dv.failWin = win;
+        dv.failN++;
+        const wait = delayMs > 0 ? delayMs : Math.min(60000, 2000 * Math.pow(2, Math.min(dv.failN - 1, 5)));
+        clearTimeout(dv.failTimer);
+        const self = this;
+        dv.failTimer = setTimeout(function () {
+            dv.failTimer = 0;
+            if (self.dv !== dv) return;
+            dv.fFailed = false;
+            self._dvEval();
+        }, wait);
+        this._dvEval();
+    };
+
+    // A clip that keeps failing (now: already retried; else on its second failure): not composed again by this player.
+    Player.prototype._dvBadClip = function (url, now) {
+        const dv = this.dv;
+        let ref = url ? idFromUrl(url) : null;
+        if (!ref && dv.tb) {
+            const it = itemAtMedia(dv.tb, dv.fStart !== null ? dv.fStart : dv.el.currentTime);
+            if (it && it.id) ref = { id: it.id, fp: it.fp };
+        }
+        if (!ref) return;
+        const key = ref.id + '|' + ref.fp;
+        if (now || dv.suspect === key) this.dvBad.add(key); else dv.suspect = key;
+    };
+
+    // Play refused without a user gesture (WebKit policy): single source until the next tap or key.
+    Player.prototype._dvNeedGesture = function () {
+        const dv = this.dv;
+        if (dv.needGesture) return;
+        dv.needGesture = true;
+        const self = this;
+        dv.onGesture = function () {
+            if (self.dv !== dv) return;
+            self._dvGestureOff(dv);
+            dv.needGesture = false;
+            self._dvEval();
+            if (dv.engaged && !self.video.paused) self._dvPlayF();
+        };
+        DV_GESTURES.forEach(function (n) { document.addEventListener(n, dv.onGesture, true); });
+        this._dvEval();
+    };
+
+    Player.prototype._dvGestureOff = function (dv) {
+        const fn = dv && dv.onGesture;
+        if (!fn) return;
+        dv.onGesture = null;
+        DV_GESTURES.forEach(function (n) { document.removeEventListener(n, fn, true); });
+    };
+
+    // Decide composite vs single-source for the current instant. offer: from _dvOffer (undefined = compute).
+    Player.prototype._dvEval = function (offer) {
+        const dv = this.dv;
+        if (!dv || this.dead) return;
+        // A leader reload keeps the last picture, as the lens canvas does; nothing left to load drops it.
+        if (!this.tb) {
+            if (!this.loadingSource && !this.win && this.pendingWall === null && this.dataReady) this._dvDisengage();
+            else this._dvPauseF();
+            return;
+        }
+        if (this.loadingSource) { this._dvPauseF(); return; }
+        if (offer === undefined) offer = this._dvOffer(this._currentWall());
+        if (offer === DV_PENDING) return;
+        // A sync bailout lasts until the next user seek or grid clip.
+        if (dv.unsynced && offer && offer.key !== dv.unsyncKey) dv.unsynced = false;
+        if (this._dvLeadStep(offer)) return;
+        const v = this.video, it = this.curItem;
+        let tf = -1;
+        let want = !!offer && !dv.sleepView && !dv.sleepPage && !dv.fFailed && !dv.needGesture && !this.errorCode && !this.overlaySeg
+            && !!it && it.key === offer.key && !(v.playbackRate > DV_RATE_MAX);
+        if (want && v.readyState >= 1 && v.videoWidth && v.videoHeight && Math.abs(v.videoWidth / v.videoHeight - offer.geo.W / offer.geo.H) > 0.01) want = false;
+        if (want) {
+            this._dvOpenF();
+            if (!dv.tb) {
+                if (dv.fFailed) want = false;
+                else { this._dvPauseF(); return; }   // follower playlist on its way
+            }
+        }
+        if (want) {
+            if (dv.tbDirty) this._dvRebuildF();
+            const wL = mediaToWall(this.tb, this._mediaNow());
+            tf = mediaInside(dv.tb, wL, dv.out);
+            if (tf < 0 && inSeam(dv.tb, wL)) return;
+            want = tf >= 0 && !dv.unsynced;
+        }
+        if (want) { this._dvEngage(offer.geo, tf); return; }
+        // Leading for an OEM preference but the composite can't engage here: back to the OEM clip,
+        // and wait longer before trying again (no reload churn).
+        if (this.dvLead && this.prefer && familyOf({ type: this.prefer }) === OEM && !dv.sleepView && !dv.sleepPage
+            && !this.scrub && this._dvOemAt(this._currentWall())) {
+            this.dvLeadGap = Math.min(60000, this.dvLeadGap * 2);
+            this.dvLeadAt = perfNow();
+            this.dvLead = false;
+            this._openSource(this._currentWall());
+            this.dvHoldLead = false;
+            return;
+        }
+        this._dvDisengage();
+    };
+
+    // OEM preference: reopen with the grid clip leading while the composite is offered, and back to the OEM clip
+    // where it is not but OEM footage is (in OEM gaps both plans pick the grid clip: no reload). True = reopened.
+    Player.prototype._dvLeadStep = function (offer) {
+        const dv = this.dv, p = this.prefer;
+        if (!p || familyOf({ type: p }) !== OEM || dv.sleepView || dv.sleepPage || this.scrub) return false;
+        const winKey = this.win ? this.win.from + '-' + this.win.to : null;
+        const ok = !!offer && !dv.unsynced && !dv.fFailed && !dv.needGesture && !this.errorCode && !this.overlaySeg
+            && dv.noOemWin !== winKey;
+        let want = this.dvLead;
+        if (ok) want = true;
+        else if (this.dvLead && this._dvOemAt(this._currentWall())) want = false;
+        if (want === this.dvLead) return false;
+        // Entering is rate-limited against flapping; leaving is immediate (no 360° picture meanwhile).
+        const now = perfNow();
+        if (want && now - this.dvLeadAt < this.dvLeadGap) return false;
+        if (want) this.dvLeadAt = now;
+        this.dvLead = want;
+        const w = this._currentWall();
+        if (want) {
+            // The OEM picture stays (hold frame) until the composite has both textures.
+            this.dvHoldLead = false;
+            this._holdFrame();
+            if (!this.holding) this._dvHoldBlack();
+            this.dvHoldLead = this.holding;
+            this._openSource(w);
+        } else {
+            // The composite (or the first hold, if it never drew) covers the reload; no 360° frame between.
+            this._openSource(w);
+            this.dvHoldLead = false;
+        }
+        return true;
+    };
+
+    // Nothing to hold yet: black over the box (the leader keeps decoding under it) rather than a 360° frame.
+    Player.prototype._dvHoldBlack = function () {
+        const c = this.holdCanvas;
+        const w = clamp(Math.round(this.el.clientWidth) || 16, 2, 1280), h = clamp(Math.round(this.el.clientHeight) || 9, 2, 1280);
+        try {
+            if (c.width !== w) c.width = w;
+            if (c.height !== h) c.height = h;
+            const x = c.getContext('2d');
+            x.fillStyle = '#000';
+            x.fillRect(0, 0, w, h);
+        } catch (e) {
+            return;
+        }
+        clearTimeout(this.holdTimer);
+        clearTimeout(this.holdSafety);
+        c.style.opacity = '1';
+        c.hidden = false;
+        this.holding = true;
+        const self = this;
+        this.holdSafety = setTimeout(function () { self.dvHoldLead = false; self._releaseHold(); }, HOLD_MAX_MS);
+    };
+
+    Player.prototype._dvOemAt = function (w) {
+        const segs = this.segs;
+        for (let i = 0; i < segs.length; i++) {
+            const s = segs[i];
+            if (s.start > w) break;
+            if (familyOf(s) === OEM && isPlayable(s) && s.end > w && !hasKey(this.blocked, s)) return true;
+        }
+        return false;
+    };
+
+    Player.prototype._dvEngage = function (geo, tf) {
+        const dv = this.dv, v = this.video, f = dv.el;
+        if (dv.geoSig !== geo.sig) { dv.geoSig = geo.sig; dv.comp.setGeometry(geo); }
+        dv.comp.setStrength(geo.raw ? this.strength : 0);
+        if (dv.engaged) return;
+        if (!dv.comp.start(v, f)) { this._dvGlFail('start'); return; }
+        dv.engaged = true;
+        dv.ready = false;
+        dv.seeks = 0;
+        dv.nudge = false;
+        f.style.visibility = '';
+        this._dvSeekF(tf);
+        setRate(f, v.playbackRate || 1);
+        if (!v.paused && !v.seeking && !this.waiting) this._dvPlayF();
+        if (typeof v.requestVideoFrameCallback !== 'function') {
+            const self = this;
+            dv.poll = setInterval(function () {
+                if (self.dv === dv && !v.paused) self._dvMeasure(v.currentTime);
+            }, DV_POLL_MS);
+        }
+    };
+
+    // Single-source rendering; keep=true leaves the composite up (the caller replaces it).
+    Player.prototype._dvDisengage = function (keep) {
+        const dv = this.dv;
+        if (dv.engaged) {
+            dv.engaged = false;
+            dv.ready = false;
+            dv.nudge = false;
+            clearInterval(dv.poll);
+            dv.poll = 0;
+            dv.comp.stop();
+            this._dvPauseF();
+            if (dv.hls && dv.fLoading) {
+                dv.fLoading = false;
+                try { dv.hls.stopLoad(); } catch (e) { /* stopped */ }
+            }
+            dv.el.style.visibility = 'hidden';
+        }
+        if (!keep) this._dvHide();
+    };
+
+    Player.prototype._dvShow = function () {
+        const dv = this.dv;
+        dv.shown = true;
+        dv.failN = 0;
+        this.dvLeadGap = 3000;
+        dv.hideSeq++;
+        dv.canvas.style.opacity = '';
+        dv.canvas.hidden = false;
+        this._lensOff();
+        if (this.dvHoldLead) { this.dvHoldLead = false; this._releaseHold(); }
+        this._dvQueueEmit();
+    };
+
+    // The single-source picture goes up first (lens canvas or plain video), the composite comes down after it painted.
+    Player.prototype._dvHide = function () {
+        const dv = this.dv;
+        if (!dv.shown) return;
+        dv.shown = false;
+        this._applyLens(this.lensItem);
+        const token = ++dv.hideSeq, canvas = dv.canvas;
+        // Fade out once the single-source picture is on screen (after a reload too).
+        this._dvWhenLeaderReady(function () {
+            if (dv.hideSeq !== token || dv.shown) return;
+            canvas.style.opacity = '0';
+            setTimeout(function () {
+                if (dv.hideSeq !== token || dv.shown) return;
+                canvas.hidden = true;
+                canvas.style.opacity = '';
+            }, HOLD_FADE_MS + 40);
+        });
+        this._dvQueueEmit();
+    };
+
+    Player.prototype._dvQueueEmit = function () {
+        const dv = this.dv, self = this;
+        if (dv.emitQueued) return;
+        dv.emitQueued = true;
+        Promise.resolve().then(function () {
+            dv.emitQueued = false;
+            if (self.dv === dv && !self.dead) self._emitSources(true);
+        });
+    };
+
+    // Follower playlist for the leader's window: OEM clips only, gaps left open.
+    Player.prototype._dvOpenF = function () {
+        const dv = this.dv, win = this.win;
+        if (!win || !this.engineKind) return;
+        const key = win.from + '-' + win.to;
+        if (dv.fFailed && dv.failWin !== key) this._dvClearFail();
+        if (dv.fFailed || dv.fKey === key) return;
+        this._dvCloseF();
+        dv.fKey = key;
+        if (dv.noOemWin === key) { dv.tb = buildTable([], 0); return; }
+        dv.netTries = 0;
+        dv.mediaTries = 0;
+        const fg = ++dv.fGen, self = this, f = dv.el;
+        const url = timelineUrl(win, null, 0) + '&family=oemDashcam';
+        const live = function () { return self.dv === dv && dv.fGen === fg && !self.dead; };
+        // status 404: no OEM footage in this window (not a failure); retryAfter: seconds from a 503.
+        const failed = function (status, retryAfter) {
+            if (!live()) return;
+            if (status === 404) {
+                self._dvCloseF();
+                dv.noOemWin = key;
+                dv.fKey = key;
+                dv.tb = buildTable([], 0);
+                self._dvEval();
+                return;
+            }
+            const ra = Number(retryAfter);
+            self._dvSoftFail(ra > 0 ? Math.min(ra, 30) * 1000 : 0);
+        };
+        if (this.engineKind === 'hls' && root.Hls) {
+            const H = root.Hls;
+            const cfg = this._hlsConfig();
+            cfg.maxBufferLength = 20;
+            cfg.maxMaxBufferLength = 30;
+            cfg.backBufferLength = 10;
+            let hls;
+            try { hls = new H(cfg); } catch (e) { this._dvSoftFail(0); return; }
+            dv.hls = hls;
+            const E = H.Events;
+            hls.on(E.LEVEL_LOADED, function (ev, d) {
+                if (!live() || dv.tb) return;
+                const details = d && d.details;
+                dv.tb = buildTable(self._hlsFrags(details), details ? details.startSN : 0);
+                dv.tbAt = perfNow();
+                self._dvEval();
+            });
+            hls.on(E.LEVEL_PTS_UPDATED, function () { if (live()) dv.tbDirty = true; });
+            hls.on(E.ERROR, function (ev, d) { if (live()) self._dvHlsError(d || {}, failed); });
+            hls.attachMedia(f);
+            hls.loadSource(absUrl(url));
+            return;
+        }
+        if (this.engineKind !== 'native') return;
+        const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        dv.fCtl = ctl;
+        fetch(url, { signal: ctl ? ctl.signal : undefined, cache: 'no-store', credentials: 'same-origin' })
+            .then(function (r) {
+                if (r.ok) return r.text();
+                const err = new Error('http ' + r.status);
+                err.status = r.status;
+                err.retryAfter = r.headers && r.headers.get ? r.headers.get('Retry-After') : null;
+                throw err;
+            })
+            .then(function (text) {
+                if (!live()) return;
+                dv.fCtl = null;
+                dv.tb = buildTable(parsePlaylist(text).frags, 0);
+                f.src = absUrl(url);
+                self._dvEval();
+            })
+            .catch(function (err) { if (!(err && err.name === 'AbortError')) failed(err && err.status, err && err.retryAfter); });
+    };
+
+    Player.prototype._dvHlsError = function (d, failed) {
+        const H = root.Hls, dv = this.dv;
+        if (!d.fatal || !H) return;
+        const T = H.ErrorTypes;
+        const code = d.response && isNum(d.response.code) ? d.response.code
+            : (d.networkDetails && isNum(d.networkDetails.status) ? d.networkDetails.status : 0);
+        if (!dv.tb) {
+            // The playlist itself (busy builder, offline, nothing in the window).
+            let ra = null;
+            try { ra = d.networkDetails && d.networkDetails.getResponseHeader ? d.networkDetails.getResponseHeader('Retry-After') : null; } catch (e) { ra = null; }
+            failed(code, ra);
+            return;
+        }
+        if (d.type === T.NETWORK_ERROR && dv.tb && dv.netTries < 2) {
+            const n = ++dv.netTries, fg = dv.fGen, self = this;
+            setTimeout(function () {
+                if (self.dv !== dv || dv.fGen !== fg || !dv.hls) return;
+                dv.fLoading = true;
+                try { dv.hls.startLoad(dv.el.currentTime); } catch (e) { failed(); }
+            }, 1000 * n);
+            return;
+        }
+        if (d.type === T.MEDIA_ERROR) {
+            if (dv.mediaTries < 1) {
+                dv.mediaTries++;
+                try { dv.hls.recoverMediaError(); return; } catch (e) { /* fall through */ }
+            }
+            // Still undecodable after recovery: that clip only.
+            this._dvBadClip(d.frag && d.frag.url, true);
+            failed(0, 2);
+            return;
+        }
+        // A fragment gone after the retries above is that clip, not the window (404 = playlist rule only).
+        if ((code === 404 || code === 410) && d.frag) {
+            this._dvBadClip(d.frag.url, true);
+            failed(0, 2);
+            return;
+        }
+        failed(0, null);
+    };
+
+    // Stop and release the follower decoder (removeAttribute('src') + load()).
+    Player.prototype._dvCloseF = function () {
+        const dv = this.dv;
+        if (!dv) return;
+        dv.fGen++;
+        if (dv.fCtl) { try { dv.fCtl.abort(); } catch (e) { /* done */ } }
+        dv.fCtl = null;
+        const h = dv.hls;
+        dv.hls = null;
+        dv.fLoading = false;
+        if (h) { try { h.destroy(); } catch (e) { /* torn down */ } }
+        // Engaged state drops with it; a composite on screen stays until the next decision replaces it.
+        this._dvDisengage(true);
+        dv.tb = null;
+        dv.tbDirty = false;
+        dv.fKey = null;
+        dv.fStart = null;
+        dv.seekPending = false;
+        dv.settle = 0;
+        dv.fMT = -1;
+        dv.fWaiting = false;
+        dv.playing = false;
+        const f = dv.el;
+        try { f.pause(); } catch (e) { /* detached */ }
+        if (f.getAttribute('src')) {
+            f.removeAttribute('src');
+            try { f.load(); } catch (e) { /* idle */ }
+        }
+    };
+
+    Player.prototype._dvRebuildF = function () {
+        const dv = this.dv, h = dv.hls;
+        const now = perfNow();
+        if (now - dv.tbAt < 250) return;
+        dv.tbDirty = false;
+        dv.tbAt = now;
+        const lvl = h && h.levels && h.levels[0];
+        if (!lvl || !lvl.details || !dv.tb) return;
+        const tb = buildTable(this._hlsFrags(lvl.details), lvl.details.startSN);
+        if (tb.n === dv.tb.n) dv.tb = tb;
+    };
+
+    Player.prototype._dvSeekF = function (t) {
+        const dv = this.dv, f = dv.el;
+        dv.seekPending = true;
+        dv.settle = 0;
+        dv.fMT = -1;
+        if (dv.hls && !dv.fLoading) {
+            dv.fLoading = true;
+            try { dv.hls.startLoad(t); } catch (e) { /* the error handler decides */ }
+        }
+        if (f.readyState >= 1) {
+            try { f.currentTime = t; } catch (e) { dv.fStart = t; }
+        } else {
+            dv.fStart = t;
+        }
+    };
+
+    Player.prototype._dvPauseF = function () {
+        const f = this.dv && this.dv.el;
+        if (f && !f.paused) { try { f.pause(); } catch (e) { /* detached */ } }
+    };
+
+    Player.prototype._dvPlayF = function () {
+        const dv = this.dv, f = dv && dv.el;
+        if (!f || !dv.engaged || !f.paused || f.ended || dv.playing) return;
+        let p;
+        try { p = f.play(); } catch (e) { p = null; }
+        if (!p || typeof p.then !== 'function') return;
+        const self = this, fg = dv.fGen;
+        dv.playing = true;
+        p.then(function () { dv.playing = false; dv.playFails = 0; }, function (err) {
+            dv.playing = false;
+            if (self.dv !== dv || dv.fGen !== fg || (err && err.name === 'AbortError')) return;
+            // Refused without a gesture: retry on the next one. Anything else: back off, then retry.
+            if (err && err.name === 'NotAllowedError') self._dvNeedGesture();
+            else if (++dv.playFails >= 3) { dv.playFails = 0; self._dvSoftFail(0); }
+        });
+    };
+
+    // Leader paused/seeked (exact frame) or playing (within one frame), then follows its play state.
+    Player.prototype._dvAlignF = function (play, exact) {
+        const dv = this.dv, v = this.video, f = dv.el;
+        if (!dv.tb || !this.tb || this.loadingSource) return;
+        const wL = mediaToWall(this.tb, this._mediaNow());
+        const tf = mediaInside(dv.tb, wL, dv.out);
+        if (tf < 0) { if (!inSeam(dv.tb, wL)) this._dvEval(); else if (play) this._dvPlayF(); return; }
+        const tol = play && !exact ? clamp(dv.frameDur, DV_TOL_MIN_S, DV_TOL_MAX_S) : 0.001;
+        if (dv.seekPending || Math.abs(f.currentTime - tf) > tol) this._dvSeekF(tf);
+        if (!play) return;
+        dv.nudge = false;
+        setRate(f, v.playbackRate || 1);
+        this._dvPlayF();
+    };
+
+    Player.prototype._dvFSettled = function () {
+        const dv = this.dv, f = dv.el;
+        if (f.seeking || f.readyState < 2) return;
+        if (dv.seekPending) {
+            dv.seekPending = false;
+            dv.settle = 2;
+            dv.fMT = -1;
+        }
+        if (dv.engaged && !dv.ready) {
+            dv.ready = true;
+            dv.readySeq = dv.comp.followerUploads;
+        }
+    };
+
+    Player.prototype._dvFollowerFrame = function (mt) {
+        const dv = this.dv;
+        if (isNum(mt)) {
+            const dt = dv.fMT >= 0 ? mt - dv.fMT : -1;
+            dv.fMT = mt;
+            if (dt > 0.001 && dt < 0.5) {
+                dv.ring[dv.ringI] = dt;
+                dv.ringI = (dv.ringI + 1) & 7;
+                if (dv.ringN < 8) dv.ringN++;
+                // Median of the last 8 frame steps (insertion sort into scratch, no allocation).
+                const n = dv.ringN, a = dv.scratch;
+                for (let i = 0; i < n; i++) {
+                    const x = dv.ring[i];
+                    let j = i - 1;
+                    while (j >= 0 && a[j] > x) { a[j + 1] = a[j]; j--; }
+                    a[j + 1] = x;
+                }
+                dv.frameDur = n & 1 ? a[n >> 1] : (a[(n >> 1) - 1] + a[n >> 1]) / 2;
+            }
+        }
+        if (dv.settle > 0 && !dv.seekPending && !dv.el.seeking) dv.settle--;
+        this._dvFSettled();
+    };
+
+    // One drift measurement per leader frame (or every 250 ms without frame callbacks).
+    Player.prototype._dvMeasure = function (mt) {
+        const dv = this.dv;
+        if (!dv || !dv.engaged || !dv.tb || !this.tb || this.loadingSource) return;
+        const v = this.video, f = dv.el;
+        if (v.paused || v.seeking || this.waiting || this.startMedia !== null) return;
+        if (dv.seekPending || dv.settle > 0 || f.seeking || f.ended || dv.fWaiting || f.readyState < 3) return;
+        if (dv.tbDirty) this._dvRebuildF();
+        const wL = mediaToWall(this.tb, mt);
+        const tf = mediaInside(dv.tb, wL, dv.out);
+        if (tf < 0) { if (!inSeam(dv.tb, wL)) this._dvEval(); return; }
+        if (f.paused) { this._dvPlayF(); return; }
+        const fa = dv.fMT >= 0 && typeof f.requestVideoFrameCallback === 'function' ? dv.fMT : f.currentTime;
+        const d = fa - tf, ad = Math.abs(d), rate = v.playbackRate || 1;
+        if (ad > DV_HARD_S) { this._dvHardSeek(tf, rate); return; }
+        dv.seeks = 0;
+        const tol = clamp(dv.frameDur, DV_TOL_MIN_S, DV_TOL_MAX_S);
+        // Nudge past one frame of drift, back to the exact rate once inside half a frame.
+        dv.nudge = dv.nudge ? ad >= tol / 2 : ad > tol;
+        setRate(f, dv.nudge ? rate * (1 - clamp(d / 2, -DV_NUDGE_MAX, DV_NUDGE_MAX)) : rate);
+    };
+
+    Player.prototype._dvHardSeek = function (tf, rate) {
+        const dv = this.dv, now = perfNow();
+        if (now - dv.seekAt < DV_SEEK_GAP_MS) return;
+        if (dv.seeks >= DV_SEEKS_MAX) {
+            // Cannot hold sync here: single source until the next user seek or clip boundary.
+            dv.unsynced = true;
+            dv.unsyncKey = this.curItem ? this.curItem.key : '';
+            this._dvEval();
+            return;
+        }
+        dv.seeks++;
+        dv.seekAt = now;
+        dv.nudge = false;
+        setRate(dv.el, rate);
+        this._dvSeekF(tf);
+    };
+
     BYD.tlplayer = {
         create: function (containerEl, opts) { return new Player(containerEl, opts); },
         _internals: {
@@ -2727,7 +3615,8 @@
             newQuietState: newQuietState, skipQuietStep: skipQuietStep, playbackWindow: playbackWindow, slideDir: slideDir,
             landing: landing, nextPlayableStart: nextPlayableStart, hasFootage: hasFootage, timelineUrl: timelineUrl,
             apiUrl: apiUrl, apiWindow: apiWindow, frameUrl: frameUrl, frameWidth: frameWidth, frameTarget: frameTarget,
-            Lru: Lru, initInfo: initInfo, sigOfTracks: sigOfTracks, Player: Player
+            Lru: Lru, initInfo: initInfo, sigOfTracks: sigOfTracks, gridGeometry: gridGeometry, mediaInside: mediaInside, inSeam: inSeam,
+            Player: Player
         }
     };
 })(typeof window !== 'undefined' ? window : globalThis);
