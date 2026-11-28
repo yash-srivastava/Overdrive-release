@@ -1381,9 +1381,8 @@ public class PanoramicCameraGpu {
     // Cached AI-lane readback pacing (parked-idle throttle). The AiLaneGl is
     // created/torn down lazily on the GL thread and is null while disarmed, so a
     // control-thread setter caches the value here and re-applies it at bring-up
-    // (ensureAiLaneStarted) — mirroring how sentry.setCameraTargetFps is
-    // re-asserted. Default 0 = disabled ⇒ AiLaneGl uses its compiled modulo=3,
-    // byte-identical to today.
+    // (ensureAiLaneStarted). Default 0 = disabled ⇒ AiLaneGl uses its
+    // compiled modulo=3, byte-identical to today.
     private volatile long aiReadbackMinIntervalMs = 0L;
 
     // Recorder draw stride. The render loop draws into the RECORDING encoder's
@@ -1635,7 +1634,6 @@ public class PanoramicCameraGpu {
         // loop for handler slots. With AiLaneGl, the crop runs inline on
         // its own GL context.
         if (sentry != null) {
-            sentry.setCameraTargetFps(targetFps);
             // Frozen-feed detector (parked): the HAL can keep queuing buffers
             // whose content never changes (camera/ISP rail down while the AVM
             // SoC re-emits its last frame — DI5 field log 2026-09-21). The
@@ -1919,10 +1917,6 @@ public class PanoramicCameraGpu {
             }
             @Override public Object cameraTextureLock() { return cameraTextureLock; }
         };
-
-        if (sentry != null) {
-            sentry.setCameraTargetFps(targetFps);
-        }
 
         // Initialize on GL thread.
         //
@@ -11656,10 +11650,6 @@ public class PanoramicCameraGpu {
         }
         this.targetFps = fps;
         logger.info("Target FPS set to: " + fps);
-        // Keep the AI-lane GL-hop budget in sync with the new rate.
-        if (sentry != null) {
-            sentry.setCameraTargetFps(fps);
-        }
         // Camera2: re-apply the AE range; renderLoop paces frames to targetFps.
         if (USE_CAMERA2_AVM_PATH) {
             Object source = cameraObj;
