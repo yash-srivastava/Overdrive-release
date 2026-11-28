@@ -96,6 +96,36 @@ public class TripExporterTest {
         }
     }
 
+    @Test
+    public void routeExportsTreatNonFiniteAltitudeAsUnknownWithoutDroppingPoints() throws Exception {
+        File file = journal("{\"la\":1,\"lo\":2,\"al\":\"Infinity\"}\n"
+                + "{\"la\":3,\"lo\":4,\"al\":\"-Infinity\"}\n"
+                + "{\"la\":5,\"lo\":6,\"al\":\"NaN\"}\n"
+                + "{\"la\":7,\"lo\":8,\"al\":0}\n"
+                + "{\"la\":9,\"lo\":10,\"al\":-12.5}\n"
+                + "{\"la\":11,\"lo\":12,\"al\":42.5}\n"
+                + "{\"la\":13,\"lo\":14}\n");
+        try {
+            TripRecord trip = new TripRecord();
+            String gpx = TripExporter.gpx(trip, file);
+            int start = gpx.indexOf("<trkseg>") + "<trkseg>\n".length();
+            assertEquals("  <trkpt lat=\"1.000000\" lon=\"2.000000\"><time>1970-01-01T00:00:00Z</time></trkpt>\n"
+                    + "  <trkpt lat=\"3.000000\" lon=\"4.000000\"><time>1970-01-01T00:00:00Z</time></trkpt>\n"
+                    + "  <trkpt lat=\"5.000000\" lon=\"6.000000\"><time>1970-01-01T00:00:00Z</time></trkpt>\n"
+                    + "  <trkpt lat=\"7.000000\" lon=\"8.000000\"><time>1970-01-01T00:00:00Z</time></trkpt>\n"
+                    + "  <trkpt lat=\"9.000000\" lon=\"10.000000\"><ele>-12.5</ele><time>1970-01-01T00:00:00Z</time></trkpt>\n"
+                    + "  <trkpt lat=\"11.000000\" lon=\"12.000000\"><ele>42.5</ele><time>1970-01-01T00:00:00Z</time></trkpt>\n"
+                    + "  <trkpt lat=\"13.000000\" lon=\"14.000000\"><time>1970-01-01T00:00:00Z</time></trkpt>\n ",
+                    gpx.substring(start, gpx.indexOf("</trkseg>")));
+            String kml = TripExporter.kml(trip, file);
+            assertTrue(kml.contains("<coordinates>2.000000,1.000000,0 4.000000,3.000000,0 "
+                    + "6.000000,5.000000,0 8.000000,7.000000,0 10.000000,9.000000,-12.5 "
+                    + "12.000000,11.000000,42.5 14.000000,13.000000,0</coordinates>"));
+        } finally {
+            file.delete();
+        }
+    }
+
     private static File journal(String lines) throws Exception {
         File file = File.createTempFile("trip-export", ".jsonl.gz");
         try (GZIPOutputStream out = new GZIPOutputStream(new FileOutputStream(file))) {

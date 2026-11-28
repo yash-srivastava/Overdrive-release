@@ -134,8 +134,8 @@ public final class TripExporter {
                 double lat = j.optDouble("la", Double.NaN), lon = j.optDouble("lo", Double.NaN);
                 if (!TelemetrySample.hasGpsFix(lat, lon)) continue;
                 double alt = j.has("al") ? j.optDouble("al", Double.NaN) : Double.NaN;
-                // The recorder writes 0.0 when the fix has no altitude; an exact 0 is "unknown", not sea level.
-                if (alt == 0.0) alt = Double.NaN;
+                // Zero is the recorder's unknown-altitude sentinel; non-finite values are also unknown.
+                if (alt == 0.0 || !Double.isFinite(alt)) alt = Double.NaN;
                 sink.point(j.optLong("t", 0), lat, lon, alt, j.has("s") ? j.optInt("s", -1) : -1);
                 n++;
             }
