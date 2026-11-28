@@ -984,6 +984,143 @@ static void gatherUV(const RemapSource& sr, int n, const int32_t* __restrict lu,
     }
 }
 
+// A separable remap uses the same horizontal coordinates on every row. Plan
+// eight gathers at a time, once per column segment rather than per scanline.
+struct FixedXBlock {
+    int start;
+    uint8_t left[8], right[8];
+    uint16_t fx[8];
+};
+
+static void planFixedX(const int32_t* u, int n, int off, int width, FixedXBlock* blocks) {
+    for (int i = 0; i + 8 <= n; i += 8) {
+        FixedXBlock& block = blocks[i / 8];
+        block.start = -1;
+        if (width < 16) continue;
+        int x[8], next[8], first = width - 16, last = 0;
+        for (int k = 0; k < 8; ++k) {
+            const int uf = clampFx(u[i + k] + off, (width - 1) * 256);
+            x[k] = uf >> 8;
+            next[k] = std::min(x[k] + 1, width - 1);
+            first = std::min(first, x[k]);
+            last = std::max(last, next[k]);
+            block.fx[k] = (uint16_t) (uf & 255);
+        }
+        if (last - first >= 16) continue;
+        block.start = first;
+        for (int k = 0; k < 8; ++k) {
+            block.left[k] = (uint8_t) (x[k] - first);
+            block.right[k] = (uint8_t) (next[k] - first);
+        }
+    }
+}
+
+#ifdef OD_REMAP_NEON
+static uint8x8_t blendFixed8(const FixedXBlock& block, uint8x16_t a, uint8x16_t b, int fy) {
+    const uint8x8_t left = vld1_u8(block.left), right = vld1_u8(block.right);
+    const uint16x8_t fx = vld1q_u16(block.fx);
+    const uint16x8_t ifx = vsubq_u16(vdupq_n_u16(256), fx);
+    const uint16x8_t top = vmlaq_u16(vmulq_u16(vmovl_u8(vqtbl1_u8(a, left)), ifx),
+                                    vmovl_u8(vqtbl1_u8(a, right)), fx);
+    if (fy == 0) return vrshrn_n_u16(top, 8);
+    const uint16x8_t bot = vmlaq_u16(vmulq_u16(vmovl_u8(vqtbl1_u8(b, left)), ifx),
+                                    vmovl_u8(vqtbl1_u8(b, right)), fx);
+    const uint16x8_t wy = vdupq_n_u16((uint16_t) fy), iy = vdupq_n_u16((uint16_t) (256 - fy));
+    const uint32x4_t lo = vmlal_u16(vmull_u16(vget_low_u16(top), vget_low_u16(iy)),
+                                   vget_low_u16(bot), vget_low_u16(wy));
+    const uint32x4_t hi = vmlal_high_u16(vmull_high_u16(top, iy), bot, wy);
+    return vmovn_u16(vcombine_u16(vrshrn_n_u32(lo, 16), vrshrn_n_u32(hi, 16)));
+}
+#endif
+
+static void gatherFixedPlane(const FixedSampleRow& row, int n, const int32_t* u, int off,
+                             const FixedXBlock* blocks, uint8_t* out) {
+    const int maxFx = (row.width - 1) * 256;
+    int i = 0;
+    for (; i + 8 <= n; i += 8) {
+        const FixedXBlock& block = blocks[i / 8];
+        if (block.start < 0) {
+            for (int k = 0; k < 8; ++k) out[i + k] = row.sample(clampFx(u[i + k] + off, maxFx));
+            continue;
+        }
+        const uint8_t* a = row.a + block.start;
+        const uint8_t* b = row.b + block.start;
+#ifdef OD_REMAP_NEON
+        const uint8x16_t av = vld1q_u8(a);
+        const int fy = row.a == row.b ? 0 : row.fy;
+        const uint8x16_t bv = fy == 0 ? av : vld1q_u8(b);
+        vst1_u8(out + i, blendFixed8(block, av, bv, fy));
+#else
+        for (int k = 0; k < 8; ++k) {
+            const int l = block.left[k], r = block.right[k];
+            out[i + k] = (uint8_t) lerp2(a[l], a[r], b[l], b[r], block.fx[k], row.fy);
+        }
+#endif
+    }
+    for (; i < n; ++i) out[i] = row.sample(clampFx(u[i] + off, maxFx));
+}
+
+static void gatherFixedY(const RemapSource& sr, int n, const int32_t* u, int vf, int off,
+                         const FixedXBlock* blocks, uint8_t* out) {
+    const FixedSampleRow row(sr.pl.y, sr.pl.rowY, sr.w, sr.h, 1, vf);
+    gatherFixedPlane(row, n, u, off, blocks, out);
+}
+
+static void gatherFixedUV(const RemapSource& sr, int n, const int32_t* u, int vf, int off,
+                          const FixedXBlock* blocks, uint8_t* ou, uint8_t* ov, int dPix) {
+    const Planes& s = sr.pl;
+    const int cw = sr.w / 2, ch = sr.h / 2;
+    if (s.pixUV == 1 && dPix == 1) {
+        gatherFixedPlane(FixedSampleRow(s.u, s.rowUV, cw, ch, 1, vf), n, u, off, blocks, ou);
+        gatherFixedPlane(FixedSampleRow(s.v, s.rowUV, cw, ch, 1, vf), n, u, off, blocks, ov);
+        return;
+    }
+    const Chroma sc = chromaOf(s.u, s.v, s.pixUV), dc = chromaOf(ou, ov, dPix);
+    if (sc == kStrided || (dc == kStrided && dPix != 1)) {
+        gatherUV<true>(sr, n, u, &vf, off, ou, ov, dPix);
+        return;
+    }
+    const FixedSampleRow ur(s.u, s.rowUV, cw, ch, s.pixUV, vf);
+    const FixedSampleRow vr(s.v, s.rowUV, cw, ch, s.pixUV, vf);
+    int i = 0;
+    for (; i + 8 <= n; i += 8) {
+        const FixedXBlock& block = blocks[i / 8];
+        if (block.start < 0) {
+            gatherUV<true>(sr, 8, u + i, &vf, off, ou + (size_t) i * dPix,
+                           ov + (size_t) i * dPix, dPix);
+            continue;
+        }
+        const size_t start = (size_t) block.start * 2;
+#ifdef OD_REMAP_NEON
+        const FixedSampleRow& base = sc == kNv12 ? ur : vr;
+        const uint8x16x2_t a = vld2q_u8(base.a + start);
+        const int fy = base.a == base.b ? 0 : base.fy;
+        const uint8x16x2_t b = fy == 0 ? a : vld2q_u8(base.b + start);
+        const int ui = sc == kNv12 ? 0 : 1;
+        const uint8x8_t ru = blendFixed8(block, a.val[ui], b.val[ui], fy);
+        const uint8x8_t rv = blendFixed8(block, a.val[1 - ui], b.val[1 - ui], fy);
+        if (dPix == 1) {
+            vst1_u8(ou + i, ru);
+            vst1_u8(ov + i, rv);
+        } else {
+            uint8x8x2_t pair;
+            pair.val[0] = dc == kNv12 ? ru : rv;
+            pair.val[1] = dc == kNv12 ? rv : ru;
+            vst2_u8((dc == kNv12 ? ou : ov) + (size_t) i * 2, pair);
+        }
+#else
+        for (int k = 0; k < 8; ++k) {
+            const size_t l = start + block.left[k] * 2, r = start + block.right[k] * 2;
+            const size_t dst = (size_t) (i + k) * dPix;
+            ou[dst] = (uint8_t) lerp2(ur.a[l], ur.a[r], ur.b[l], ur.b[r], block.fx[k], ur.fy);
+            ov[dst] = (uint8_t) lerp2(vr.a[l], vr.a[r], vr.b[l], vr.b[r], block.fx[k], vr.fy);
+        }
+#endif
+    }
+    if (i < n) gatherUV<true>(sr, n - i, u + i, &vf, off,
+                              ou + (size_t) i * dPix, ov + (size_t) i * dPix, dPix);
+}
+
 // Only bypass the general sampler when every horizontal coordinate is an
 // in-bounds integer texel in a contiguous run. Check once per column plan,
 // not once per output row; rounding and nonstandard offsets retain the fallback.
@@ -1164,6 +1301,7 @@ struct DashcamColumns {
     int32_t bottomY[kMaxRow], bottomC[kMaxRow / 2];
     bool topReady, bottomReady;
     int topStart[2], bottomStart[2][3];  // luma/chroma, then cell
+    FixedXBlock topBlocks[2][kMaxRow / 8], bottomBlocks[2][kMaxRow / 8];
 };
 
 static void dashcamColumns(const RemapSpec& p, const RemapSource* src,
@@ -1188,6 +1326,9 @@ static void dashcamColumns(const RemapSpec& p, const RemapSource* src,
         const int topOff = p.windshield ? 0 : offsetFx(p.off[0], sw);
         cols.topStart[plane] = cols.topReady
                 ? contiguousStart(top, n, topOff, topWidth) : -1;
+        if (cols.topReady && cols.topStart[plane] < 0) {
+            planFixedX(top, n, topOff, topWidth, cols.topBlocks[plane]);
+        }
         std::fill_n(cols.bottomStart[plane], 3, -1);
         if (!cols.bottomReady) continue;
         const int* bounds = div == 1 ? cb.luma : cb.chroma;
@@ -1198,6 +1339,10 @@ static void dashcamColumns(const RemapSpec& p, const RemapSource* src,
             identityX(b - a, tx0, dvx * 3.f, 0.25f * (float) sw, bottom + a);
             cols.bottomStart[plane][c] = contiguousStart(bottom + a, b - a,
                     offsetFx(p.off[3 - c], sw), sw);
+            if (cols.bottomStart[plane][c] < 0) {
+                planFixedX(bottom + a, b - a, offsetFx(p.off[3 - c], sw), sw,
+                           cols.bottomBlocks[plane] + a / 8);
+            }
         }
     }
 }
@@ -1502,8 +1647,8 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
             if (start >= 0) {
                 if (chroma) verticalUV(ws, start, n, lv[0], ou, ov, d.pixUV);
                 else verticalY(ws, start, n, lv[0], oy);
-            } else if (chroma) gatherUV<true>(ws, n, u, lv, 0, ou, ov, d.pixUV);
-            else gatherY<true>(ws, n, u, lv, 0, oy);
+            } else if (chroma) gatherFixedUV(ws, n, u, lv[0], 0, cols.topBlocks[div - 1], ou, ov, d.pixUV);
+            else gatherFixedY(ws, n, u, lv[0], 0, cols.topBlocks[div - 1], oy);
             return;
         }
         const int32_t* u = lu;
@@ -1525,8 +1670,8 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
             if (chroma) verticalUV(strip, start, n, lv[0], ou, ov, d.pixUV);
             else verticalY(strip, start, n, lv[0], oy);
         } else if (cols.topReady) {
-            if (chroma) gatherUV<true>(strip, n, u, lv, off, ou, ov, d.pixUV);
-            else gatherY<true>(strip, n, u, lv, off, oy);
+            if (chroma) gatherFixedUV(strip, n, u, lv[0], off, cols.topBlocks[div - 1], ou, ov, d.pixUV);
+            else gatherFixedY(strip, n, u, lv[0], off, cols.topBlocks[div - 1], oy);
         } else if (chroma) gatherUV(strip, n, u, v, off, ou, ov, d.pixUV);
         else gatherY(strip, n, u, v, off, oy);
         return;
@@ -1555,9 +1700,10 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
                     ou + (size_t) a * d.pixUV, ov + (size_t) a * d.pixUV, d.pixUV);
             else verticalY(strip, start, b - a, lv[0], oy + a);
         } else if (cols.bottomReady) {
-            if (chroma) gatherUV<true>(strip, b - a, u, lv, off,
+            const FixedXBlock* blocks = cols.bottomBlocks[div - 1] + a / 8;
+            if (chroma) gatherFixedUV(strip, b - a, u, lv[0], off, blocks,
                     ou + (size_t) a * d.pixUV, ov + (size_t) a * d.pixUV, d.pixUV);
-            else gatherY<true>(strip, b - a, u, lv, off, oy + a);
+            else gatherFixedY(strip, b - a, u, lv[0], off, blocks, oy + a);
         } else if (chroma) gatherUV(strip, b - a, u, v, off, ou + (size_t) a * d.pixUV, ov + (size_t) a * d.pixUV, d.pixUV);
         else gatherY(strip, b - a, u, v, off, oy + a);
     }
@@ -1768,7 +1914,8 @@ int remapGrid(const RemapSpec& p, const RemapSource& strip, const RemapSource* w
         job.rows = ch;
         job.per = (ch + bands - 1) / bands;  // chroma rows per band
         cellBounds(p.outW, &job.cb);
-        DashcamColumns columns;
+        // Worker bands borrow this bounded geometry scratch until Pool::run returns.
+        thread_local DashcamColumns columns;
         dashcamColumns(p, src, job.cb, columns);
         job.columns = &columns;
         cache.prepare(p, strip);
