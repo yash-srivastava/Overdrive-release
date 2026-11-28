@@ -5633,9 +5633,7 @@ public class SurveillanceEngineGpu {
                 // Slot empty or stale — fall back to mosaic for this tick.
                 qW = THUMBNAIL_WIDTH / 2;
                 qH = THUMBNAIL_HEIGHT / 2;
-                byte[] mosaicShared = cropFromMosaic(mosaicRgb, quadrant, qW, qH);
-                cropData = new byte[mosaicShared.length];
-                System.arraycopy(mosaicShared, 0, cropData, 0, mosaicShared.length);
+                cropData = MosaicRgbCrop.snapshot(mosaicRgb, quadrant, qW, qH);
                 // Mosaic crop: identity mapping, handled by the scaleX=1.0
                 // branch downstream. No foveated affine.
                 fovMapAx = 0f; fovMapBx = 0f; fovMapAy = 0f; fovMapBy = 0f;
@@ -5647,13 +5645,11 @@ public class SurveillanceEngineGpu {
             // a heartbeat run (stationary subject — mosaic detail suffices),
             // preferWideForClose (a NEAR subject whose full body must stay in
             // frame — see the wide-crop gate above), OR a light-change check
-            // (no motion centroid to aim at). Must copy: cropFromMosaic
-            // returns a thread-local shared buffer.
+            // (no motion centroid to aim at). Extract directly into an owned
+            // snapshot; the asynchronous AI task must not borrow scratch.
             qW = THUMBNAIL_WIDTH / 2;
             qH = THUMBNAIL_HEIGHT / 2;
-            byte[] mosaicShared = cropFromMosaic(mosaicRgb, quadrant, qW, qH);
-            cropData = new byte[mosaicShared.length];
-            System.arraycopy(mosaicShared, 0, cropData, 0, mosaicShared.length);
+            cropData = MosaicRgbCrop.snapshot(mosaicRgb, quadrant, qW, qH);
             // Mosaic crop: identity mapping downstream. No foveated affine.
             fovMapAx = 0f; fovMapBx = 0f; fovMapAy = 0f; fovMapBy = 0f;
             fovMapValid = false;
@@ -5740,20 +5736,18 @@ public class SurveillanceEngineGpu {
         // generation has advanced (i.e. stopRecording fired in the meantime).
         final long generationAtSchedule = recordingGeneration.get();
         
-        // Capture mosaic quadrant crop for the texture tracker (always 320×240).
-        // The tracker needs the mosaic-scale image regardless of whether YOLO used foveated.
-        final byte[] mosaicQuadCrop;
-        {
-            int mqW = THUMBNAIL_WIDTH / 2;
-            int mqH = THUMBNAIL_HEIGHT / 2;
-            byte[] tmp = cropFromMosaic(mosaicRgb, quadrant, mqW, mqH);
-            if (tmp != null) {
-                mosaicQuadCrop = new byte[tmp.length];
-                System.arraycopy(tmp, 0, mosaicQuadCrop, 0, tmp.length);
-            } else {
-                mosaicQuadCrop = null;
-            }
-        }
+        // A mosaic inference already owns the exact pixels the tracker needs.
+        // Detector, thumbnail and tracker consumers read this snapshot only.
+        // Foveated inference needs a separate mosaic snapshot only when its
+        // dispatch-time affine and age permit seeding the tracker.
+        final boolean fovSeedFresh = !usedFoveated
+                || (fovAgeAtDispatchNanos >= 0
+                    && fovAgeAtDispatchNanos <= FOVEATED_SEED_MAX_AGE_NANOS);
+        final byte[] mosaicQuadCrop = !usedFoveated ? cropData
+                : (fovMapValid && fovSeedFresh
+                    ? MosaicRgbCrop.snapshot(mosaicRgb, quadrant,
+                            THUMBNAIL_WIDTH / 2, THUMBNAIL_HEIGHT / 2)
+                    : null);
         
         // Stamp identifying THIS occupancy of the AI lane. If the watchdog ever
         // force-releases the lane while this task is still running (a genuinely
@@ -6748,9 +6742,6 @@ public class SurveillanceEngineGpu {
                         // measuring here (post-inference) over-counted by the
                         // full ~250-300ms inference and made the 250ms budget
                         // structurally unsatisfiable.
-                        final boolean fovSeedFresh = !usedFoveated
-                                || (fovAgeAtDispatchNanos >= 0
-                                    && fovAgeAtDispatchNanos <= FOVEATED_SEED_MAX_AGE_NANOS);
                         if (!trackableDetections.isEmpty() && mosaicQuadCrop != null
                                 && (!usedFoveated || fovMapValid)
                                 && fovSeedFresh
@@ -7105,9 +7096,6 @@ public class SurveillanceEngineGpu {
      * Legacy path used when foveated cropper is not available.
      */
     private byte[] cropFromMosaic(byte[] mosaicRgb, int quadrant, int qW, int qH) {
-        int startX = (quadrant % 2) * qW;
-        int startY = (quadrant / 2) * qH;
-
         int cropSize = qW * qH * BYTES_PER_PIXEL;
         byte[] aiBuffer = aiBufferTL.get();
         if (aiBuffer == null || aiBuffer.length != cropSize) {
@@ -7115,11 +7103,7 @@ public class SurveillanceEngineGpu {
             aiBufferTL.set(aiBuffer);
         }
 
-        for (int y = 0; y < qH; y++) {
-            int srcOffset = ((startY + y) * THUMBNAIL_WIDTH + startX) * BYTES_PER_PIXEL;
-            int dstOffset = y * qW * BYTES_PER_PIXEL;
-            System.arraycopy(mosaicRgb, srcOffset, aiBuffer, dstOffset, qW * BYTES_PER_PIXEL);
-        }
+        MosaicRgbCrop.copyInto(mosaicRgb, quadrant, qW, qH, aiBuffer);
         return aiBuffer;
     }
     
