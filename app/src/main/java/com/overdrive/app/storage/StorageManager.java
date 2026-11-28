@@ -6650,6 +6650,44 @@ public class StorageManager {
      * hand a fresh writer a stale removable-volume path during that window.
      * Normal configured-volume fallback semantics remain unchanged.
      */
+    /** The recordings folder on the volume holding {@code file} (SD card, USB or internal); null if unknown. */
+    public File recordingsDirOnVolumeOf(File file) {
+        StorageType type = externalVolumeOf(file);
+        if (type == StorageType.SD_CARD) return sdCardRecordingsDir;
+        if (type == StorageType.USB) return usbRecordingsDir;
+        return internalRecordingsDir;
+    }
+
+    /** Volume holding {@code file}. */
+    public StorageType volumeTypeOf(File file) {
+        StorageType type = externalVolumeOf(file);
+        return type != null ? type : StorageType.INTERNAL;
+    }
+
+    /**
+     * True when {@code dir} can take a new file now: reachable and writable, its volume not
+     * write-faulted, and, when it is the configured recordings volume, not in the unmount fallback.
+     */
+    public boolean isRecordingsDirReady(File dir) {
+        if (dir == null) return false;
+        StorageType type = volumeTypeOf(dir);
+        if (type != StorageType.INTERNAL && isWriteFaulted(type)) return false;
+        if (type == recordingsStorageType && volumeTypeOf(getLiveRecordingsDir()) != type) return false;
+        try {
+            return RemovableStorageFs.isDirectory(dir)
+                && RemovableStorageFs.statFsTotalBytes(dir.getAbsolutePath()) > 0
+                && RemovableStorageFs.canWrite(dir);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** True when the volume holding {@code file} is latched as refusing writes. */
+    public boolean isWriteFaultedVolumeOf(File file) {
+        StorageType type = externalVolumeOf(file);
+        return type != null && isWriteFaulted(type);
+    }
+
     public File getLiveRecordingsDirIfMounted() {
         File live = getLiveRecordingsDir();
         StorageType volume = externalVolumeOf(live);

@@ -732,6 +732,7 @@ public class OemDashcamPipeline {
      * resolver-driven recording passes false.
      */
     private boolean startRecordingInternal(long postRecordMs, boolean eventOwned) {
+        com.overdrive.app.surveillance.CameraLoadProbe.recordingStarting("recording");
         if (!running.get()) return false;
         if (!DRAW_PASSTHROUGH_IS_REAL) {
             logger.warn("startRecording refused: passthrough shader not yet plumbed (Phase-9)");

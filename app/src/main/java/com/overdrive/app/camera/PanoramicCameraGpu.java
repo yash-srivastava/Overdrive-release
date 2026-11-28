@@ -8171,6 +8171,7 @@ public class PanoramicCameraGpu {
                     localRecorder != null ? localRecorder.cpuPressureTotal() : 0L, aiLaneNeeded);
             }
             stageWindowFrames++;
+            com.overdrive.app.surveillance.CameraLoadProbe.noteStage(stageTotalNs);
             if (stageTotalNs > stageWorstTotalNs) {
                 stageWorstTotalNs   = stageTotalNs;
                 stageWorstAcquireNs = stageAcquireNs;

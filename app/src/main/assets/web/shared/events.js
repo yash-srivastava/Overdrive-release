@@ -2290,6 +2290,7 @@ BYD.events = {
         this.loadThumbnailsAsync();
         // SafeKeep backup badges (no-op when SafeKeep is off).
         if (window.SafeKeepBadges) window.SafeKeepBadges.decorate();
+        if (window.DashcamExport) window.DashcamExport.decorate();
     },
     
     // A rendered list owns its thumbnail requests, retry timers and blob URLs.

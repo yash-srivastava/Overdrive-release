@@ -123,6 +123,9 @@ public class RecordingsApiHandler {
      * @return true if handled, false if not a recordings endpoint
      */
     public static boolean handle(String method, String path, String body, OutputStream out) throws Exception {
+        if (path.startsWith(DashcamViewExportApi.PREFIX)) {
+            return DashcamViewExportApi.handle(method, path, body, out);
+        }
         // List recordings (with optional query params)
         if ((path.equals("/api/recordings") || path.startsWith("/api/recordings?")) && method.equals("GET")) {
             String query = path.contains("?") ? path.substring(path.indexOf('?') + 1) : "";
