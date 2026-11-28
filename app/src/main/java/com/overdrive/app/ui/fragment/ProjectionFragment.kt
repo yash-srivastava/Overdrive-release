@@ -41,6 +41,7 @@ import com.google.android.material.materialswitch.MaterialSwitch
 import com.overdrive.app.R
 import com.overdrive.app.launcher.dilink5.cluster.DiLink5ProjectionConfig.Transport.FACTORY_MINI
 import com.overdrive.app.launcher.dilink5.cluster.Sealion7HdmiProjection
+import com.overdrive.app.launcher.dilink5.cluster.Sealion7HostedDiagnostics
 import com.overdrive.app.ui.MainActivity
 import com.overdrive.app.ui.view.AaosMapAreaCheck
 import com.overdrive.app.ui.view.ClusterViewMirrorClient
@@ -1488,6 +1489,7 @@ class ProjectionFragment : Fragment() {
         // A cast can take a minute to verify on DI5; one request at a time.
         castInFlight = true
         updateButtons()
+        Sealion7HostedDiagnostics.clear()
         submitIo {
             val result = postCast(pkg)
             val status = if (result.success) fetchStatus() else null
@@ -1532,12 +1534,13 @@ class ProjectionFragment : Fragment() {
                             notifyToast(message, AppToast.Kind.ERROR)
                         }
                         else -> {
-                            notifyToast(
-                                result.error.ifEmpty {
-                                    getString(R.string.projection_cast_failed)
-                                },
-                                AppToast.Kind.ERROR
-                            )
+                            val error = result.error.ifEmpty {
+                                getString(R.string.projection_cast_failed)
+                            }
+                            // Release builds have no logs: show why the Sealion 7 window was refused.
+                            val detail = Sealion7HostedDiagnostics.recent()
+                            if (detail != null) appToast?.show("$error · $detail", AppToast.Kind.ERROR, 15_000L)
+                            else notifyToast(error, AppToast.Kind.ERROR)
                         }
                     }
                 }

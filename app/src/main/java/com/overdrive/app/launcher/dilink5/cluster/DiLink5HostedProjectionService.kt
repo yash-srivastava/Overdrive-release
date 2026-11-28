@@ -113,6 +113,11 @@ class DiLink5HostedProjectionService : Service() {
         if (!destroyed && overlays.isEmpty() && pendingCreates.isEmpty()) stopSelfResult(latestStartId)
     }
 
+    private fun warnSealion7(message: String) {
+        logger.warn(message)
+        Sealion7HostedDiagnostics.record(message)
+    }
+
     @Suppress("DEPRECATION")
     private fun probeDisplay(intent: Intent) {
         val displayId = intent.getIntExtra(
@@ -123,7 +128,7 @@ class DiLink5HostedProjectionService : Service() {
         val receiver = intent.getParcelableExtra<ResultReceiver>(
             DiLink5HostedProjectionBridge.EXTRA_RESULT_RECEIVER,
         ) ?: run {
-            if (sealion7Hdmi) logger.warn("Sealion 7 hosted probe display=$displayId missing result receiver")
+            if (sealion7Hdmi) warnSealion7("Sealion 7 hosted probe display=$displayId missing result receiver")
             return
         }
         val display = (getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)
@@ -134,7 +139,7 @@ class DiLink5HostedProjectionService : Service() {
                 @Suppress("DEPRECATION")
                 display.getRealMetrics(metrics)
             } catch (error: Throwable) {
-                if (sealion7Hdmi) logger.warn("Sealion 7 hosted probe display=$displayId metrics failed ${hostedProjectionFailure(error)}")
+                if (sealion7Hdmi) warnSealion7("Sealion 7 hosted probe display=$displayId metrics failed ${hostedProjectionFailure(error)}")
             }
         }
         val observedId = display?.displayId ?: -1
@@ -159,7 +164,7 @@ class DiLink5HostedProjectionService : Service() {
             val message = "Sealion 7 hosted probe display=$displayId observed=$observedId valid=$displayValid " +
                 "metrics=${metrics.widthPixels}x${metrics.heightPixels}@${metrics.densityDpi} " +
                 "visible=$visible mapArea=$aaosMapArea admitted=$admitted"
-            if (admitted) logger.info(message) else logger.warn(message)
+            if (admitted) logger.info(message) else warnSealion7(message)
         }
         receiver.send(if (admitted) 1 else 0, if (admitted) android.os.Bundle().apply {
             putInt(DiLink5HostedProjectionBridge.RESULT_DISPLAY_ID, displayId)
@@ -186,7 +191,7 @@ class DiLink5HostedProjectionService : Service() {
         val sealion7Hdmi = intent.getBooleanExtra(DiLink5HostedProjectionBridge.EXTRA_SEALION7_HDMI, false)
         if (generation <= 0 || physicalId <= 0 || bridge == null || width <= 0 || height <= 0 ||
             bufferWidth <= 0 || bufferHeight <= 0 || density <= 0) {
-            if (sealion7Hdmi) logger.warn("Sealion 7 hosted create rejected invalid request " +
+            if (sealion7Hdmi) warnSealion7("Sealion 7 hosted create rejected invalid request " +
                 "generation=$generation display=$physicalId hasBridge=${bridge != null} " +
                 "window=${width}x$height buffer=${bufferWidth}x$bufferHeight density=$density")
             return
@@ -201,7 +206,7 @@ class DiLink5HostedProjectionService : Service() {
             if (sealion7Hdmi) intent.getLongExtra(DiLink5HostedProjectionBridge.EXTRA_SEALION7_DEADLINE_MS, 0) else 0,
         )
         if (overlays.containsKey(generation) || pendingCreates.containsKey(generation)) {
-            request.diagnostic?.let { logger.warn("$it rejected duplicate generation") }
+            request.diagnostic?.let { warnSealion7("$it rejected duplicate generation") }
             return
         }
         if (sealion7Hdmi) startSealionCreate(request) else attachOverlay(request)
@@ -222,7 +227,7 @@ class DiLink5HostedProjectionService : Service() {
             else -> null
         }
         if (rejection != null) {
-            logger.warn("$diagnostic rejected: $rejection")
+            warnSealion7("$diagnostic rejected: $rejection")
             return
         }
 
@@ -253,7 +258,7 @@ class DiLink5HostedProjectionService : Service() {
                 "config check failed: ${hostedProjectionFailure(error)}"
             }
             if (configRejection != null && !Thread.currentThread().isInterrupted) {
-                logger.warn("$diagnostic config admission failed: $configRejection")
+                warnSealion7("$diagnostic config admission failed: $configRejection")
             }
             postPending(pending) { completeSealionAdmission(pending, configRejection == null) }
         }
@@ -312,7 +317,7 @@ class DiLink5HostedProjectionService : Service() {
     private fun rejectPendingCreate(pending: PendingCreate, reason: String) {
         if (!isCurrent(pending)) return
         val request = pending.request
-        logger.warn("${request.diagnostic} rejected: $reason")
+        warnSealion7("${request.diagnostic} rejected: $reason")
         retirePendingCreate(pending)
         if (overlays.containsKey(request.generation)) release(request.generation, request.bridge, true)
         stopIfIdle()
@@ -324,7 +329,7 @@ class DiLink5HostedProjectionService : Service() {
         val diagnostic = request.diagnostic
         val display = if (sealion7Hdmi) {
             if (!OverlayPermissionChecker.isGranted(this)) {
-                logger.warn("$diagnostic rejected overlay permission denied")
+                warnSealion7("$diagnostic rejected overlay permission denied")
                 return
             }
             Sealion7HdmiProjection.findPhysicalDisplay(this)?.takeIf { it.displayId == physicalId }
@@ -332,7 +337,7 @@ class DiLink5HostedProjectionService : Service() {
             (getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)?.getDisplay(physicalId)?.takeIf { it.isValid }
         }
         if (display == null) {
-            diagnostic?.let { logger.warn("$it rejected physical display unavailable or ineligible") }
+            diagnostic?.let { warnSealion7("$it rejected physical display unavailable or ineligible") }
             return
         }
         val area = if (aaosMapArea) {
@@ -348,7 +353,7 @@ class DiLink5HostedProjectionService : Service() {
         } else displayContext
         val windowManager = windowContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
             ?: run {
-                diagnostic?.let { logger.warn("$it rejected window manager unavailable") }
+                diagnostic?.let { warnSealion7("$it rejected window manager unavailable") }
                 return
             }
         val view = SurfaceView(windowContext)
@@ -369,7 +374,7 @@ class DiLink5HostedProjectionService : Service() {
                 val message = "$diagnostic layout matches=$matches actualDisplay=${currentDisplay?.displayId} " +
                     "displayMatches=$displayMatches bounds=${position[0]},${position[1]} ${view.width}x${view.height} " +
                     "expectedBounds=$left,$top ${width}x$height"
-                if (matches) logger.info(message) else logger.warn(message)
+                if (matches) logger.info(message) else warnSealion7(message)
             }
             return matches
         }
@@ -394,7 +399,7 @@ class DiLink5HostedProjectionService : Service() {
                             val frame = holder.surfaceFrame
                             val message = "$handoffDiagnostic surface valid=$surfaceValid " +
                                 "buffer=${frame.width()}x${frame.height()} expectedBuffer=${bufferWidth}x$bufferHeight"
-                            if (surfaceValid) logger.info(message) else logger.warn(message)
+                            if (surfaceValid) logger.info(message) else warnSealion7(message)
                         }
                         if (windowMatches && surfaceValid) publishSurface(holder, handoffDiagnostic)
                         else release(generation, bridge)
@@ -417,7 +422,7 @@ class DiLink5HostedProjectionService : Service() {
                     data.writeInt(1)
                     holder.surface.writeToParcel(data, 0)
                     if (!bridge.transact(IBinder.FIRST_CALL_TRANSACTION, data, reply, 0)) {
-                        handoffDiagnostic?.let { logger.warn("$it surface Binder transaction unhandled") }
+                        handoffDiagnostic?.let { warnSealion7("$it surface Binder transaction unhandled") }
                         release(generation, bridge)
                         return
                     }
@@ -426,7 +431,7 @@ class DiLink5HostedProjectionService : Service() {
                     val contentDisplayId = if (accepted) reply.readInt() else null
                     if (contentDisplayId == null || contentDisplayId <= 0) {
                         handoffDiagnostic?.let {
-                            logger.warn("$it surface Binder rejected accepted=$accepted contentDisplay=$contentDisplayId")
+                            warnSealion7("$it surface Binder rejected accepted=$accepted contentDisplay=$contentDisplayId")
                         }
                         release(generation, bridge)
                     } else {
@@ -434,7 +439,7 @@ class DiLink5HostedProjectionService : Service() {
                         handoffDiagnostic?.let { logger.info("$it surface Binder accepted contentDisplay=$contentDisplayId") }
                     }
                 } catch (error: Throwable) {
-                    handoffDiagnostic?.let { logger.warn("$it surface Binder handoff failed ${hostedProjectionFailure(error)}") }
+                    handoffDiagnostic?.let { warnSealion7("$it surface Binder handoff failed ${hostedProjectionFailure(error)}") }
                     release(generation, bridge)
                 } finally {
                     data.recycle()
@@ -444,6 +449,7 @@ class DiLink5HostedProjectionService : Service() {
 
             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
             override fun surfaceDestroyed(holder: SurfaceHolder) {
+                diagnostic?.let { Sealion7HostedDiagnostics.record("$it surface destroyed") }
                 release(generation, bridge)
             }
         }
@@ -494,7 +500,7 @@ class DiLink5HostedProjectionService : Service() {
         try {
             windowManager.addView(view, params)
         } catch (error: Throwable) {
-            diagnostic?.let { logger.warn("$it addView failed ${hostedProjectionFailure(error)}") }
+            diagnostic?.let { warnSealion7("$it addView failed ${hostedProjectionFailure(error)}") }
             release(generation, bridge)
         }
     }
@@ -505,7 +511,7 @@ class DiLink5HostedProjectionService : Service() {
         val admitted = overlayGranted && eligibleId == displayId
         val message = "$diagnostic overlayGranted=$overlayGranted " +
             "eligibleDisplay=${eligibleId ?: if (overlayGranted) "unavailable" else "unchecked"} admitted=$admitted"
-        if (admitted) logger.info(message) else logger.warn(message)
+        if (admitted) logger.info(message) else warnSealion7(message)
         return admitted
     }
 
@@ -600,4 +606,28 @@ internal class SealionCreateFence<Owner : Any>(private val requestWindowMs: Long
     private fun discardExpired(nowMs: Long) {
         retired.entries.removeAll { it.value <= nowMs }
     }
+}
+
+/**
+ * First Sealion 7 hosted-window rejection of the current attempt in this process. Release
+ * builds strip logs, so the Projection screen shows it next to a failed cast.
+ */
+internal object Sealion7HostedDiagnostics {
+    private const val WINDOW_MS = 120_000L
+    @Volatile private var note: String? = null
+    @Volatile private var atMs = 0L
+
+    fun record(message: String) {
+        val now = SystemClock.elapsedRealtime()
+        if (note == null || now - atMs > WINDOW_MS) {
+            note = message
+            atMs = now
+        }
+    }
+
+    fun clear() {
+        note = null
+    }
+
+    fun recent(): String? = note?.takeIf { SystemClock.elapsedRealtime() - atMs in 0..WINDOW_MS }
 }
