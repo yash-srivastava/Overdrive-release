@@ -8,10 +8,6 @@ import com.overdrive.app.logging.DaemonLogger;
 
 import org.json.JSONObject;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
-
 /**
  * Singleton coordinator for BYD vehicle data.
  * 
@@ -20,8 +16,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * so existing consumers (HttpServer, SurveillanceIpcServer, TripDetector, etc.)
  * don't need changes.
  * 
- * The BatteryPowerMonitor is kept for AccSentryDaemon's voltage-based MCU control
- * (it needs listener callbacks for real-time voltage changes).
+ * BatteryPowerMonitor supplies the 12V fallback and forwards voltage readings
+ * directly to BatteryVoltageMonitorV2.
  */
 public class VehicleDataMonitor {
     
@@ -31,10 +27,8 @@ public class VehicleDataMonitor {
     private static VehicleDataMonitor instance;
     private static final Object lock = new Object();
     
-    // Only BatteryPowerMonitor kept — AccSentryDaemon needs its listener for voltage-based MCU control
     private final BatteryPowerMonitor batteryPowerMonitor;
     
-    private final CopyOnWriteArrayList<VehicleDataListener> listeners = new CopyOnWriteArrayList<>();
     private boolean isRunning = false;
 
     // Throttle for the charging-power resolution diagnostic (see getChargingState).
@@ -74,7 +68,7 @@ public class VehicleDataMonitor {
     public void init(Context context) {
         logger.info("Initializing VehicleDataMonitor (BydDataCollector mode)");
         
-        // Only init battery power monitor (for AccSentryDaemon voltage listener)
+        // Only the battery power monitor needs separate initialization.
         try {
             batteryPowerMonitor.init(context);
         } catch (Exception e) {
@@ -1269,23 +1263,6 @@ public class VehicleDataMonitor {
         return vd != null ? vd.totalElecCon : Double.NaN;
     }
 
-    /**
-     * The vehicle's own lifetime average petrol consumption in L/100km, from the
-     * BYD statistic HAL ({@code getTotalFuelConPHMValue}).
-     *
-     * <p>Preferred over deriving L/100km ourselves when showing a lifetime figure:
-     * it is the same number the instrument cluster shows, so the two can't
-     * disagree. Per-trip consumption is still computed from the litres delta over
-     * the trip's distance — this accumulator is lifetime-wide and can't answer
-     * "what did THIS drive use".
-     *
-     * @return L/100km, or {@code NaN} when unreported (BEV, or trim without it)
-     */
-    public double getAvgFuelConPer100Km() {
-        BydVehicleData vd = getVd();
-        return vd != null ? vd.avgFuelConPer100Km : Double.NaN;
-    }
-    
     public BatteryThermalData getBatteryThermal() {
         BydVehicleData vd = getVd();
         if (vd != null) {
@@ -1442,54 +1419,5 @@ public class VehicleDataMonitor {
         }
         
         return json;
-    }
-    
-    public Map<String, Boolean> getAvailability() {
-        Map<String, Boolean> availability = new HashMap<>();
-        BydDataCollector c = BydDataCollector.getInstance();
-        boolean ready = c.isInitialized();
-        availability.put("batteryVoltage", ready);
-        availability.put("batteryPower", ready || batteryPowerMonitor.isAvailable());
-        availability.put("batterySoc", ready);
-        availability.put("chargingState", ready);
-        availability.put("drivingRange", ready);
-        availability.put("batteryThermal", ready);
-        return availability;
-    }
-    
-    // ==================== MONITOR ACCESS ====================
-
-    public BatteryPowerMonitor getBatteryPowerMonitor() { return batteryPowerMonitor; }
-    
-    // ==================== LISTENER MANAGEMENT ====================
-    
-    public void addListener(VehicleDataListener listener) {
-        if (listener != null && !listeners.contains(listener)) {
-            listeners.add(listener);
-        }
-    }
-    
-    public void removeListener(VehicleDataListener listener) {
-        if (listener != null) listeners.remove(listener);
-    }
-    
-    public void notifyBatteryVoltageChanged(BatteryVoltageData data) {
-        for (VehicleDataListener l : listeners) { try { l.onBatteryVoltageChanged(data); } catch (Exception ignored) {} }
-    }
-    
-    public void notifyBatteryPowerChanged(BatteryPowerData data) {
-        for (VehicleDataListener l : listeners) { try { l.onBatteryPowerChanged(data); } catch (Exception ignored) {} }
-    }
-    
-    public void notifyChargingStateChanged(ChargingStateData data) {
-        for (VehicleDataListener l : listeners) { try { l.onChargingStateChanged(data); } catch (Exception ignored) {} }
-    }
-    
-    public void notifyChargingPowerChanged(double powerKW) {
-        for (VehicleDataListener l : listeners) { try { l.onChargingPowerChanged(powerKW); } catch (Exception ignored) {} }
-    }
-    
-    public void notifyDataUnavailable(String monitorName, String reason) {
-        for (VehicleDataListener l : listeners) { try { l.onDataUnavailable(monitorName, reason); } catch (Exception ignored) {} }
     }
 }
