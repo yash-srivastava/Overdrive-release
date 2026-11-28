@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Projection picker tile (idle grid), on the shared Revamp tile. Tap casts the app; long-press
+  opens its window/tools menu. ProjectionAppTileAdapter outlines the app that is on the cluster.
+-->
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/projectionTile"
+    style="@style/Widget.Overdrive.Revamp.Tile"
+    android:layout_width="match_parent"
+    android:layout_height="112dp"
+    android:layout_margin="@dimen/od_space_4"
+    android:longClickable="true">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:paddingHorizontal="@dimen/od_space_8">
+
+            <ImageView
+                android:id="@+id/projectionTileIcon"
+                android:layout_width="@dimen/od_icon_tile"
+                android:layout_height="@dimen/od_icon_tile"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter" />
+
+            <TextView
+                android:id="@+id/projectionTileLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/od_space_8"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle" />
+
+            <TextView
+                android:id="@+id/projectionTileLive"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/od_space_2"
+                android:text="@string/projection_now_on_cluster"
+                android:textAppearance="@style/TextAppearance.Overdrive.Overline"
+                android:textColor="?attr/colorPrimary"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <ImageView
+            android:id="@+id/projectionTileBadge"
+            android:layout_width="@dimen/od_icon_md"
+            android:layout_height="@dimen/od_icon_md"
+            android:layout_gravity="top|end"
+            android:layout_margin="@dimen/od_space_8"
+            android:background="@drawable/projection_cast_badge"
+            android:importantForAccessibility="no"
+            android:padding="@dimen/od_space_4"
+            android:src="@drawable/ic_projection"
+            app:tint="?attr/colorOnSurfaceVariant" />
+    </FrameLayout>
+</com.google.android.material.card.MaterialCardView>

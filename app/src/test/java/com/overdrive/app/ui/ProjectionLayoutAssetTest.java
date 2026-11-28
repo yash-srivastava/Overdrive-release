@@ -16,13 +16,22 @@ public class ProjectionLayoutAssetTest {
     private static final String PORTRAIT = "app/src/main/res/layout/fragment_projection.xml";
     private static final String LAND = "app/src/main/res/layout-land/fragment_projection.xml";
 
+    private static final String FRAGMENT =
+            "app/src/main/java/com/overdrive/app/ui/fragment/ProjectionFragment.kt";
+    private static final String TILES =
+            "app/src/main/java/com/overdrive/app/ui/view/ProjectionAppTiles.kt";
+    private static final String ACTIONS = "app/src/main/res/layout/dialog_projection_app_actions.xml";
+
     private static final String[] WIRED_IDS = {
-            "projectionAppSpinner", "projectionCastButton", "projectionStopButton",
+            "projectionPickerHero", "projectionAppPicker", "projectionFavoriteGrid",
+            "projectionAppGrid", "projectionAppStrip", "projectionNowPlaying",
+            "projectionClusterKeys", "projectionKeyBack", "projectionKeyHome",
+            "projectionKeyVolumeDown", "projectionKeyVolumeUp",
+            "projectionTransportSettings", "projectionStopButton",
             "projectionStatus", "projectionStatusDot", "projectionStage", "projectionTexture",
             "projectionBounds", "projectionProgress", "projectionScaleGroup", "projectionScaleFit",
-            "projectionScaleFill", "projectionScaleZoom", "projectionPresetGroup",
-            "projectionPresetFull", "projectionPresetLeft", "projectionPresetRight",
-            "projectionPresetCenter", "projectionAdjustButton", "projectionAspectLockSwitch",
+            "projectionScaleFill", "projectionScaleZoom",
+            "projectionAdjustButton", "projectionAspectLockSwitch",
             "projectionAutoStartSwitch", "projectionTransportGroup", "projectionTransportAuto",
             "projectionTransportLegacy", "projectionTransportDilink5",
             "projectionDiLink5Controls", "projectionPathGroup", "projectionPathDescription",
@@ -30,9 +39,7 @@ public class ProjectionLayoutAssetTest {
             "projectionStandardSettings", "projectionEditableWindowCard",
             "projectionTransportStatus", "projectionFullscreenButton", "projectionScroll",
             "projectionContent", "projectionMirrorCard", "projectionDock", "projectionSettings",
-            "projectionHud", "projectionEmptyState", "projectionClusterKeys",
-            "projectionKeyBack", "projectionKeyHome", "projectionKeyVolumeDown",
-            "projectionKeyVolumeUp",
+            "projectionHud", "projectionEmptyState",
     };
 
     /** ProjectionFragment does not branch on orientation, so both files must carry every ID. */
@@ -77,14 +84,75 @@ public class ProjectionLayoutAssetTest {
         }
     }
 
-    /** The live mirror leads the page with its status pill over it; the cast controls follow. */
+    /** The live mirror sits over its status pill; the dock with Stop follows it. */
     @Test
-    public void portraitPutsTheStageAheadOfTheCastControls() throws IOException {
-        String xml = readRepositoryFile(PORTRAIT);
-        int stage = xml.indexOf("@+id/projectionStage\"");
-        int dot = xml.indexOf("@+id/projectionStatusDot");
-        int cast = xml.indexOf("@+id/projectionCastButton");
-        assertTrue(stage >= 0 && dot > stage && cast > dot);
+    public void stageLeadsTheLiveDock() throws IOException {
+        for (String path : new String[] {PORTRAIT, LAND}) {
+            String xml = readRepositoryFile(path);
+            int stage = xml.indexOf("@+id/projectionStage\"");
+            int dot = xml.indexOf("@+id/projectionStatusDot");
+            int stop = xml.indexOf("@+id/projectionStopButton");
+            assertTrue(path, stage >= 0 && dot > stage && stop > dot);
+        }
+    }
+
+    /**
+     * Idle, the app tiles lead the page; the mirror and its dock start hidden and only show once
+     * an app is projected (renderLiveState swaps them).
+     */
+    @Test
+    public void pickerLeadsWhileIdleAndTheMirrorWaitsForACast() throws IOException {
+        for (String path : new String[] {PORTRAIT, LAND}) {
+            String xml = readRepositoryFile(path);
+            int hero = xml.indexOf("@+id/projectionPickerHero");
+            int mirror = xml.indexOf("@+id/projectionMirrorCard");
+            assertTrue(path, hero >= 0 && mirror > hero);
+            assertTrue(path, openingTag(xml, "projectionMirrorCard").contains("android:visibility=\"gone\""));
+            assertTrue(path, openingTag(xml, "projectionDock").contains("android:visibility=\"gone\""));
+            assertFalse(path, xml.contains("<Spinner"));
+        }
+        String fragment = readRepositoryFile(FRAGMENT);
+        int render = fragment.indexOf("private fun renderLiveState(");
+        assertTrue(render >= 0);
+        assertTrue(fragment.indexOf("setVisible(stageCard, live)", render) > render);
+        assertTrue(fragment.indexOf("setVisible(appPicker, !live)", render) > render);
+    }
+
+    /** Tap casts, long-press opens the app's own menu; both gestures are named for TalkBack. */
+    @Test
+    public void tilesCastOnTapAndOpenTheAppMenuOnLongPress() throws IOException {
+        String tiles = readRepositoryFile(TILES);
+        assertTrue(tiles.contains("view.setOnClickListener { onTap(item.pkg) }"));
+        assertTrue(tiles.contains("view.setOnLongClickListener { onLongPress(item.pkg); true }"));
+        assertTrue(tiles.contains("ACTION_LONG_CLICK"));
+
+        String fragment = readRepositoryFile(FRAGMENT);
+        assertTrue(fragment.contains("ProjectionAppTileAdapter(false, ::onAppTapped, ::showAppActions)"));
+        assertTrue(fragment.contains("ProjectionAppTileAdapter(true, ::onAppTapped, ::showAppActions)"));
+        assertTrue(fragment.contains("ProjectionAppTools.open(this) { pkg }"));
+
+        String actions = readRepositoryFile(ACTIONS);
+        for (String id : new String[] {"projectionActionsPresets", "projectionActionsPresetFull",
+                "projectionActionsPresetLeft", "projectionActionsPresetRight",
+                "projectionActionsPresetCenter", "projectionActionsResize", "projectionActionsTools",
+                "projectionActionsFavorite", "projectionActionsPrimary"}) {
+            assertTrue(id, actions.contains("@+id/" + id));
+        }
+    }
+
+    /** Back, Home and Volume are dock buttons now, not entries of a ⋮ dialog. */
+    @Test
+    public void clusterKeysAreVisibleDockButtons() throws IOException {
+        for (String path : new String[] {PORTRAIT, LAND}) {
+            String xml = readRepositoryFile(path);
+            int dock = xml.indexOf("@+id/projectionDock");
+            int keys = xml.indexOf("@+id/projectionClusterKeys");
+            int panel = xml.indexOf("@+id/projectionSettings\"");
+            assertTrue(path, dock >= 0 && keys > dock && panel > keys);
+        }
+        String fragment = readRepositoryFile(FRAGMENT);
+        assertTrue(fragment.contains("R.id.projectionKeyBack to KeyEvent.KEYCODE_BACK"));
+        assertFalse(fragment.contains(".setItems(labels)"));
     }
 
     /**
@@ -121,23 +189,17 @@ public class ProjectionLayoutAssetTest {
         }
     }
 
-    /**
-     * Portrait keeps Resize under the presets it shares; landscape docks it beside Cast,
-     * where the stage it edits stays on screen above the settings.
-     */
+    /** Resize lives in the dock under the stage it edits, in both orientations. */
     @Test
     public void resizeSitsWhereTheStageStaysInView() throws IOException {
-        String portrait = readRepositoryFile(PORTRAIT);
-        int presets = portrait.indexOf("@+id/projectionPresetGroup");
-        int presetsEnd = portrait.indexOf(
-                "</com.google.android.material.button.MaterialButtonToggleGroup>", presets);
-        assertTrue(presets >= 0 && portrait.indexOf("@+id/projectionAdjustButton") > presetsEnd);
-
-        String land = readRepositoryFile(LAND);
-        int cast = land.indexOf("@+id/projectionCastButton");
-        int adjust = land.indexOf("@+id/projectionAdjustButton");
-        int settings = land.indexOf("@+id/projectionSettings");
-        assertTrue(cast >= 0 && adjust > cast && settings > adjust);
+        for (String path : new String[] {PORTRAIT, LAND}) {
+            String xml = readRepositoryFile(path);
+            int stage = xml.indexOf("@+id/projectionStage\"");
+            int dock = xml.indexOf("@+id/projectionDock");
+            int adjust = xml.indexOf("@+id/projectionAdjustButton");
+            int settings = xml.indexOf("@+id/projectionSettings\"");
+            assertTrue(path, stage >= 0 && dock > stage && adjust > dock && settings > adjust);
+        }
     }
 
     @Test
@@ -163,22 +225,27 @@ public class ProjectionLayoutAssetTest {
         }
     }
 
+    /** Tiles use the themed surfaces and stay at least a touch target in size. */
     @Test
-    public void spinnerUsesTheThemedItemInsteadOfThePlatformOne() throws IOException {
-        String fragment = readRepositoryFile(
-                "app/src/main/java/com/overdrive/app/ui/fragment/ProjectionFragment.kt");
-        assertTrue(fragment.contains("R.layout.item_projection_spinner"));
-        assertFalse(fragment.contains("android.R.layout.simple_spinner_item"));
+    public void tilesUseTheThemedItems() throws IOException {
+        String tiles = readRepositoryFile(TILES);
+        assertTrue(tiles.contains("R.layout.item_projection_app_tile"));
+        assertTrue(tiles.contains("R.layout.item_projection_app_chip"));
+        assertTrue(tiles.contains("colorSecondaryContainer"));
 
-        String item = readRepositoryFile("app/src/main/res/layout/item_projection_spinner.xml");
-        assertTrue(item.contains("android:textColor=\"?attr/colorOnSurface\""));
-        assertTrue(item.contains("android:minHeight=\"@dimen/dashboard_modern_touch_target\""));
+        String tile = readRepositoryFile("app/src/main/res/layout/item_projection_app_tile.xml");
+        assertTrue(tile.contains("style=\"@style/Widget.Overdrive.Revamp.Tile\""));
+        assertTrue(tile.contains("@style/TextAppearance.Overdrive.Settings.RowTitle"));
+        assertTrue(tile.contains("android:layout_height=\"112dp\""));
+        String chip = readRepositoryFile("app/src/main/res/layout/item_projection_app_chip.xml");
+        assertTrue(chip.contains("style=\"@style/Widget.Overdrive.Revamp.Tile\""));
+        assertTrue(chip.contains("android:layout_width=\"@dimen/od_touch_primary\""));
+        assertTrue(chip.contains("android:layout_height=\"@dimen/od_touch_primary\""));
     }
 
     @Test
     public void statusDotFollowsTheMirrorState() throws IOException {
-        String fragment = readRepositoryFile(
-                "app/src/main/java/com/overdrive/app/ui/fragment/ProjectionFragment.kt");
+        String fragment = readRepositoryFile(FRAGMENT);
         assertTrue(fragment.contains("statusDot = view.findViewById(R.id.projectionStatusDot)"));
         assertTrue(fragment.contains("statusDot = null"));
         assertTrue(fragment.contains("setStatusDot(R.drawable.status_dot_online)"));
@@ -199,16 +266,16 @@ public class ProjectionLayoutAssetTest {
     public void stageFillsTheCardOnEverySide() throws IOException {
         for (String path : new String[] {PORTRAIT, LAND}) {
             String xml = readRepositoryFile(path);
-            int card = xml.indexOf("com.google.android.material.card.MaterialCardView");
             int stage = xml.indexOf("@+id/projectionStage");
+            // The card wrapping the stage (the idle picker card comes first on the page).
+            int card = xml.lastIndexOf("com.google.android.material.card.MaterialCardView", stage);
             assertTrue(path, card >= 0 && stage > card);
             String stageCard = xml.substring(card, stage);
             assertFalse(path, stageCard.contains("android:padding="));
             assertTrue(path, stageCard.contains("app:contentPadding=\"0dp\""));
             assertTrue(path, stageCard.contains("app:cardBackgroundColor=\"@android:color/black\""));
         }
-        String fragment = readRepositoryFile(
-                "app/src/main/java/com/overdrive/app/ui/fragment/ProjectionFragment.kt");
+        String fragment = readRepositoryFile(FRAGMENT);
         assertTrue(fragment.contains("clipMirrorToCard()"));
         assertTrue(fragment.contains("clipToOutline = true"));
     }
@@ -220,8 +287,7 @@ public class ProjectionLayoutAssetTest {
             String xml = readRepositoryFile(path);
             assertTrue(path, xml.contains("layout=\"@layout/app_toast\""));
         }
-        String fragment = readRepositoryFile(
-                "app/src/main/java/com/overdrive/app/ui/fragment/ProjectionFragment.kt");
+        String fragment = readRepositoryFile(FRAGMENT);
         assertTrue(fragment.contains("appToast = AppToast(view)"));
         assertTrue(fragment.contains("result.error.ifEmpty"));
         assertTrue(fragment.contains("getString(R.string.projection_cast_failed)"));
@@ -245,42 +311,106 @@ public class ProjectionLayoutAssetTest {
         assertFalse(helper.contains("text.text = message"));
     }
 
-    /** Landscape stacks the full-width stage over the dock; the settings cards share a row. */
+    /** Landscape stacks the full-width stage over the dock and its app strip; settings follow. */
     @Test
     public void landscapeStacksTheStageOverTheDock() throws IOException {
         String land = readRepositoryFile(LAND);
         int stage = land.indexOf("@+id/projectionStage\"");
-        int spinner = land.indexOf("@+id/projectionAppSpinner");
-        int settings = land.indexOf("@+id/projectionSettings");
-        assertTrue(stage >= 0 && spinner > stage && settings > spinner);
-        int settingsEnd = land.indexOf(">", settings);
-        assertTrue(land.substring(settings, settingsEnd).contains("android:orientation=\"horizontal\""));
+        int strip = land.indexOf("@+id/projectionAppStrip");
+        int settings = land.indexOf("@+id/projectionSettings\"");
+        assertTrue(stage >= 0 && strip > stage && settings > strip);
     }
 
-    /** Back, Home and Volume are 56dp dock buttons under the mirror, not a ⋮ dialog. */
+    /** Stop pressed (or the cast ending) in full screen must not strand the user there. */
     @Test
-    public void clusterKeysAreVisibleDockButtons() throws IOException {
+    public void fullScreenEndsWhenNothingIsLive() throws IOException {
+        String fragment = readRepositoryFile(FRAGMENT);
+        int render = fragment.indexOf("private fun renderLiveState(");
+        assertTrue(render >= 0);
+        assertTrue(fragment.indexOf("if (!live && theater) setTheater(false)", render) > render);
+    }
+
+    /** On DiLink 5 a switch restarts the cast: the strip sits behind a divider and its own label. */
+    @Test
+    public void appStripStaysApartFromTheKeyRow() throws IOException {
         for (String path : new String[] {PORTRAIT, LAND}) {
             String xml = readRepositoryFile(path);
-            int stage = xml.indexOf("@+id/projectionStage\"");
-            int dock = xml.indexOf("@+id/projectionDock");
             int keys = xml.indexOf("@+id/projectionClusterKeys");
-            int settings = xml.indexOf("@+id/projectionSettings\"");
-            assertTrue(path, stage >= 0 && dock > stage && keys > dock && settings > keys);
-            for (String id : new String[] {"projectionKeyBack", "projectionKeyHome",
-                    "projectionKeyVolumeDown", "projectionKeyVolumeUp"}) {
-                int at = xml.indexOf("@+id/" + id + "\"");
-                String tag = xml.substring(xml.lastIndexOf("<", at), xml.indexOf(">", at));
-                assertTrue(path + " " + id,
-                        tag.contains("android:layout_height=\"@dimen/od_touch_standard\""));
+            int label = xml.indexOf("@+id/projectionAppStripLabel");
+            int strip = xml.indexOf("@+id/projectionAppStrip\"");
+            assertTrue(path, keys >= 0 && label > keys && strip > label);
+            String between = xml.substring(keys, label);
+            assertTrue(path, between.contains("android:background=\"?attr/colorOutlineVariant\""));
+            assertTrue(path, xml.contains("@string/projection_switch_app"));
+        }
+    }
+
+    /** A preset for the app the resize frame belongs to goes through the frame's commit path. */
+    @Test
+    public void presetForTheFramesAppGoesThroughTheFrame() throws IOException {
+        String fragment = readRepositoryFile(FRAGMENT);
+        int apply = fragment.indexOf("private fun applyPresetFor(");
+        assertTrue(apply >= 0);
+        int frame = fragment.indexOf("(!casting && boxPackage == pkg)", apply);
+        int prefs = fragment.indexOf("persistWindowPrefsOnly(pkg", apply);
+        assertTrue(frame > apply && prefs > frame);
+    }
+
+    /** Dock buttons, Stop included, use the 56dp standard touch target and the shared icons. */
+    @Test
+    public void dockUsesTheSharedTouchTargetAndIcons() throws IOException {
+        for (String path : new String[] {PORTRAIT, LAND}) {
+            String xml = readRepositoryFile(path);
+            int dock = xml.indexOf("@+id/projectionDock");
+            String dockXml = xml.substring(dock,
+                    xml.indexOf("</com.google.android.material.card.MaterialCardView>", dock));
+            java.util.regex.Matcher button = java.util.regex.Pattern
+                    .compile("<com\\.google\\.android\\.material\\.button\\.MaterialButton[^>]*>")
+                    .matcher(dockXml);
+            int buttons = 0;
+            while (button.find()) {
+                buttons++;
+                assertTrue(path + " " + button.group(),
+                        button.group().contains("android:layout_height=\"@dimen/od_touch_standard\""));
             }
+            assertTrue(path, buttons >= 7);
             assertTrue(path, xml.contains("app:icon=\"@drawable/ic_saved_home\""));
             assertTrue(path, xml.contains("app:icon=\"@drawable/ic_volume_on\""));
         }
-        String fragment = readRepositoryFile(
-                "app/src/main/java/com/overdrive/app/ui/fragment/ProjectionFragment.kt");
-        assertTrue(fragment.contains("R.id.projectionKeyBack to KeyEvent.KEYCODE_BACK"));
-        assertFalse(fragment.contains(".setItems(labels)"));
+        assertTrue(readRepositoryFile(FRAGMENT)
+                .contains("if (favorite) R.drawable.ic_star_filled else R.drawable.ic_star"));
+    }
+
+    /** Tiles and mirror swap places from the top; tile taps wait a beat after a cast ends. */
+    @Test
+    public void pageSwitchResetsScrollAndGuardsTileTaps() throws IOException {
+        String fragment = readRepositoryFile(FRAGMENT);
+        int render = fragment.indexOf("private fun renderLiveState(");
+        assertTrue(fragment.indexOf("scroll?.scrollTo(0, 0)", render) > render);
+        int tap = fragment.indexOf("private fun onAppTapped(");
+        assertTrue(fragment.indexOf("TILE_TAP_GUARD_MS", tap) > tap);
+        assertTrue(fragment.contains(
+                "val canEdit = !aaosHostedMap && !layoutActive && !layoutBusy && !castInFlight"));
+    }
+
+    /** Projection tools keep an always-visible entry next to Layouts. */
+    @Test
+    public void projectionToolsKeepAnEntryNextToLayouts() throws IOException {
+        for (String path : new String[] {PORTRAIT, LAND}) {
+            String xml = readRepositoryFile(path);
+            int tools = xml.indexOf("@+id/projectionToolsRow");
+            int layouts = xml.indexOf("@+id/projectionLayoutsRow");
+            assertTrue(path, tools >= 0 && layouts > tools);
+        }
+        assertTrue(readRepositoryFile(FRAGMENT).contains("R.id.projectionToolsRow"));
+    }
+
+    /** The opening tag (attributes) of the view carrying {@code id}. */
+    private static String openingTag(String xml, String id) {
+        int at = xml.indexOf("@+id/" + id + "\"");
+        int start = xml.lastIndexOf("<", at);
+        int end = xml.indexOf(">", at);
+        return xml.substring(start, end);
     }
 
     private static String readRepositoryFile(String relativePath) throws IOException {

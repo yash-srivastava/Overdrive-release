@@ -18,7 +18,6 @@
     <string name="projection_guidance_setup_di5">Save, then start navigation in RoadSense. Google Maps or Waze also need Map notification access.\n\nThe DI5 cluster strip is experimental. Stop any full-screen cluster cast or map before testing it. Windshield guidance is unavailable on DI5.</string>
     <string name="projection_keyboard_auto">Automatically open the DI5 keyboard on cluster text fields</string>
     <string name="projection_guidance_saved">Saved. Windshield guidance is DI3 only; DI5 strip rendering still needs an in-car check.</string>
-    <string name="projection_tools_title">Tools</string>
     <string name="projection_tools_dialog_title">Projection tools</string>
     <string name="projection_tools_description">Set up navigation, app size and text input for the cluster.</string>
     <string name="projection_tools_navigation">Navigation guidance</string>
