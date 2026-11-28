@@ -1015,15 +1015,6 @@ BYD.performance = {
     async fetchData() {
         if (!this._shouldRunRealtime()) return;
         try {
-            // Try WebView bridge first
-            if (typeof PerformanceBridge !== 'undefined') {
-                const dataStr = PerformanceBridge.getPerformanceData();
-                const data = JSON.parse(dataStr);
-                this.updateUI(data);
-                return;
-            }
-            
-            // Fallback to HTTP API
             const res = await fetch('/api/performance');
             if (res.ok) {
                 const data = await res.json();

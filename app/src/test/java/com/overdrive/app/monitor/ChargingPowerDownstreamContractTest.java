@@ -95,18 +95,6 @@ public class ChargingPowerDownstreamContractTest {
         assertTrue(ipc.contains("json.put(\"chargingPowerKW\", data.chargingPowerKW)"));
         assertTrue(ipc.contains("json.put(\"isEstimated\", data.isEstimated)"));
 
-        String bridge = read(
-                "app/src/main/java/com/overdrive/app/bridge/VehicleDataBridge.java");
-        assertTrue(bridge.contains("ChargingStateData data = monitor.getChargingState()"));
-        assertTrue(bridge.contains("json.put(\"chargingPowerKW\", data.chargingPowerKW)"));
-        assertTrue(bridge.contains("json.put(\"isEstimated\", data.isEstimated)"));
-        assertTrue(bridge.contains(
-                "json.put(\"description\", getPowerFlowDescription(data))"));
-        assertTrue(bridge.contains(
-                "\"nominalPlaceholder\".equals(data.powerSource)"));
-        assertTrue(bridge.contains(
-                "String prefix = data.isEstimated ? \"~\" : \"\""));
-
         String notifier = read(
                 "app/src/main/java/com/overdrive/app/notifications/ChargingEventNotifier.java");
         assertTrue(notifier.contains(

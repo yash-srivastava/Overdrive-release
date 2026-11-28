@@ -317,7 +317,6 @@
 # ==================== App Packages (allow obfuscation) ====================
 # Keep class names for debugging but obfuscate methods/fields
 -keepnames class com.overdrive.app.auth.** { }
--keepnames class com.overdrive.app.bridge.** { }
 -keepnames class com.overdrive.app.byd.** { }
 -keepnames class com.overdrive.app.client.** { }
 -keepnames class com.overdrive.app.config.** { }
