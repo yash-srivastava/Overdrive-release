@@ -16,7 +16,7 @@ public class WebSettingsToggleReliabilityContractTest {
 
     @Test
     public void immediateSavePagesLockUntilHydratedAndSerializeWrites() throws IOException {
-        assertPageLock("recording.html", "recording.js?v=codecavailability3");
+        assertPageLock("recording.html", "recording.js?v=codecavailability4");
         assertPageLock("road-sense.html", "road-sense.js?v=bsux3");
         assertPageLock("trips.html", "trips.js?v=routebatch1-calendar1-ratesave1");
         assertPageLock("abrp.html", "abrp.js?v=toggle3");

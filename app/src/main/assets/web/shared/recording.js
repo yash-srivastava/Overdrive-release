@@ -3043,6 +3043,9 @@ BYD.recording = {
         if (subSetting) {
             subSetting.style.display = layout === 'dashcam' ? 'flex' : 'none';
         }
+        // The grid + OEM dashcam gives the same view at playback for far less CPU.
+        const hint = document.getElementById('dashcamLayoutHint');
+        if (hint) hint.style.display = layout === 'dashcam' ? '' : 'none';
     },
 
     _applyRecordingLayoutButtons(layout) {
