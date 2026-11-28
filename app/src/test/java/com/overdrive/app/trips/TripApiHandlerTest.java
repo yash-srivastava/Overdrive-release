@@ -59,6 +59,69 @@ public class TripApiHandlerTest {
         assertEquals(1, manager.config.saves);
     }
 
+    @Test
+    public void invalidFuelSettingsRejectEntireUpdateBeforeMutation() throws Exception {
+        TrackingManager manager = new TrackingManager();
+        TripApiHandler handler = new TripApiHandler(manager);
+        String[] invalidValues = {"-1", "1e100", "\"NaN\"", "\"Infinity\"", "\"-Infinity\"",
+                "\"not a number\"", "null", "true", "{}", "[]"};
+
+        for (String field : new String[]{"tankCapacityL", "fuelPricePerL"}) {
+            for (String value : invalidValues) {
+                assertInvalidFuelSetting(handler, manager, field, value);
+            }
+            assertInvalidFuelSetting(handler, manager, field,
+                    "tankCapacityL".equals(field) ? "200" : "100000");
+        }
+    }
+
+    private static void assertInvalidFuelSetting(TripApiHandler handler, TrackingManager manager,
+                                                String field, String value) throws Exception {
+        String otherField = "tankCapacityL".equals(field) ? "fuelPricePerL" : "tankCapacityL";
+        JSONObject response = post(handler, "{\"" + field + "\":" + value
+                + ",\"" + otherField + "\":10,\"enabled\":false,\"currency\":\"EUR\",\"electricityRate\":3}");
+        String label = field + "=" + value;
+        assertFalse(label, response.getBoolean("success"));
+        assertEquals(label, 400, response.getInt("_status"));
+        assertTrue(label, response.getString("error").contains(field));
+        assertEquals(label, 40, manager.config.getTankCapacityL(), 0);
+        assertEquals(label, 1.75, manager.config.getFuelPricePerL(), 0);
+        assertEquals(label, 2.5, manager.config.getElectricityRate(), 0);
+        assertEquals(label, "USD", manager.config.getCurrency());
+        assertTrue(label, manager.config.isEnabled());
+        assertEquals(label, 0, manager.enabledUpdates);
+        assertEquals(label, 0, manager.config.saves);
+    }
+
+    @Test
+    public void validFuelSettingsAndExplicitZeroAreSaved() throws Exception {
+        TrackingManager manager = new TrackingManager();
+        TripApiHandler handler = new TripApiHandler(manager);
+
+        for (double[] values : new double[][]{{0.001, 0.001}, {60, 1.75}, {199.99, 99999.99}, {0, 0}}) {
+            JSONObject response = post(handler, new JSONObject().put("tankCapacityL", values[0])
+                    .put("fuelPricePerL", values[1]).toString());
+            assertTrue(response.getBoolean("success"));
+            assertEquals(values[0], manager.config.getTankCapacityL(), 0);
+            assertEquals(values[1], manager.config.getFuelPricePerL(), 0);
+        }
+        assertEquals(4, manager.config.saves);
+    }
+
+    @Test
+    public void omittedFuelSettingsRemainUnchangedAndNumericStringsAreAccepted() throws Exception {
+        TrackingManager manager = new TrackingManager();
+        TripApiHandler handler = new TripApiHandler(manager);
+
+        assertTrue(post(handler, "{\"tankCapacityL\":\"50.5\"}").getBoolean("success"));
+        assertEquals(50.5, manager.config.getTankCapacityL(), 0);
+        assertEquals(1.75, manager.config.getFuelPricePerL(), 0);
+        assertTrue(post(handler, "{\"fuelPricePerL\":\"2.25\"}").getBoolean("success"));
+        assertEquals(50.5, manager.config.getTankCapacityL(), 0);
+        assertEquals(2.25, manager.config.getFuelPricePerL(), 0);
+        assertEquals(2, manager.config.saves);
+    }
+
     private static JSONObject post(TripApiHandler handler, String body) {
         return handler.handleRequest("/api/trips/config", "POST", null, body);
     }
@@ -72,6 +135,7 @@ public class TripApiHandlerTest {
             config.setElectricityRate(2.5);
             config.setCurrency("USD");
             config.setFuelPricePerL(1.75);
+            config.setTankCapacityL(40);
         }
 
         @Override

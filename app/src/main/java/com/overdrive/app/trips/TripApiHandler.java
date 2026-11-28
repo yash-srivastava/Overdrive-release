@@ -1060,12 +1060,23 @@ public class TripApiHandler {
         try {
             JSONObject bodyJson = new JSONObject(body != null ? body : "{}");
 
-            // Reject invalid rates before any settings change. Zero explicitly
-            // clears the rate; the upper bound matches TripConfig's setter.
+            // Reject invalid pricing inputs before any settings change. Zero
+            // explicitly clears a value; the bounds match TripConfig's setters.
             boolean hasElectricityRate = bodyJson.has("electricityRate");
             double electricityRate = bodyJson.optDouble("electricityRate", Double.NaN);
             if (hasElectricityRate && !(electricityRate >= 0 && electricityRate < 100000)) {
                 return errorResponse("electricityRate must be at least 0 and less than 100000", 400);
+            }
+
+            boolean hasTankCapacity = bodyJson.has("tankCapacityL");
+            double tankCapacity = bodyJson.optDouble("tankCapacityL", Double.NaN);
+            if (hasTankCapacity && !(tankCapacity >= 0 && tankCapacity < 200)) {
+                return errorResponse("tankCapacityL must be at least 0 and less than 200", 400);
+            }
+            boolean hasFuelPrice = bodyJson.has("fuelPricePerL");
+            double fuelPrice = bodyJson.optDouble("fuelPricePerL", Double.NaN);
+            if (hasFuelPrice && !(fuelPrice >= 0 && fuelPrice < 100000)) {
+                return errorResponse("fuelPricePerL must be at least 0 and less than 100000", 400);
             }
 
             if (bodyJson.has("enabled")) {
@@ -1082,11 +1093,11 @@ public class TripApiHandler {
                 if (bodyJson.has("currency")) {
                     config.setCurrency(bodyJson.getString("currency"));
                 }
-                if (bodyJson.has("tankCapacityL")) {
-                    config.setTankCapacityL(bodyJson.getDouble("tankCapacityL"));
+                if (hasTankCapacity) {
+                    config.setTankCapacityL(tankCapacity);
                 }
-                if (bodyJson.has("fuelPricePerL")) {
-                    config.setFuelPricePerL(bodyJson.getDouble("fuelPricePerL"));
+                if (hasFuelPrice) {
+                    config.setFuelPricePerL(fuelPrice);
                 }
                 if (bodyJson.has("fuelUnit")) {
                     config.setFuelUnit(bodyJson.getString("fuelUnit"));
