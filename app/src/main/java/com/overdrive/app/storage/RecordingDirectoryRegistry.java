@@ -15,19 +15,6 @@ public final class RecordingDirectoryRegistry {
 
     private RecordingDirectoryRegistry() {}
 
-    /**
-     * True iff {@code dir} is, or lives under, the legacy pre-registry base
-     * ({@link #LEGACY_BASE}) — which contains all three legacy roots. Used by
-     * consumers that must order legacy roots LAST (first-match-wins hero/
-     * thumbnail resolution: a colliding name must resolve to the live copy,
-     * never the stale flat legacy copy).
-     */
-    public static boolean isLegacy(File dir) {
-        if (dir == null) return false;
-        String p = dir.getAbsolutePath();
-        return p.equals(LEGACY_BASE) || p.startsWith(LEGACY_BASE + "/");
-    }
-
     static List<File> recordings(File active, File internal, File sd, File usb) {
         return unique(active, internal, sd, usb,
                 new File(LEGACY_RECORDINGS), new File(LEGACY_BASE));

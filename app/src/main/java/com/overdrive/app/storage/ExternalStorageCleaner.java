@@ -667,19 +667,11 @@ public class ExternalStorageCleaner {
     }
 
     public int getProtectedHours() { return protectedHours; }
-    public void setProtectedHours(int hours) {
-        setProtectedHoursNoSave(hours);
-        saveConfig();
-    }
     public void setProtectedHoursNoSave(int hours) {
         this.protectedHours = Math.max(0, Math.min(168, hours)); // 0-7 days
     }
 
     public int getMinFilesKeep() { return minFilesKeep; }
-    public void setMinFilesKeep(int count) {
-        setMinFilesKeepNoSave(count);
-        saveConfig();
-    }
     public void setMinFilesKeepNoSave(int count) {
         this.minFilesKeep = Math.max(0, Math.min(100, count));
     }

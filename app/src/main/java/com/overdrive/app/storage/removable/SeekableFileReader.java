@@ -40,10 +40,6 @@ public final class SeekableFileReader implements Closeable {
         return read(b, 0, b.length);
     }
 
-    public long getFilePointer() {
-        return pos;
-    }
-
     /** The underlying channel (positional; independent of this reader's position). */
     public FileChannel getChannel() {
         return channel;

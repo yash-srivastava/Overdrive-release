@@ -534,7 +534,7 @@ public class StorageManager {
     // USB state — flash drives mounted via OTG. Treated as a separate volume
     // class from SD because of how head-units enumerate them: SD sits behind
     // an mmc driver (Linux major 179), USB behind sd/SCSI (major 8/65/66/...).
-    // Without this distinction discoverSdCard() will happily latch onto a USB
+    // Without this distinction SD-only discovery could latch onto a USB
     // stick when both are present. volatile for the same cross-thread reason
     // as the SD state fields above.
     private volatile String usbPath = null;
@@ -2804,14 +2804,6 @@ public class StorageManager {
         return landed;
     }
 
-    /**
-     * Backwards-compatible alias for {@link #discoverVolumes()} — public
-     * callers (refreshSdCard, watchdog) keep working unchanged.
-     */
-    public void discoverSdCard() {
-        discoverVolumes();
-    }
-
     // Some BYD vold builds (Shark 6) name public volumes "M:N" instead of AOSP's "public:M,N".
     private static final java.util.regex.Pattern BARE_PUBLIC_VOLUME_ID =
             java.util.regex.Pattern.compile("\\d+:\\d+");
@@ -2936,7 +2928,7 @@ public class StorageManager {
 
     /**
      * Discover both SD card and USB drive paths in a single pass so they
-     * can never alias each other. Replaces the old SD-only discoverSdCard
+     * can never alias each other. Replaces the old SD-only discovery
      * which would happily latch onto a USB stick when both were inserted
      * (the type-blind methods accepted any writable {@code public:} volume).
      *
@@ -3708,7 +3700,7 @@ public class StorageManager {
         // Under mountLock: this reads the (sdCardAvailable, sdCardPath) pair and
         // derives the sdCard*Dir fields from it. It is called both from inside the
         // locked mount/discovery path (reentrant — already holds the lock) AND from
-        // unlocked callers (ensureStorageReady, refreshUsb, the constructor, the
+        // unlocked callers (ensureStorageReady, refreshSdCard, the constructor, the
         // watchdog success branch). Without the lock, an unlocked caller could
         // observe a half-committed (available=true, path=null) pair mid-remount and
         // null the derived dirs — leaving the recorder pointed at internal even
@@ -7372,10 +7364,6 @@ public class StorageManager {
         return surveillanceDir.getAbsolutePath();
     }
     
-    public String getProximityPath() {
-        return proximityDir.getAbsolutePath();
-    }
-    
     public String getTripsPath() {
         return tripsDir.getAbsolutePath();
     }
@@ -7607,15 +7595,6 @@ public class StorageManager {
         return surveillanceLimitMb;
     }
 
-    /**
-     * The cap proximity clips are actually reaped against — the recordings limit,
-     * which their bytes share. Returns the ENFORCED number, not the legacy
-     * {@code proximityLimitMb} field, which nothing enforces any more.
-     */
-    public long getProximityLimitMb() {
-        return recordingsLimitMb;
-    }
-
     public long getTripsLimitMb() {
         return tripsLimitMb;
     }
@@ -7658,20 +7637,6 @@ public class StorageManager {
             saveConfig();
         }
         markStorageDirty();  // idle gate: a lowered cap may need a reap
-    }
-
-    /**
-     * Retained so an existing {@code proximityLimitMb} in the config round-trips, but
-     * the value is NOT enforced: proximity is reaped against the recordings cap. Set
-     * that instead via {@link #setRecordingsLimitMb}.
-     */
-    public void setProximityLimitMb(long limitMb) {
-        synchronized (configChangeLock) {
-            proximityLimitMb = limitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(recordingsStorageType), limitMb));  // proximity follows recordings (ACC-ON) volume
-            saveConfig();
-            logInfo("setProximityLimitMb(" + limitMb + "): stored but NOT enforced —"
-                + " proximity shares the recordings cap (" + recordingsLimitMb + " MB)");
-        }
     }
 
     public void setTripsLimitMb(long limitMb) {
@@ -7741,25 +7706,6 @@ public class StorageManager {
         return normalizeStorageType(tripsStorageType);
     }
 
-    /**
-     * Recovery callers use this to keep removable-volume reconciliation
-     * retryable across the asynchronous startup/remount window.
-     */
-    public boolean isConfiguredTripsVolumeUnavailable() {
-        StorageType configured = tripsStorageType;
-        if (configured == StorageType.SD_CARD) {
-            return !sdCardAvailable
-                    || sdCardTripsDir == null
-                    || !isSdCardLikelyMounted();
-        }
-        if (configured == StorageType.USB) {
-            return !usbAvailable
-                    || usbTripsDir == null
-                    || !isUsbLikelyMounted();
-        }
-        return false;
-    }
-    
     /**
      * Set recordings storage type (INTERNAL or SD_CARD).
      * @param type The storage type to use
@@ -8182,18 +8128,6 @@ public class StorageManager {
 
     public String getUsbPath() {
         return usbPath;
-    }
-
-    /**
-     * Re-detect both SD and USB. Public alias mostly used by polling
-     * watchdogs / API handlers that want to refresh state on demand.
-     */
-    public void refreshUsb() {
-        discoverVolumes();
-        initSdCardDirectories();
-        initUsbDirectories();
-        updateActiveDirectories();
-        logInfo("Volume refresh complete. SD=" + sdCardAvailable + ", USB=" + usbAvailable);
     }
 
     /**
@@ -9210,14 +9144,6 @@ public class StorageManager {
         return out;
     }
 
-    /**
-     * Backwards-compatible: returns the dynamic max for the given type.
-     * Old callers that passed a {@link StorageType} keep working.
-     */
-    public long getMaxLimitMb(StorageType type) {
-        return getEffectiveMaxLimitMb(type);
-    }
-
     // ==================== Combined-Limit Budget (overcommit advisory) ====================
     //
     // Every category's slider tops out at the FULL volume (the per-category /N share
@@ -9252,8 +9178,8 @@ public class StorageManager {
 
     /**
      * Categories with no storage-type picker of their own that follow another
-     * category's volume: {@code {follower, leader}} pairs. Proximity has no UI at all
-     * (see {@link #setProximityLimitMb}) and rides recordings' ACC-ON volume, so
+     * category's volume: {@code {follower, leader}} pairs. Proximity has no separate cap
+     * and rides recordings' ACC-ON volume, so
      * repointing recordings silently moves proximity's budget too. Published in the
      * advisory payload so the UI can account for the coupling instead of hardcoding
      * a policy that lives here.
@@ -9688,8 +9614,8 @@ public class StorageManager {
     
     // ==================== CATEGORY SIZE/COUNT TTL CACHE ====================
     //
-    // WHY (perf): getDirectoriesTotalSize / getFileCountAcross are UNCACHED
-    // full directory walks — listFiles() plus a per-entry isFile() and
+    // WHY (perf): getDirectoriesTotalSize is an UNCACHED
+    // full directory walk — listFiles() plus a per-entry isFile() and
     // length() for every file in every reapable dir of the category. Every
     // recording carries sidecars (.mp4 + .json + .srt), so a 500-clip library
     // is ~1500 stat()s per walk. On the emulated/FUSE volumes these paths live
@@ -9934,8 +9860,7 @@ public class StorageManager {
      *       /{@code thumb_}), matching {@link #getDirectoriesTotalSize} and,
      *       critically, what the reaper actually frees.
      *   <li>count counts only primary-extension files under the STRICT
-     *       {@code startsWith(namePrefix)} gate, matching
-     *       {@link #getFileCountAcross}. So OEM {@code dvr_} and
+     *       {@code startsWith(namePrefix)} gate. So OEM {@code dvr_} and
      *       {@code replay_} clips contribute bytes but not to
      *       {@code recordingsCount} — preserving the number the UI has always
      *       shown.
@@ -9994,7 +9919,7 @@ public class StorageManager {
                 size += length;
                 // STRICT prefix gate for the count — see the javadoc. The gate
                 // above is aux-inclusive (needed for byte parity with the
-                // reaper); getFileCountAcross used a bare startsWith, so
+                // reaper); the count uses a bare startsWith, so
                 // re-test here rather than reusing that result.
                 if (isPrimary
                         && (namePrefix == null || name.startsWith(namePrefix))) {
@@ -10118,14 +10043,6 @@ public class StorageManager {
         return categorySizeCached("surveillance");
     }
 
-    /**
-     * Get current size of proximity across all locations (active dir, the
-     * inactive internal/SD-card mirror, and the legacy proximity_events path).
-     */
-    public long getProximitySize() {
-        return categorySizeCached("proximity");
-    }
-
     // Uncached variants — for the reap/enforcement path, which must measure the
     // filesystem as it is RIGHT NOW. Never route the periodic cleanup or
     // ensureSpace through the cached getters above.
@@ -10157,36 +10074,6 @@ public class StorageManager {
         return categoryCountCached("surveillance");
     }
 
-    /**
-     * Get proximity events file count across all locations.
-     */
-    public int getProximityCount() {
-        return categoryCountCached("proximity");
-    }
-
-    private int getFileCountAcross(String category, List<File> dirs, String namePrefix) {
-        String primaryExt = primaryExtensionForCategory(category);
-        int total = 0;
-        Set<String> seen = new HashSet<>();
-        for (File dir : dirs) {
-            if (dir == null || !RemovableStorageFs.exists(dir) || !RemovableStorageFs.isDirectory(dir)) continue;
-            File[] files = RemovableStorageFs.listFiles(dir, (d, name) -> name.endsWith(primaryExt));
-            if (files == null) {
-                files = listFilesByExt(dir, primaryExt);
-            }
-            if (files == null) continue;
-            for (File f : files) {
-                if (!RemovableStorageFs.isFile(f)) continue;
-                String name = f.getName();
-                if (namePrefix != null && !name.startsWith(namePrefix)) continue;
-                if (seen.add(name)) {
-                    total++;
-                }
-            }
-        }
-        return total;
-    }
-    
     /**
      * Get current size of trips directory in bytes.
      *
@@ -10261,45 +10148,6 @@ public class StorageManager {
         cachedTripsSize = size;
         cachedTripsSizeAt = now;
         return size;
-    }
-
-    /**
-     * Get trips file count.
-     *
-     * <p>Same DB-vs-walk pattern as {@link #getTripsSize()}: prefer
-     * {@code TripDatabase.getTripCount()} once backfill is complete (a
-     * one-row aggregate against the indexed trips table), fall back to the
-     * filesystem walk wrapped in a 30s in-memory cache while backfill is
-     * still running.
-     */
-    public int getTripsCount() {
-        try {
-            com.overdrive.app.trips.TripAnalyticsManager tam =
-                    com.overdrive.app.daemon.CameraDaemon.getTripAnalyticsManager();
-            if (tam != null) {
-                com.overdrive.app.trips.TripDatabase db = tam.getDatabase();
-                if (db != null && db.isBackfillComplete()) {
-                    return db.getTripCount();
-                }
-            }
-        } catch (Throwable t) {
-            // Fall through to direct walk
-        }
-        return getTripsCountWithCache();
-    }
-
-    private int cachedTripsCount = -1;
-    private long cachedTripsCountAt = 0;
-
-    private synchronized int getTripsCountWithCache() {
-        long now = System.currentTimeMillis();
-        if (cachedTripsCount >= 0 && (now - cachedTripsCountAt) < TRIPS_SIZE_CACHE_MS) {
-            return cachedTripsCount;
-        }
-        int count = getFileCountAcross("trips", getReapableDirs("trips"), namePrefixForCategory("trips"));
-        cachedTripsCount = count;
-        cachedTripsCountAt = now;
-        return count;
     }
 
     /**
@@ -11125,18 +10973,6 @@ public class StorageManager {
     }
 
     /**
-     * True only when a pinned trip telemetry destination is currently safe to
-     * write. Emergency tails use this to wait for their original removable
-     * volume instead of creating an incomplete same-name file on fallback
-     * storage.
-     */
-    public boolean isTripTelemetryPathAvailable(File telemetryFile) {
-        return telemetryFile != null
-                && isTelemetryVolumeAvailable(
-                        telemetryFile.getAbsolutePath());
-    }
-
-    /**
      * Primary file extension for a category. Cleanup walks files matching
      * this extension as the "anchor" rows; sidecars are pulled in via
      * {@link #sidecarExtensionsForCategory(String)}.
@@ -11800,7 +11636,7 @@ public class StorageManager {
         }
 
         // If we dropped any trips DB rows above, expire the DB-size cache so the
-        // next getTripsSize()/getTripsCount() re-queries the post-reap SUM rather
+        // next getTripsSize() re-queries the post-reap SUM rather
         // than returning the stale (inflated) value that keeps the limit gate
         // from ever converging.
         if (tripsRowReaped) {
@@ -11959,31 +11795,6 @@ public class StorageManager {
     
     public static long getMinLimitMb() {
         return MIN_LIMIT_MB;
-    }
-    
-    /**
-     * Static fallback ceiling. Use the instance methods
-     * {@link #getEffectiveMaxLimitMb(StorageType)} / {@link #getMaxLimitMb(StorageType)}
-     * for the live, volume-aware ceiling. These statics are kept only
-     * for legacy callers that don't have an instance handy.
-     */
-    public static long getMaxLimitMb() {
-        return MAX_LIMIT_MB_FALLBACK;
-    }
-
-    public static long getMaxLimitMbInternal() {
-        StorageManager sm = instance;
-        return sm != null ? sm.getEffectiveMaxLimitMb(StorageType.INTERNAL) : MAX_LIMIT_MB_FALLBACK;
-    }
-
-    public static long getMaxLimitMbSdCard() {
-        StorageManager sm = instance;
-        return sm != null ? sm.getEffectiveMaxLimitMb(StorageType.SD_CARD) : MAX_LIMIT_MB_FALLBACK;
-    }
-
-    public static long getMaxLimitMbUsb() {
-        StorageManager sm = instance;
-        return sm != null ? sm.getEffectiveMaxLimitMb(StorageType.USB) : MAX_LIMIT_MB_FALLBACK;
     }
     
     // ==================== Event-Driven Cleanup (SOTA) ====================
@@ -14176,47 +13987,10 @@ public class StorageManager {
     }
 
     /**
-     * Atomically re-point the active-trip marker at {@code to} AND rename the
-     * on-disk file, under {@link #tripsCleanupLock}.
-     *
-     * <p>The trips reaper snapshots {@code activeTripFilePath} ONCE per pass
-     * and protects that exact path, so a marker transition performed outside
-     * its lock always leaves one of the two paths unprotected for a window:
-     * destination-first exposes the still-on-disk source; source-held exposes
-     * the freshly-renamed destination. Every cleanup pass (ensureTripsSpace,
-     * the deferred and post-save sweeps) holds {@code tripsCleanupLock} for
-     * its whole pass, so flipping the marker and renaming inside one lock
-     * hold makes the pair atomic to cleanup: a pass observes strictly-before
-     * (marker=from, file at from) or strictly-after (marker=to, file at to),
-     * never a mixed state.
-     *
-     * <p>On rename failure the marker is restored to {@code from} — the file
-     * that actually still exists. Returns the rename result. Used by the
-     * trip-end flow's {@code <startTime>.jsonl.gz → <dbId>.jsonl.gz} rename.
-     */
-    public boolean renameActiveTripFile(File from, File to) {
-        synchronized (tripsCleanupLock) {
-            setActiveTripFile(to);
-            boolean renamed = false;
-            try {
-                renamed = RemovableStorageFs.renameTo(from, to);
-            } finally {
-                if (!renamed) {
-                    setActiveTripFile(from);
-                }
-            }
-            return renamed;
-        }
-    }
-
-    /**
-     * Cross-volume variant of {@link #renameActiveTripFile}: same marker
-     * atomicity under {@link #tripsCleanupLock}, but falls back to copy+delete
-     * when {@code renameTo} fails because source and destination live on
-     * different filesystems. Used by the trip-end flow now that the active
-     * trip journal is written to internal storage
-     * ({@link #getTripJournalDir()}) and only moved to the (typically
-     * SD-hosted) trips directory once the row is finalized.
+     * Move the active trip file while holding {@link #tripsCleanupLock}, so cleanup
+     * cannot observe a marker/file mismatch. Restore the source marker on failure.
+     * The journal starts in internal storage ({@link #getTripJournalDir()}); the
+     * finalized file may require a cross-volume copy and delete.
      */
     public boolean moveActiveTripFile(File from, File to) {
         synchronized (tripsCleanupLock) {
