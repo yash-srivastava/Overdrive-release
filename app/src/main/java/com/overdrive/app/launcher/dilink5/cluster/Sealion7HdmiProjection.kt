@@ -10,12 +10,12 @@ import com.overdrive.app.config.VehicleModelSelection
 import com.overdrive.app.ui.view.AaosMapAreaCheck
 import org.json.JSONObject
 
-/** Opt-in full HDMI navigation window for the vehicle and firmware measured on-car. */
+/** Opt-in full HDMI navigation window for the vehicle and firmware builds measured on-car. */
 object Sealion7HdmiProjection {
     const val CONFIG_KEY = "sealion7FullHdmiProjection"
     internal const val WIDTH = 1920
     internal const val HEIGHT = 720
-    private const val SUPPORTED_FIRMWARE = "eng.scm.20260603.212028"
+    private val SUPPORTED_FIRMWARE = setOf("eng.scm.20260603.212028", "eng.scm.20260413.234037")
 
     @JvmStatic
     fun isSupported(context: Context): Boolean = findDisplay(context, requireOptIn = false) != null
@@ -81,7 +81,7 @@ object Sealion7HdmiProjection {
     }
 
     internal fun matchesFirmware(product: String?, sdk: Int, incremental: String?): Boolean =
-        ClusterTransport.isAaosHdmiFirmware(product, sdk) && incremental == SUPPORTED_FIRMWARE
+        ClusterTransport.isAaosHdmiFirmware(product, sdk) && incremental in SUPPORTED_FIRMWARE
 
     internal fun isUserSelected(modelId: Any?, modelSource: Any?): Boolean =
         modelId is String && modelSource is String &&
