@@ -43,7 +43,6 @@ import androidx.navigation.ui.setupActionBarWithNavController
 // import com.overdrive.app.shell.PrivilegedShellSetup
 import com.overdrive.app.storage.StorageSetup
 import com.overdrive.app.ui.daemon.DaemonStartupManager
-import com.overdrive.app.ui.model.DaemonStatus
 import com.overdrive.app.ui.model.DaemonType
 import com.overdrive.app.ui.model.NavigationRailSwipePolicy
 import com.overdrive.app.ui.model.TunnelDisplayPolicy
@@ -5527,11 +5526,6 @@ open class MainActivity : AppCompatActivity() {
         return dash?.view
     }
 
-    /** Expert-tour entry: land the user on Diagnostics (advanced camera knobs live there). */
-    fun openExpertTourEntry() {
-        try { navController.navigate(R.id.diagnosticsFragment) } catch (_: Throwable) {}
-    }
-
     /** Setup-guide camera tip: land the user on Diagnostics, where the camera probe lives. */
     fun invokeDiagnosticsScreen() = navigateToRailDestination(R.id.diagnosticsFragment)
 
@@ -5556,13 +5550,6 @@ open class MainActivity : AppCompatActivity() {
     /** True if the given nav destination is currently shown (tour waits on this). */
     fun isCurrentDestination(destId: Int): Boolean =
         try { navController.currentDestination?.id == destId } catch (_: Throwable) { false }
-
-    /**
-     * Root view of the currently-shown native fragment (any type), for the Expert tour
-     * to resolve anchors. Null if the destination isn't laid out yet or is a WebView page
-     * with no inner anchors — callers degrade to a centered card.
-     */
-    fun currentFragmentRoot(): android.view.View? = currentNavFragment()?.view
 
     /** The currently-shown nav destination fragment INSTANCE (not its view). */
     private fun currentNavFragment(): androidx.fragment.app.Fragment? {

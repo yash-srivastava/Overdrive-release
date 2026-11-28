@@ -21,7 +21,6 @@ object PreferencesManager {
     private const val KEY_LAST_TUNNEL_URL = "last_tunnel_url"
     private const val KEY_LAST_ZROK_URL = "last_zrok_url"
     private const val KEY_ZROK_UNIQUE_NAME = "zrok_unique_name"
-    private const val KEY_ZROK_ENABLE_TOKEN = "zrok_enable_token"
     private const val KEY_NAVIGATION_VISIBLE_V1 = "navigation_visible_v1"
     /** Rail keys the user has already been offered, so a NEW one can default to
      *  visible without un-hiding something they deliberately switched off. */
@@ -162,40 +161,9 @@ object PreferencesManager {
         requirePrefs().edit().putString(KEY_LAST_ZROK_URL, url).apply()
     }
     
-    // Zrok Unique Name - CRITICAL for preventing "Not Found" errors
-    // The unique name MUST be persisted alongside the token to prevent split-brain
+    // Read the saved legacy name for the reserved-share startup compatibility check.
     fun getZrokUniqueName(): String? {
         return requirePrefs().getString(KEY_ZROK_UNIQUE_NAME, null)
-    }
-    
-    fun setZrokUniqueName(name: String) {
-        requirePrefs().edit().putString(KEY_ZROK_UNIQUE_NAME, name).commit()
-    }
-    
-    // Zrok Enable Token - stored in preferences for app-side access
-    // Also synced to /data/local/tmp/.zrok/enable_token for cross-UID access
-    @Deprecated("Use unified storage via ZrokController instead")
-    fun getZrokEnableToken(): String? {
-        return requirePrefs().getString(KEY_ZROK_ENABLE_TOKEN, null)
-    }
-    
-    @Deprecated("Use unified storage via ZrokController instead")
-    fun setZrokEnableToken(token: String?) {
-        if (token.isNullOrBlank()) {
-            requirePrefs().edit().remove(KEY_ZROK_ENABLE_TOKEN).commit()
-        } else {
-            requirePrefs().edit().putString(KEY_ZROK_ENABLE_TOKEN, token.trim()).commit()
-        }
-    }
-    
-    @Deprecated("Use unified storage via ZrokController instead")
-    fun hasZrokEnableToken(): Boolean {
-        return !getZrokEnableToken().isNullOrBlank()
-    }
-    
-    @Deprecated("Use unified storage via ZrokController instead")
-    fun clearZrokEnableToken() {
-        requirePrefs().edit().remove(KEY_ZROK_ENABLE_TOKEN).commit()
     }
     
     /**
@@ -245,7 +213,4 @@ object PreferencesManager {
             .remove(KEY_NAVIGATION_SEEN_V1)
             .apply()
     }
-
-    /** Current access URL — always the last tunnel URL we saw. */
-    fun getCurrentUrl(): String? = getLastTunnelUrl()
 }

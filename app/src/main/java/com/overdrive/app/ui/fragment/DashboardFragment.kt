@@ -66,7 +66,6 @@ import com.overdrive.app.ui.util.RecordingScanner
 import com.overdrive.app.ui.util.RecordingsApiClient
 import com.overdrive.app.ui.vehicle.VehicleArt
 import com.overdrive.app.ui.viewmodel.DaemonsViewModel
-import com.overdrive.app.ui.viewmodel.MainViewModel
 import com.overdrive.app.ui.viewmodel.RecordingViewModel
 import com.overdrive.app.ui.widget.AppToast
 import com.overdrive.app.ui.widget.Skeleton
@@ -79,7 +78,6 @@ import java.util.concurrent.Executors
 /** State-driven dashboard backed by the daemon's existing /status contract. */
 class DashboardFragment : Fragment() {
 
-    private val mainViewModel: MainViewModel by activityViewModels()
     private val daemonsViewModel: DaemonsViewModel by activityViewModels()
     private val recordingViewModel: RecordingViewModel by activityViewModels()
 
@@ -916,12 +914,7 @@ class DashboardFragment : Fragment() {
             is DashboardUiState.VehicleState.Ready -> {
                 val snapshot = vehicle.snapshot
                 heroGreeting.setText(R.string.dashboard_modern_vehicle_status)
-                val isPowerOn = snapshot.isAccOn == true
-                val gear = snapshot.gear
-                val speed = snapshot.speedKmh
-                val isRecording = snapshot.isRecording == true
                 recordingViewModel.reconcileWithStatus(snapshot.activeRecordingCameras)
-                val isSentry = snapshot.isGpuSurveillance == true
 
                 heroSubtitle.text = when {
                     snapshot.charging?.fault == true ->
