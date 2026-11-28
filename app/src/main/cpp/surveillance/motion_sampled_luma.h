@@ -94,6 +94,59 @@ inline bool rowHasChange(const uint8_t* current, const uint8_t* reference, int t
 #endif
 }
 
+// Reject a completely quiet quadrant before visiting any blocks. Scan the
+// contiguous sampled planes in batches and stop on the first changed batch.
+inline bool planeHasChange(const uint8_t* current, const uint8_t* reference,
+                           int count, int threshold) {
+    if (count <= 0 || threshold >= 255) return false;
+    if (threshold < 0) return true;
+    int i = 0;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    const uint8x16_t limit = vdupq_n_u8(static_cast<uint8_t>(threshold));
+    for (; i + 16 <= count; i += 16) {
+        const uint8x16_t diff = vabdq_u8(vld1q_u8(current + i), vld1q_u8(reference + i));
+        const uint8x16_t changed = vcgtq_u8(diff, limit);
+        if (vgetq_lane_u64(vreinterpretq_u64_u8(changed), 0)
+                || vgetq_lane_u64(vreinterpretq_u64_u8(changed), 1)) return true;
+    }
+#else
+    for (; i + 16 <= count; i += 16) {
+        bool changed = false;
+        for (int lane = 0; lane < 16; ++lane) {
+            const int diff = current[i + lane] - reference[i + lane];
+            changed |= (diff < 0 ? -diff : diff) > threshold;
+        }
+        if (changed) return true;
+    }
+#endif
+    for (; i < count; ++i) {
+        const int diff = current[i] - reference[i];
+        if ((diff < 0 ? -diff : diff) > threshold) return true;
+    }
+    return false;
+}
+
+// One bit per changed sample, in increasing pixel order.
+inline unsigned rowChangeMask(const uint8_t* current, const uint8_t* reference, int threshold) {
+    if (threshold < 0) return 0xff;
+    if (threshold >= 255) return 0;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    const uint8x8_t diff = vabd_u8(vld1_u8(current), vld1_u8(reference));
+    const uint8x8_t changed = vcgt_u8(diff, vdup_n_u8(static_cast<uint8_t>(threshold)));
+    const uint64_t lanes = vget_lane_u64(vreinterpret_u64_u8(changed), 0)
+            & UINT64_C(0x0101010101010101);
+    // Gather the low bit of each byte into the top byte.
+    return static_cast<unsigned>((lanes * UINT64_C(0x0102040810204080)) >> 56);
+#else
+    unsigned mask = 0;
+    for (int i = 0; i < 8; ++i) {
+        const int diff = current[i] - reference[i];
+        mask |= static_cast<unsigned>((diff < 0 ? -diff : diff) > threshold) << i;
+    }
+    return mask;
+#endif
+}
+
 } // namespace motion_luma
 
 #endif

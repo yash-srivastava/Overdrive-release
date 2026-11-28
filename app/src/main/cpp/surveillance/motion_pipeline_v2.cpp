@@ -249,6 +249,15 @@ static int stage2_blockAnalysis(
 {
     static_assert(V2_BLOCK_SIZE == 32 && V2_BYTES_PER_PIXEL == 3,
                   "Stage 2 expects eight stride-4 RGB samples per block row");
+    // No sample can pass Gate 1, so no block can have edge evidence. Temporal
+    // decay and all later stages still run on the caller's normal path. Do not
+    // scan outside a custom ROI: its excluded blocks are already cheap to skip.
+    if (!qs->hasCustomRoi && !motion_luma::planeHasChange(currentLuma, referenceLuma,
+                                    V2_SAMPLED_SIZE, config->shadowThreshold)) {
+        memset(activeBlocks, 0, V2_TOTAL_BLOCKS * sizeof(bool));
+        if (shadowSuppressedBlocks) *shadowSuppressedBlocks = 0;
+        return 0;
+    }
     int totalActive = 0;
     int totalShadowSuppressed = 0;
     bool shadowFilterEnabled = (config->shadowFilterMode > 0);
@@ -300,24 +309,22 @@ static int stage2_blockAnalysis(
                 
                 const int sampleBase = (gy / 4) * V2_SAMPLED_WIDTH + startX / 4;
                 // Quiet rows never reach the ratio, chroma or edge gates.
-                if (!motion_luma::rowHasChange(currentLuma + sampleBase,
-                        referenceLuma + sampleBase, config->shadowThreshold)) continue;
-
-                for (int x = 0; x < V2_BLOCK_SIZE; x += 4) {
-                    const int gx = startX + x;
-                    const int sample = sampleBase + x / 4;
+                unsigned changed = motion_luma::rowChangeMask(currentLuma + sampleBase,
+                        referenceLuma + sampleBase, config->shadowThreshold);
+                while (changed) {
+                    const int lane = __builtin_ctz(changed);
+                    changed &= changed - 1;
+                    const int gx = startX + lane * 4;
+                    const int sample = sampleBase + lane;
                     const int luma1 = currentLuma[sample];
                     const int luma2 = referenceLuma[sample];
 
-                    // Gate 1: Luma difference + ratio
-                    int lumaDiff = std::abs(luma1 - luma2);
-                    if (lumaDiff <= config->shadowThreshold) continue;
-
+                    // The row mask already applied the luma difference gate.
                     int maxLuma = std::max(luma1, luma2);
                     int minLuma = std::min(luma1, luma2) + 1;
                     float ratio = (float)maxLuma / minLuma;
                     if (ratio < config->lumaRatioThreshold) continue;
-                    
+
                     // Luma gate passed — this pixel changed significantly
                     totalChangedPixels++;
                     

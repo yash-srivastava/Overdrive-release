@@ -57,12 +57,20 @@ void checkPlane(const std::vector<uint8_t>& rgb) {
     }
 }
 
-bool scalarAny(const uint8_t* a, const uint8_t* b, int threshold) {
+unsigned scalarMask(const uint8_t* a, const uint8_t* b, int threshold) {
+    unsigned mask = 0;
     for (int i = 0; i < 8; ++i) {
-        if (std::abs(static_cast<int>(a[i]) - b[i]) > threshold) return true;
+        if (std::abs(static_cast<int>(a[i]) - b[i]) > threshold) {
+            mask |= 1u << i;
+        }
     }
-    return false;
+    return mask;
 }
+
+bool scalarAny(const uint8_t* a, const uint8_t* b, int threshold) {
+    return scalarMask(a, b, threshold) != 0;
+}
+
 } // namespace
 
 int main() {
@@ -94,6 +102,10 @@ int main() {
             a[lane] = static_cast<uint8_t>(diff);
             for (int threshold : {-1, 0, diff - 1, diff, diff + 1, 255, 256}) {
                 const bool expected = scalarAny(a.data(), b.data(), threshold);
+                require(motion_luma::rowChangeMask(a.data(), b.data(), threshold)
+                        == scalarMask(a.data(), b.data(), threshold), "Positive mask mismatch");
+                require(motion_luma::rowChangeMask(b.data(), a.data(), threshold)
+                        == scalarMask(b.data(), a.data(), threshold), "Negative mask mismatch");
                 require(motion_luma::rowHasChange(a.data(), b.data(), threshold) == expected,
                         "Positive difference or threshold mismatch");
                 require(motion_luma::rowHasChange(b.data(), a.data(), threshold) == expected,
@@ -107,6 +119,29 @@ int main() {
         const int threshold = static_cast<int>(rng() % 258) - 1;
         require(motion_luma::rowHasChange(a.data(), b.data(), threshold)
                         == scalarAny(a.data(), b.data(), threshold), "Mixed row mismatch");
+        require(motion_luma::rowChangeMask(a.data(), b.data(), threshold)
+                        == scalarMask(a.data(), b.data(), threshold), "Mixed mask mismatch");
     }
-    std::cout << "Packed motion history and row gate cases passed\n";
+    // Exercise every position, both signs, all vector/tail boundaries and a
+    // full quadrant. A change exactly at the threshold must not pass.
+    for (int count : {0, 1, 7, 8, 15, 16, 17, 31, 32, 33, Samples}) {
+        std::vector<uint8_t> current(count, 100), reference(count, 100);
+        require(!motion_luma::planeHasChange(current.data(), reference.data(), count, 0),
+                "Identical plane reported motion");
+        require(motion_luma::planeHasChange(current.data(), reference.data(), count, -1)
+                        == (count > 0), "Negative threshold mismatch");
+        for (int i = 0; i < count; ++i) {
+            current[i] = 115;
+            require(!motion_luma::planeHasChange(current.data(), reference.data(), count, 15),
+                    "Plane threshold equality mismatch");
+            require(motion_luma::planeHasChange(current.data(), reference.data(), count, 14),
+                    "Missed positive plane change");
+            require(motion_luma::planeHasChange(reference.data(), current.data(), count, 14),
+                    "Missed negative plane change");
+            current[i] = 100;
+        }
+        require(!motion_luma::planeHasChange(current.data(), reference.data(), count, 255),
+                "Threshold ceiling mismatch");
+    }
+    std::cout << "Packed motion history, row masks and quiet plane checks passed\n";
 }
