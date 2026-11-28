@@ -189,7 +189,9 @@ window.DashcamExport = (function () {
                     return;
                 }
                 if (!was || was.state !== 'running') return;
-                if (job.state === 'done') {
+                if (job.state === 'done' && job.note === 'storage_nearly_full') {
+                    toast(t('events.dv_export_ready_full', 'Saved — note: storage is nearly full, older clips may be removed. Tap the button again to download.'), 'warning');
+                } else if (job.state === 'done') {
                     toast(t('events.dv_export_ready', 'Dashcam view saved to Replays. Tap the button again to download.'), 'success');
                 } else if (job.state === 'cancelled') {
                     toast(t('events.dv_export_cancelled', 'Export cancelled.'), 'info');

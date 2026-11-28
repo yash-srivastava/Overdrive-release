@@ -379,6 +379,8 @@ public final class DashcamViewExportApi {
         volatile String error;
         volatile String filename;
         volatile String recordingId;
+        /** Non-null when the save is fine but the recordings limit will now remove older clips. */
+        volatile String note;
         volatile boolean cancel;
         volatile boolean paused;
         volatile Thread thread;
@@ -407,6 +409,7 @@ public final class DashcamViewExportApi {
             o.put("error", error != null ? error : JSONObject.NULL);
             o.put("filename", filename != null ? filename : JSONObject.NULL);
             o.put("id", recordingId != null ? recordingId : JSONObject.NULL);
+            o.put("note", note != null ? note : JSONObject.NULL);
             o.put("videoUrl", recordingId != null ? "/video/id/" + recordingId : JSONObject.NULL);
             return o;
         }
@@ -462,10 +465,12 @@ public final class DashcamViewExportApi {
                     if (from <= 0 || to <= from) throw new Refusal("bad_request", "Invalid range");
                 }
                 Plan plan = plan(from, to, prefer);
-                File output = prepareOutput(plan);
+                File dir = outputDirFor(plan);
+                // The card can drop for a few seconds around ACC OFF: then the job waits for it.
+                File output = dirReady(dir) ? prepareOutput(plan, dir) : null;
                 job = new Job(sourceId, from, to);
-                job.filename = output.getName();
-                launch(job, plan, output, epoch);
+                job.filename = output != null ? output.getName() : null;
+                launch(job, plan, dir, output, epoch);
             } catch (Refusal r) {
                 HttpResponse.sendJson(out, "bad_request".equals(r.code) ? 400 : 409,
                         error(r.code, r.getMessage()).toString());
@@ -489,17 +494,39 @@ public final class DashcamViewExportApi {
         return video + video / 10 + 24_000L * seconds + 1_048_576L;
     }
 
-    /** replay_<range end>.mp4 in the live recordings folder; refuses when the volume can't take it. */
-    private static File prepareOutput(Plan plan) throws Refusal {
-        long need = estimateBytes(plan);
+    /**
+     * Where the export goes: the folder of the source grid clip when it is a recordings clip (cam_*),
+     * else the recordings folder on the same volume. Never another volume.
+     */
+    static File outputDirFor(Plan plan) throws Refusal {
+        File source = plan.leaders.get(0).file;
+        File parent = source.getParentFile();
+        if (parent != null && source.getName().startsWith("cam")) return parent;
         File dir;
-        long free;
         try {
-            StorageManager storage = StorageManager.getInstance();
-            dir = storage.getLiveRecordingsDirIfMounted();
-            // Secondary writer: never flips the recorder's fallback state, never deletes recordings for room.
-            dir = storage.resolveTargetWithEnospcFallback(dir, need + RESERVE_BYTES, false);
-            if (dir == null) throw new Refusal("storage", "No recordings storage is available.");
+            dir = StorageManager.getInstance().recordingsDirOnVolumeOf(source);
+        } catch (Throwable t) {
+            dir = null;
+        }
+        if (dir == null) throw new Refusal("storage", "The recordings folder isn't available.");
+        return dir;
+    }
+
+    static boolean dirReady(File dir) {
+        try {
+            return StorageManager.getInstance().isRecordingsDirReady(dir);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** Space, limit and file name in a ready {@code dir}; refuses when it can't take the video. */
+    private static File prepareOutput(Plan plan, File dir) throws Refusal {
+        long need = estimateBytes(plan);
+        long free;
+        StorageManager storage;
+        try {
+            storage = StorageManager.getInstance();
             if (!RemovableStorageFs.exists(dir) && !RemovableStorageFs.mkdirs(dir) && !RemovableStorageFs.exists(dir)) {
                 throw new Refusal("storage", "The recordings folder can't be written.");
             }
@@ -510,9 +537,14 @@ public final class DashcamViewExportApi {
             throw new Refusal("storage", "The recordings storage can't be read.");
         }
         if (free < need + RESERVE_BYTES) {
-            throw new Refusal("storage_full", "Not enough free space: the export needs about "
-                    + StorageManager.formatSize(need + RESERVE_BYTES) + " free (including room kept for recording), "
+            throw new Refusal("storage_full", "Not enough free space to save the video: it needs about "
+                    + StorageManager.formatSize(need + RESERVE_BYTES) + " (including room kept for recording), "
                     + StorageManager.formatSize(Math.max(0L, free)) + " is free. Delete some recordings and try again.");
+        }
+        long limit = recordingsLimitBytes(storage);
+        if (limit > 0 && need > limit / 2) {
+            throw new Refusal("storage_limit", "This video would take more than half of the recordings storage limit ("
+                    + StorageManager.formatSize(limit) + "). Choose a shorter clip or raise the limit.");
         }
         // Named by the range end like an instant replay (stamped at save time = clip end).
         String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date(plan.to));
@@ -530,8 +562,8 @@ public final class DashcamViewExportApi {
         return new File(output.getAbsolutePath() + ".tmp");
     }
 
-    private static void launch(final Job job, final Plan plan, final File output, final long epoch) {
-        final File tmp = tmpOf(output);
+    private static void launch(final Job job, final Plan plan, final File dir, final File output,
+                               final long epoch) {
         final float strength;
         float s;
         try {
@@ -545,7 +577,7 @@ public final class DashcamViewExportApi {
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LOWEST);
             } catch (Throwable ignored) {
             }
-            run(job, plan, output, tmp, strength, epoch);
+            run(job, plan, dir, output, strength, epoch);
         }, "DashcamViewExport");
         t.setDaemon(true);
         t.setPriority(Thread.MIN_PRIORITY);
@@ -553,7 +585,38 @@ public final class DashcamViewExportApi {
         t.start();
     }
 
-    private static void run(Job job, Plan plan, File output, File tmp, float strength, long epoch) {
+    private static final long STORAGE_WAIT_MS = 15_000L;
+
+    /** Waits (bounded, cancellable) for the source's storage to come back, then picks the file. */
+    private static File awaitOutput(Job job, Plan plan, File dir, DashcamViewExporter.Listener stop)
+            throws DashcamViewExporter.ExportException {
+        long deadline = android.os.SystemClock.elapsedRealtime() + STORAGE_WAIT_MS;
+        while (!dirReady(dir)) {
+            String r = stop.stopReason();
+            if (r != null) throw new DashcamViewExporter.ExportException(r, "Stopped: " + r);
+            if (android.os.SystemClock.elapsedRealtime() >= deadline) {
+                job.error = "The SD card isn't ready — try again in a moment.";
+                throw new DashcamViewExporter.ExportException("storage_not_ready", job.error);
+            }
+            try {
+                Thread.sleep(250L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new DashcamViewExporter.ExportException("cancelled", "Cancelled");
+            }
+        }
+        try {
+            File output = prepareOutput(plan, dir);
+            job.filename = output.getName();
+            return output;
+        } catch (Refusal r) {
+            job.error = r.getMessage();
+            throw new DashcamViewExporter.ExportException(r.code, r.getMessage());
+        }
+    }
+
+    private static void run(Job job, Plan plan, File dir, File chosen, float strength, long epoch) {
+        final File[] tmpRef = {chosen != null ? tmpOf(chosen) : null};
         final Health health = new Health();
         final Runnable busyListener = () -> job.abort.abort(CameraLoadProbe.lastBusyReason());
         final long[] nextCheck = {0L, 0L};
@@ -580,8 +643,7 @@ public final class DashcamViewExportApi {
                 if (now < nextCheck[1]) return null;
                 nextCheck[1] = now + 2_000L;
                 try {
-                    File dir = tmp.getParentFile();
-                    if (dir != null && RemovableStorageFs.statFsAvailableBytes(dir.getAbsolutePath())
+                    if (tmpRef[0] != null && RemovableStorageFs.statFsAvailableBytes(dir.getAbsolutePath())
                             < MIN_FREE_WHILE_WRITING) {
                         stop[0] = "storage_full";
                     }
@@ -610,7 +672,11 @@ public final class DashcamViewExportApi {
             }
         };
         boolean ok = false;
+        File output = chosen;
         try {
+            if (output == null) output = awaitOutput(job, plan, dir, listener);
+            File tmp = tmpOf(output);
+            tmpRef[0] = tmp;
             logger.info("Dashcam view export " + job.from + ".." + job.to + " (" + plan.leaders.size()
                     + " grid, " + plan.followers.size() + " windshield clips) -> " + output.getName());
             // The recorder's start signal releases the export's codecs at once on a releaser thread.
@@ -626,7 +692,7 @@ public final class DashcamViewExportApi {
                     + " frames=" + r.frames + " audio=" + r.audio);
         } catch (DashcamViewExporter.ExportException e) {
             job.code = e.code;
-            job.error = failureMessage(e.code, e.getMessage());
+            if (job.error == null) job.error = failureMessage(e.code, e.getMessage());
             logger.warn("Dashcam view export failed (" + e.code + "): " + e.getMessage());
         } catch (Throwable t) {
             job.code = "failed";
@@ -636,7 +702,7 @@ public final class DashcamViewExportApi {
             CameraLoadProbe.clearBusyListener(busyListener);
             job.paused = false;
             if (!ok) {
-                RemovableStorageFs.delete(tmp);
+                if (tmpRef[0] != null) RemovableStorageFs.delete(tmpRef[0]);
                 job.state = "cancelled".equals(job.code) ? "cancelled" : "failed";
             }
         }
@@ -765,7 +831,30 @@ public final class DashcamViewExportApi {
         }
     }
 
+    private static long recordingsLimitBytes(StorageManager storage) {
+        try {
+            return Math.max(0L, storage.getEffectiveLimitMb("recordings")) * 1024L * 1024L;
+        } catch (Throwable t) {
+            return 0L;
+        }
+    }
+
     private static void finish(Job job, File output, File tmp, Plan plan) throws Exception {
+        // The export counts toward the recordings limit; the reaper removes oldest-first by mtime, so
+        // this (newest) file stays but older loop clips may go. Say so instead of surprising the user.
+        try {
+            StorageManager storage = StorageManager.getInstance();
+            long limit = recordingsLimitBytes(storage);
+            long size = RemovableStorageFs.length(tmp);
+            if (limit > 0 && storage.getRecordingsSize() + size > limit * 95 / 100) job.note = "storage_nearly_full";
+        } catch (Throwable ignored) {
+        }
+        // Same folder as the temp file (no cross-volume rename); it must still be the reachable source volume.
+        File dir = output.getParentFile();
+        if (dir == null || !dir.equals(tmp.getParentFile()) || !dirReady(dir)) {
+            job.error = "The SD card stopped responding while saving. Try again in a moment.";
+            throw new DashcamViewExporter.ExportException("storage_not_ready", job.error);
+        }
         writeSidecar(output);
         if (!RemovableStorageFs.renameTo(tmp, output)) {
             deleteSidecar(output);

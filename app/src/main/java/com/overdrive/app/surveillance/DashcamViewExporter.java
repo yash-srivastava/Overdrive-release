@@ -871,12 +871,15 @@ public final class DashcamViewExporter {
                 f.setInteger(MediaFormat.KEY_FRAME_RATE, fps);
                 f.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2);
                 f.setInteger(MediaFormat.KEY_PRIORITY, 1);
-                // Baseline like the recorder (plays on every phone, iOS included).
-                if (attempt == 0) f.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline);
+                // First the encoder's default profile (High on the Qualcomm AVC encoder; Baseline
+                // without a level is refused at 1920x1440 there, 0x80001001). High plays on phones,
+                // iOS included, and nothing feeds exports to the Baseline-only live-view decoder.
+                // Baseline stays as the fallback for encoders that need an explicit profile.
+                if (attempt == 1) f.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline);
                 try {
                     encoder.configure(f, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
                     logger.info("Encoder " + encoder.getName() + " " + outW + "x" + outH + " @" + fps
-                            + "fps " + bitrate + "bps");
+                            + "fps " + bitrate + "bps" + (attempt == 1 ? " (Baseline fallback)" : ""));
                     return;
                 } catch (Throwable t) {
                     logger.warn("Encoder configure failed (attempt " + attempt + "): " + t.getMessage());
