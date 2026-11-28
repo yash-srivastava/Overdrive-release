@@ -490,8 +490,6 @@ class ZoomableVideoView @JvmOverloads constructor(
         anim.start()
     }
 
-    fun getQuadrant(): Quadrant = quadrant
-
     /**
      * Set the clip's composition [Layout]. Changes which sub-rectangle each
      * [Quadrant] maps to (e.g. FRONT is the top-left quarter in STANDARD but
@@ -509,8 +507,6 @@ class ZoomableVideoView @JvmOverloads constructor(
             applyTransform(progress = 1f, from = quadrant, to = quadrant)
         }
     }
-
-    fun getLayout(): Layout = layout
 
     // --------- Internals ---------
 

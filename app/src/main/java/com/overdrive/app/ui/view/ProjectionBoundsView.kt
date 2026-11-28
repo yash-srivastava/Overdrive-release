@@ -197,12 +197,6 @@ class ProjectionBoundsView @JvmOverloads constructor(
     /** True while a resize/move gesture is in progress. */
     fun isAdjusting(): Boolean = adjustPointerId != MotionEvent.INVALID_POINTER_ID
 
-    /** Current window as a normalized (0..1 of the cluster) rect, for persistence. */
-    fun normalizedWindow(): FloatArray = floatArrayOf(
-        box.left.toFloat() / clusterW, box.top.toFloat() / clusterH,
-        box.right.toFloat() / clusterW, box.bottom.toFloat() / clusterH
-    )
-
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (oldw > 0 && oldh > 0 && (w != oldw || h != oldh)) cancelActiveGesture()

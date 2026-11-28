@@ -52,16 +52,4 @@ object QrCodeGenerator {
             null
         }
     }
-    
-    /**
-     * Generate a QR code with dark theme colors.
-     */
-    fun generateDarkTheme(content: String, size: Int = 256): Bitmap? {
-        return generate(
-            content = content,
-            size = size,
-            darkColor = Color.WHITE,
-            lightColor = Color.parseColor("#2D2D44")
-        )
-    }
 }

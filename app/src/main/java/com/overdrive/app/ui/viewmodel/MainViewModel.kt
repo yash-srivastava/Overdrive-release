@@ -14,16 +14,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _currentUrl = MutableLiveData<String?>()
     val currentUrl: LiveData<String?> = _currentUrl
 
-    private val _tunnelUrl = MutableLiveData<String?>()
-    val tunnelUrl: LiveData<String?> = _tunnelUrl
-
     init {
-        _tunnelUrl.value = PreferencesManager.getLastTunnelUrl()
-        _currentUrl.value = _tunnelUrl.value
+        _currentUrl.value = PreferencesManager.getLastTunnelUrl()
     }
 
     fun setTunnelUrl(url: String?) {
-        _tunnelUrl.value = url
         if (url != null) {
             PreferencesManager.setLastTunnelUrl(url)
         }
