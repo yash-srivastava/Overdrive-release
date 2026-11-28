@@ -277,6 +277,20 @@ int main() {
             cases++;
         }
     }
+    // Preplanned gathers: unaligned cell boundaries, narrow and wide source
+    // windows, clipped offsets, and all planar/interleaved format combinations.
+    for (int sm = 0; sm < 3; ++sm) {
+        for (int dm = 0; dm < 3; ++dm) {
+            odcpu::check(100, 32, 256, 48, 34, 24, sm, dm, true,
+                         0.f, 0.f, 0.75f, 0.7f, 0.f, 4, rng);
+            odcpu::check(132, 48, 1024, 80, 512, 48, sm, dm, false,
+                         0.f, 0.f, 0.75f, 0.7f, 0.f, 4, rng);
+            cases += 2;
+        }
+    }
+    odcpu::check(2560, 1920, 5120, 960, 1920, 1080, 1, 2, false,
+                 0.f, 0.f, 0.75f, 0.7f, 0.f, 16, rng);
+    cases++;
     // Small geometries use raw coordinates; 1080p fits entirely when packed.
     odcpu::check(640, 480, 2560, 480, 1280, 720, 0, 2, false,
                  0.3f, 0.07f, 0.75f, 0.7f, 0.f, 16, rng);

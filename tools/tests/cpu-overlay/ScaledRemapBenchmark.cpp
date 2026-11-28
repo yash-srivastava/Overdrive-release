@@ -25,10 +25,11 @@ struct Frame {
 int main() {
     Frame strip(2560, 480), windshield(1280, 720), dst(1920, 1080);
     const char* names[] = {"grid", "dashcam", "windshield", "dewarped dashcam",
-                           "dewarped windshield", "2560x1920 dewarped dashcam"};
+                           "dewarped windshield", "2560x1920 dewarped dashcam",
+                           "2560x1920 dashcam"};
     constexpr int frames = 80;
-    for (int mode = 0; mode < 6; mode++) {
-        const bool large = mode == 5;
+    for (int mode = 0; mode < 7; mode++) {
+        const bool large = mode >= 5;
         Frame largeStrip(large ? 5120 : 2, large ? 960 : 2);
         Frame largeDst(large ? 2560 : 2, large ? 1920 : 2);
         Frame& output = large ? largeDst : dst;
@@ -37,8 +38,8 @@ int main() {
         odcpu::RemapSource wr = {windshield.planes, 1280, 720};
         odcpu::RemapSpec p = {large ? 2560 : 1920, large ? 1920 : 1080,
                               mode == 0 ? 0 : 1, {0.f, .25f, .5f, .75f},
-                              large ? .12f : mode >= 3 ? .3f : 0.f,
-                              large ? .04f : mode >= 3 ? .07f : 0.f, .75f,
+                              mode == 5 ? .12f : mode == 3 || mode == 4 ? .3f : 0.f,
+                              mode == 5 ? .04f : mode == 3 || mode == 4 ? .07f : 0.f, .75f,
                               mode == 2 || mode == 4, .12f, .7f};
         for (int i = 0; i < 5; i++) {
             if (odcpu::remapGrid(p, sr, &wr, output.planes, 16)) return 1;
