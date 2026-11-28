@@ -150,14 +150,8 @@ public final class DaemonLogConfig {
     /** VehicleDataMonitor - BYD vehicle CAN bus data */
     public static final boolean VEHICLE_DATA_MONITOR = false;
     
-    /** VehicleDataBridge - vehicle data bridge for HTTP API */
-    public static final boolean VEHICLE_DATA_BRIDGE = false;
-    
     /** PerformanceMonitor - CPU/memory/thermal monitoring */
     public static final boolean PERFORMANCE_MONITOR = false;
-    
-    /** PerformanceBridge - performance monitoring bridge for HTTP API */
-    public static final boolean PERFORMANCE_BRIDGE = false;
     
     /** SocHistoryDatabase - SOC history H2 database */
     public static final boolean SOC_HISTORY_DATABASE = false;
@@ -252,7 +246,7 @@ public final class DaemonLogConfig {
         || RECORDING_MODE_MANAGER || PROXIMITY_GUARD_CONTROLLER
         || PROXIMITY_RADAR_MONITOR || PROXIMITY_RECORDING_HANDLER
         || PROXIMITY_GUARD_CONFIG || GEAR_MONITOR || VEHICLE_DATA_MONITOR
-        || VEHICLE_DATA_BRIDGE || PERFORMANCE_MONITOR || PERFORMANCE_BRIDGE
+        || PERFORMANCE_MONITOR
         || SOC_HISTORY_DATABASE || WS_STREAM_SERVER || ABRP_TELEMETRY
         || ABRP_CONFIG || SOH_ESTIMATOR || TELEMETRY_DATA_COLLECTOR
         || OVERLAY_RENDERER || TRIP_ANALYTICS || STORAGE_MANAGER
@@ -301,9 +295,7 @@ public final class DaemonLogConfig {
             if (PROXIMITY_GUARD_CONFIG)     ENABLED_TAGS.add("ProximityGuardConfig");
             if (GEAR_MONITOR)               ENABLED_TAGS.add("GearMonitor");
             if (VEHICLE_DATA_MONITOR)       ENABLED_TAGS.add("VehicleDataMonitor");
-            if (VEHICLE_DATA_BRIDGE)        ENABLED_TAGS.add("VehicleDataBridge");
             if (PERFORMANCE_MONITOR)        ENABLED_TAGS.add("PerformanceMonitor");
-            if (PERFORMANCE_BRIDGE)         ENABLED_TAGS.add("PerformanceBridge");
             if (SOC_HISTORY_DATABASE)       ENABLED_TAGS.add("SocHistoryDatabase");
             if (ROADSENSE) {
                 ENABLED_TAGS.add("RoadSense");              // controller plog
