@@ -1364,11 +1364,6 @@ public final class TsAvmCoordinator {
         return bindRequested.get() && avmService != null;
     }
 
-    public static boolean isAvmServiceAlive() {
-        TsAvmCoordinator current = instance;
-        return current != null && current.isConnected();
-    }
-
     public void unbind() {
         ServiceConnection boundConnection = connection;
         long epoch = connectionEpoch;
