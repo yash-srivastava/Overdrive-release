@@ -1921,7 +1921,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 val route = st.route
                 if (route != null) {
                     renderRoute(route)
-                    if (st.navigating && !navigating) {
+                    if (!navigating) {
                         // Drive the same guidance follow as the infotainment map,
                         // but WITHOUT re-publishing (clusterMode guards the publish).
                         guidance.start(route)
@@ -1946,7 +1946,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                         moveCameraToImmersiveStart(route)
                         mainHandler.removeCallbacks(guidanceRunnable)
                         mainHandler.post(guidanceRunnable)
-                    } else if (st.navigating && navigating && route !== clusterNavRoute) {
+                    } else if (route !== clusterNavRoute) {
                         // ROUTE CHANGED mid-nav (head-unit rerouted off-route, or the
                         // driver tapped an alternate). Re-arm the cluster's own
                         // guidance engine on the NEW route so its turn-by-turn +
@@ -1968,19 +1968,6 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                         // back into immersive follow (mirrors the nav-start branch), so a
                         // route switch while PARKED doesn't stay zoomed out.
                         moveCameraToImmersiveStart(route)
-                    } else if (!st.navigating && navigating) {
-                        // Defensive: a (route!=null, navigating=false) PREVIEW state.
-                        // No live caller produces it today (NavSession.publishPreview has
-                        // no callers — the head-unit only publishRoute/clear), so this is
-                        // unreachable in the current build; kept correct in case preview-
-                        // mirroring is wired later. Retire the banner + glyph.
-                        navigating = false
-                        clusterNavRoute = null
-                        mainHandler.removeCallbacks(guidanceRunnable)
-                        guidance.stop()
-                        findViewById<View>(R.id.navBanner)?.visibility = View.GONE
-                        findViewById<View>(R.id.navBannerIcon)?.visibility = View.GONE
-                        showNavHud(false)
                     }
                 } else {
                     // Trip cleared on infotainment → wipe + resume idle follow.
@@ -2606,7 +2593,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         }
         c.drawCircle(cx, cx, r, rim)
         // Null-safe (was `!!`): a failed glyph resolve returns the pin body without the
-        // glyph rather than crashing out of onStyleLoaded → addImage. See buildHazardPin.
+        // glyph rather than crashing out of onStyleLoaded → addImage.
         val glyph = ContextCompat.getDrawable(this, glyphRes)?.mutate() ?: return bmp
         glyph.colorFilter = android.graphics.PorterDuffColorFilter(
             0xFFFFFFFF.toInt(), android.graphics.PorterDuff.Mode.SRC_IN)

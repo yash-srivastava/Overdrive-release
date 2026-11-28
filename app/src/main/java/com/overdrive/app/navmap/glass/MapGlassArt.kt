@@ -27,7 +27,6 @@ object MapGlassArt {
     const val GEM_PREFIX = "od-gem-"
     const val CLUSTER_PREFIX = "od-cluster-"
     const val VIA_PREFIX = "od-via-"
-    const val CLUSTER_MAX = "od-cluster-99+"
 
     const val KIND_POTHOLE = "pothole"
     const val KIND_BREAKER = "breaker"
@@ -47,26 +46,7 @@ object MapGlassArt {
 
     private val KIND_NAMES = arrayOf(KIND_POTHOLE, KIND_BREAKER, KIND_ROUGH, KIND_UNKNOWN)
     private val GEM_IDS = Array(4) { kind -> Array(3) { sev -> "$GEM_PREFIX${KIND_NAMES[kind]}-${sev + 1}" } }
-    private val CLUSTER_IDS = Array(100) { "$CLUSTER_PREFIX$it" }
-    private val VIA_IDS = Array(VIA_IDS_CACHED + 1) { "$VIA_PREFIX$it" }
-    private const val VIA_IDS_CACHED = 32
     private const val OVERFLOW = "99+"
-
-    /** Today's hazard feature `type`: 1 pothole, 0 breaker, 3 rough, anything else unknown. */
-    fun kindOf(type: Int): String = when (type) {
-        1 -> KIND_POTHOLE
-        0 -> KIND_BREAKER
-        3 -> KIND_ROUGH
-        else -> KIND_UNKNOWN
-    }
-
-    /** od-gem-{kind}-{sev}; an unknown kind reads as unknown and sev is clamped to 1–3. */
-    fun gemId(kind: String, sev: Int): String = GEM_IDS[kindIndex(kind)][sev.coerceIn(1, 3) - 1]
-
-    /** od-cluster-N for N ≤ 99, else od-cluster-99+. */
-    fun clusterId(n: Int): String = if (n > 99) CLUSTER_MAX else CLUSTER_IDS[n.coerceAtLeast(0)]
-
-    fun viaId(n: Int): String = if (n in 0..VIA_IDS_CACHED) VIA_IDS[n] else "$VIA_PREFIX$n"
 
     /** The recommended LocationIndicatorLayer look: images and the paint values above (location, bearing, accuracy are main's). */
     fun puckLayerProps(): Array<PropertyValue<*>> = arrayOf(
@@ -107,11 +87,6 @@ object MapGlassArt {
         if (!sheet.images.containsKey(id)) styles.getOrPut(style) { Registration() }.onDemand.add(id)
         return true
     }
-
-    /** The bitmap [registerStatic] / [drawMissing] would add for [id], or null if the id is not ours (previews). */
-    @Synchronized
-    internal fun bitmap(context: Context, id: String, night: Boolean): Bitmap? =
-        draw(context, sheet(night, context.resources.displayMetrics.densityDpi), id)
 
     // ── caches ───────────────────────────────────────────────────────────────
 
@@ -156,13 +131,6 @@ object MapGlassArt {
         if (sheets.size >= 2) sheets.removeAt(0)
         sheets.add(s)
         return s
-    }
-
-    private fun kindIndex(kind: String): Int = when (kind) {
-        KIND_POTHOLE -> MarkerArt.POTHOLE
-        KIND_BREAKER -> MarkerArt.BREAKER
-        KIND_ROUGH -> MarkerArt.ROUGH
-        else -> MarkerArt.UNKNOWN
     }
 
     // ── on-demand images ─────────────────────────────────────────────────────
