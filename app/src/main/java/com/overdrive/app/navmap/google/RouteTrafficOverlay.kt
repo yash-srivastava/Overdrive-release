@@ -1,14 +1,11 @@
 package com.overdrive.app.navmap.google
 
-import android.os.SystemClock
 import android.util.Log
 import com.overdrive.app.navmap.glass.CoordBuf
 import com.overdrive.app.navmap.glass.GlassLines
 import com.overdrive.app.navmap.glass.MapGlassPalette
 import com.overdrive.app.navmap.glass.RibbonTrack
 import com.overdrive.app.navmap.glass.SpanSet
-import com.overdrive.app.navmap.nav.CongestionSpan
-import com.overdrive.app.navmap.nav.NavRoute
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.Layer
@@ -23,15 +20,11 @@ import kotlin.math.min
 
 /**
  * Congested stretches of the route, one LineString per span clipped to [cut, end] with `level` slow|jam.
- * Glass (SPEC §4.3): install() + setData()/setRange(), driven by MapGlassLayers. Legacy flat line:
- * addToStyle()/show()/updateTraveled()/reset() as before. Main thread only; never throws.
+ * Driven by MapGlassLayers through install(), setData() and setRange(). Main thread only; never throws.
  */
 class RouteTrafficOverlay {
 
     companion object {
-        /** Legacy flat-line source and layer. */
-        const val SOURCE_ID = "roadsense-route-traffic"
-        const val LAYER_ID = "roadsense-route-traffic-line"
         const val GLASS_SOURCE_ID = "od-traffic"
         const val PROP_LEVEL = "level"
 
@@ -51,9 +44,6 @@ class RouteTrafficOverlay {
         private const val MIN_PIECE_M = 1.0
         private const val SLOW_FADE_IN = 0.09
         private const val JAM_FADE_OUT = 0.9
-        // Legacy per-frame updateTraveled(): geometry is re-cut at most once a second and per 25 m.
-        private const val RECUT_MIN_M = 25.0
-        private const val RECUT_MIN_MS = 1000L
     }
 
     private var style: Style? = null
@@ -64,10 +54,6 @@ class RouteTrafficOverlay {
     private var cutM = Double.NaN
     private var endM = Double.NaN
     private var lastJson: String? = null
-
-    private var legacyRoute: NavRoute? = null
-    private var traveledM = 0.0
-    private var recutAtMs = 0L
 
     private val buf = CoordBuf()
     private val sb = StringBuilder(4096)
@@ -115,66 +101,6 @@ class RouteTrafficOverlay {
         this.cutM = cutM
         this.endM = endM
         render()
-    }
-
-    // ── Legacy API (activity callers before the glass integration) ─────────
-
-    fun addToStyle(style: Style, aboveLayerId: String, slowColor: Int, jamColor: Int, lineWidth: Float) {
-        dropRefs()
-        if (!loaded(style)) return
-        try {
-            removeAll(style)
-            val src = GeoJsonSource(SOURCE_ID, EMPTY)
-            style.addSource(src)
-            val lyr = LineLayer(LAYER_ID, SOURCE_ID).withProperties(
-                PropertyFactory.lineColor(Expression.match(Expression.get(PROP_LEVEL), Expression.color(slowColor),
-                    Expression.stop("jam", Expression.color(jamColor)))),
-                PropertyFactory.lineWidth(lineWidth),
-                PropertyFactory.lineOpacity(0.95f),
-                PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
-                PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
-            )
-            add(style, lyr, aboveLayerId, null)
-            this.style = style
-            source = src
-            render()
-        } catch (t: Throwable) {
-            Log.w(TAG, "addToStyle failed: ${t.javaClass.simpleName}")
-            dropRefs()
-        }
-    }
-
-    /** Draws [spans] of [route]; null route or no spans clears. A different route restarts the traveled trim. */
-    fun show(route: NavRoute?, spans: List<CongestionSpan>) {
-        if (route !== legacyRoute) {
-            traveledM = 0.0
-            recutAtMs = 0L
-        }
-        legacyRoute = route
-        val t = if (route == null || route.points.size < 2 || spans.isEmpty()) null
-        else track?.takeIf { it.route === route } ?: RibbonTrack.of(route)
-        this.track = t
-        this.spans = t?.let { SpanSet.of(it, spans) }
-        cutM = if (traveledM > 0.0) traveledM else Double.NaN
-        render()
-    }
-
-    fun updateTraveled(traveledM: Double) {
-        if (!(traveledM > this.traveledM)) return
-        this.traveledM = traveledM
-        if (spans == null) return
-        val drawn = if (cutM.isNaN()) 0.0 else cutM
-        if (traveledM - drawn < RECUT_MIN_M) return
-        val now = SystemClock.elapsedRealtime()
-        if (now - recutAtMs < RECUT_MIN_MS) return
-        recutAtMs = now
-        setRange(traveledM, endM)
-    }
-
-    fun reset() {
-        traveledM = 0.0
-        recutAtMs = 0L
-        setRange(Double.NaN, endM)
     }
 
     fun detach() = dropRefs()
@@ -276,9 +202,7 @@ class RouteTrafficOverlay {
 
     private fun removeAll(style: Style) {
         for (id in glassLayerIds(false)) style.getLayer(id)?.let { style.removeLayer(it) }
-        style.getLayer(LAYER_ID)?.let { style.removeLayer(it) }
         if (style.getSource(GLASS_SOURCE_ID) != null) style.removeSource(GLASS_SOURCE_ID)
-        if (style.getSource(SOURCE_ID) != null) style.removeSource(SOURCE_ID)
     }
 
     private fun dropRefs() {

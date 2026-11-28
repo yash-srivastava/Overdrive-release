@@ -6,7 +6,7 @@ import com.overdrive.app.navmap.nav.NavRoute
 /**
  * Process-wide active-navigation state, shared between the two map instances:
  *  - the INTERACTIVE map on the infotainment display (display 0) PUBLISHES here
- *    when the user selects/starts/stops a route (it's the control surface);
+ *    when the user starts/changes/stops guidance (it's the control surface);
  *  - the VIEW-ONLY cluster mirror (the RoadSenseClusterMapActivity alias on the
  *    fission display) OBSERVES and re-renders the same route in real time.
  *
@@ -23,12 +23,13 @@ object NavSession {
     /** Immutable snapshot of the active trip. route == null ⇒ no active nav. */
     data class State(
         val route: NavRoute?,
-        val destLabel: String,
-        val navigating: Boolean
-    )
+        val destLabel: String
+    ) {
+        val navigating: Boolean get() = route != null
+    }
 
     @Volatile
-    var state: State = State(null, "", false)
+    var state: State = State(null, "")
         private set
 
     /** elapsedRealtime of the last guidance step on either screen: guidance left running behind a closed map goes quiet. */
@@ -69,22 +70,17 @@ object NavSession {
 
     /** Publish an active route (selected on the infotainment map). navigating=true. */
     fun publishRoute(route: NavRoute, destLabel: String) {
-        update(State(route, destLabel, navigating = true))
-    }
-
-    /** Publish a route PREVIEW (chosen but guidance not started yet). navigating=false. */
-    fun publishPreview(route: NavRoute, destLabel: String) {
-        update(State(route, destLabel, navigating = false))
+        update(State(route, destLabel))
     }
 
     /** Clear the active trip (route ended / cancelled). */
     fun clear() {
-        if (state.route == null && !state.navigating) return
-        update(State(null, "", false))
+        if (state.route == null) return
+        update(State(null, ""))
     }
 
     private fun update(next: State) {
-        if (!next.navigating) {
+        if (next.route == null) {
             com.overdrive.app.navmap.cluster.ClusterGuidanceClient.clear("roadsense")
         }
         if (next.route == null || traffic?.route !== next.route) traffic = null
