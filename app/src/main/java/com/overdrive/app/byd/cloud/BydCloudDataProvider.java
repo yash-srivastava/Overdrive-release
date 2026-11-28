@@ -1200,18 +1200,6 @@ public final class BydCloudDataProvider {
         this.mqttConnected = connected;
     }
 
-    public boolean isMqttConnected() {
-        return mqttConnected;
-    }
-
-    public long getTotalMessagesReceived() {
-        return totalMessagesReceived;
-    }
-
-    public long getLastMessageReceivedAt() {
-        return lastMessageReceivedAt;
-    }
-
     /**
      * Build a status JSON for the API response.
      */

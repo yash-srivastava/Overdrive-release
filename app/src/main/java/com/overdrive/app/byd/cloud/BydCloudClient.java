@@ -198,14 +198,6 @@ public final class BydCloudClient {
     // ── Vehicle List ────────────────────────────────────────────────────
 
     /**
-     * Fetch all vehicles and return the first VIN.
-     */
-    public String fetchFirstVin() throws IOException {
-        String[] result = fetchFirstVinAndEnergyType();
-        return result[0];
-    }
-
-    /**
      * Fetch all vehicles and return [VIN, energyType].
      */
     public String[] fetchFirstVinAndEnergyType() throws IOException {
@@ -444,11 +436,6 @@ public final class BydCloudClient {
     /**
      * Verify the control PIN. Must be called once before remote commands.
      */
-    /** True once {@link #verifyControlPassword(String)} has succeeded this session. */
-    public boolean isControlPasswordVerified() {
-        return commandsVerified;
-    }
-
     public void verifyControlPassword(String vin) throws IOException {
         // Idempotent — once we've verified the PIN this session, every subsequent
         // /control/remoteControl call piggybacks on the same verification flag.
@@ -487,95 +474,6 @@ public final class BydCloudClient {
     }
 
     // ── Remote Commands ─────────────────────────────────────────────────
-
-    /**
-     * Flash the vehicle's lights.
-     */
-    public boolean flashLights(String vin) throws IOException {
-        return executeRemoteCommand(vin, "FLASHLIGHTNOWHISTLE", true);
-    }
-
-    /**
-     * Flash lights without waiting for result polling.
-     */
-    public boolean flashLightsNoWait(String vin) throws IOException {
-        return executeRemoteCommand(vin, "FLASHLIGHTNOWHISTLE", false);
-    }
-
-    /**
-     * Find car (horn + lights).
-     */
-    public boolean findCar(String vin) throws IOException {
-        return executeRemoteCommand(vin, "FINDCAR", true);
-    }
-
-    /**
-     * Find car without waiting for result polling.
-     */
-    public boolean findCarNoWait(String vin) throws IOException {
-        return executeRemoteCommand(vin, "FINDCAR", false);
-    }
-
-    /**
-     * Lock the vehicle.
-     */
-    public boolean lock(String vin) throws IOException {
-        return executeRemoteCommand(vin, "LOCKDOOR", true);
-    }
-
-    /**
-     * Unlock the vehicle.
-     */
-    public boolean unlock(String vin) throws IOException {
-        return executeRemoteCommand(vin, "OPENDOOR", true);
-    }
-
-    /**
-     * Start remote AC with target temp.
-     * BYD OPENAIR: temperature applies to driver+copilot, cycle_mode=2 (auto),
-     * remote_mode=4 (cool/heat auto), default time_span=3 (20 min).
-     */
-    public boolean startClimate(String vin, double tempCelsius) throws IOException {
-        return executeRemoteCommand(vin, "OPENAIR", climateStartParams(tempCelsius), true).success;
-    }
-
-    /**
-     * Stop remote AC.
-     */
-    public boolean stopClimate(String vin) throws IOException {
-        return executeRemoteCommand(vin, "CLOSEAIR", null, true).success;
-    }
-
-    /**
-     * Close all four windows.
-     */
-    public boolean closeAllWindows(String vin) throws IOException {
-        return executeRemoteCommand(vin, "CLOSEWINDOW", null, true).success;
-    }
-
-    /** Cloud OPENWINDOW only cracks all windows for ventilation; it is not a full-open command. */
-    public boolean ventAllWindows(String vin) throws IOException {
-        return executeRemoteCommand(vin, "OPENWINDOW", null, true).success;
-    }
-
-    /**
-     * Toggle traction battery preconditioning heat.
-     * BATTERYHEAT: batteryHeatSwitch=1 enables, 0 disables.
-     */
-    public boolean setBatteryHeat(String vin, boolean on) throws IOException {
-        JSONObject extra = new JSONObject();
-        try {
-            extra.put("batteryHeatSwitch", on ? 1 : 0);
-        } catch (Exception e) {
-            throw new IOException("Failed to build BATTERYHEAT params", e);
-        }
-        return executeRemoteCommand(vin, "BATTERYHEAT", extra, true).success;
-    }
-
-    /** Build pyBYD-compatible OPENAIR controlParamsMap with the OEM default 20-minute session. */
-    public static JSONObject climateStartParams(double tempCelsius) throws IOException {
-        return climateStartParams(tempCelsius, 20);
-    }
 
     /**
      * Build pyBYD-compatible OPENAIR controlParamsMap.
@@ -702,37 +600,12 @@ public final class BydCloudClient {
     }
 
     /**
-     * Set seat heating/ventilation via cloud (commandType VENTILATIONHEATING).
-     *
-     * <p>BYD's cloud command requires sending the FULL seat-climate snapshot in
-     * one POST — there's no "just change one seat" variant. We pass the current
-     * state of all known seats (driver+passenger heat+vent), zero out unknown
-     * surfaces (rear seats, steering wheel), and let the BMS apply the diff.
-     *
-     * <p>Level scale is INVERTED on the wire vs. our 0..2 UI convention:
-     * <ul>
-     *   <li>UI 0 (off) → wire 3</li>
-     *   <li>UI 1 (low) → wire 2</li>
-     *   <li>UI 2 (high) → wire 1</li>
-     *   <li>0 = "not applicable / feature absent" — used for seats we don't track</li>
-     * </ul>
-     *
-     * @param chairType "1"=driver changed, "2"=copilot, "5"=steering wheel
-     */
-    public boolean setSeatClimate(String vin, String chairType,
-                                   int driverHeatUi, int driverVentUi,
-                                   int passengerHeatUi, int passengerVentUi) throws IOException {
-        // Retained for callers built before the router supplied a confirmed
-        // steering-wheel state. New routed calls must use the overload below:
-        // wire value 3 is an explicit steering-wheel OFF command.
-        return setSeatClimate(vin, chairType, driverHeatUi, driverVentUi,
-                passengerHeatUi, passengerVentUi, 3);
-    }
-
-    /**
      * Send a complete, state-preserving front-seat command. The steering-wheel
      * field is also part of BYD's composite payload, so it must be a known wire
-     * state (1=on or 3=off), never an assumed default.
+     * state (1=on or 3=off), never an assumed default. BYD requires the full
+     * front-seat snapshot; UI levels 0/1/2 map to wire levels 3/2/1.
+     *
+     * @param chairType "1"=driver changed, "2"=copilot, "5"=steering wheel
      */
     public boolean setSeatClimate(String vin, String chairType,
                                    int driverHeatUi, int driverVentUi,
@@ -753,17 +626,9 @@ public final class BydCloudClient {
     }
 
     /**
-     * Build pyBYD-compatible VENTILATIONHEATING parameters. BYD's current
-     * API model declares the level and mode fields as JSON numbers; only
-     * chairType is a string selector.
+     * Build VENTILATIONHEATING parameters with an explicit steering-wheel state.
+     * Level and mode fields are JSON numbers; chairType is a string selector.
      */
-    static JSONObject seatClimateParams(String chairType,
-                                        int driverHeatUi, int driverVentUi,
-                                        int passengerHeatUi, int passengerVentUi) throws IOException {
-        return seatClimateParams(chairType, driverHeatUi, driverVentUi,
-                passengerHeatUi, passengerVentUi, 3);
-    }
-
     static JSONObject seatClimateParams(String chairType,
                                         int driverHeatUi, int driverVentUi,
                                         int passengerHeatUi, int passengerVentUi,
@@ -1266,10 +1131,6 @@ public final class BydCloudClient {
                                                            boolean waitForResult,
                                                            BooleanSupplier authority) throws IOException {
         return executeRemoteCommand(vin, commandType, extraParams, waitForResult, authority);
-    }
-
-    private boolean executeRemoteCommand(String vin, String commandType, boolean waitForResult) throws IOException {
-        return executeRemoteCommand(vin, commandType, null, waitForResult).success;
     }
 
     private CloudCommandResult executeRemoteCommand(String vin, String commandType,
