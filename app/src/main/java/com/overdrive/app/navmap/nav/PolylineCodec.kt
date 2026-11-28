@@ -20,50 +20,45 @@ object PolylineCodec {
      * @param encoded the encoded polyline string (Valhalla `legs[].shape`)
      * @param precisionFactor the coordinate scaling factor; Valhalla uses
      *   `1e6` (the default), classic Google polylines use `1e5`
-     * @return decoded points; a truncated tail contributes no incomplete point
+     * @return decoded points up to the first malformed, truncated or out-of-range point
      */
     fun decode(encoded: String, precisionFactor: Double = 1e6): List<GeoPoint> {
-        if (encoded.isEmpty()) return emptyList()
+        if (encoded.isEmpty() || !precisionFactor.isFinite() || precisionFactor <= 0.0) {
+            return emptyList()
+        }
 
         val points = ArrayList<GeoPoint>()
         var index = 0
-        val len = encoded.length
-        var lat = 0
-        var lng = 0
+        var lat = 0L
+        var lng = 0L
 
-        try {
-            while (index < len) {
-                // Decode one delta-encoded signed varint for latitude, then longitude.
-                var shift = 0
-                var result = 0
-                var b: Int
-                do {
-                    b = encoded[index++].code - 63
-                    result = result or ((b and 0x1f) shl shift)
-                    shift += 5
-                } while (b >= 0x20 && index < len)
-                val dLat = if (result and 1 != 0) (result shr 1).inv() else result shr 1
-                lat += dLat
-
-                shift = 0
-                result = 0
-                do {
-                    b = encoded[index++].code - 63
-                    result = result or ((b and 0x1f) shl shift)
-                    shift += 5
-                } while (b >= 0x20 && index < len)
-                // A continuation bit at EOF means the longitude is incomplete.
-                // Keep the complete prefix instead of appending a fabricated point.
-                if (b >= 0x20) break
-                val dLng = if (result and 1 != 0) (result shr 1).inv() else result shr 1
-                lng += dLng
-
-                points.add(GeoPoint(lat / precisionFactor, lng / precisionFactor))
+        // A signed 32-bit delta uses at most 32 unsigned zigzag bits.
+        fun readDelta(): Long? {
+            var shift = 0
+            var result = 0L
+            while (index < encoded.length && shift <= 30) {
+                val b = encoded[index++].code - 63
+                if (b !in 0..63 || (shift == 30 && b > 3)) return null
+                result = result or ((b and 0x1f).toLong() shl shift)
+                if (b < 0x20) {
+                    return if ((result and 1L) != 0L) (result shr 1).inv() else result shr 1
+                }
+                shift += 5
             }
-        } catch (_: IndexOutOfBoundsException) {
-            // Truncated/malformed tail — return what we decoded so far.
+            return null
         }
 
+        while (index < encoded.length) {
+            val dLat = readDelta() ?: break
+            val dLng = readDelta() ?: break
+            // Accumulate before narrowing to coordinates to avoid Int wraparound.
+            lat += dLat
+            lng += dLng
+            val latitude = lat / precisionFactor
+            val longitude = lng / precisionFactor
+            if (latitude !in -90.0..90.0 || longitude !in -180.0..180.0) break
+            points.add(GeoPoint(latitude, longitude))
+        }
         return points
     }
 }
