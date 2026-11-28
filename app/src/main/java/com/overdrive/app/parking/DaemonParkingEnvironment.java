@@ -509,7 +509,7 @@ public final class DaemonParkingEnvironment implements ParkingEnvironment {
         String layout = null;
         JSONObject j = sidecarOf(mp4);
         if (j != null) {
-            if (j.has("lens")) return true;
+            if (j.has("lens") || j.has("grid")) return true;
             layout = j.optString("layout", "standard");
         }
         if (layout == null) {

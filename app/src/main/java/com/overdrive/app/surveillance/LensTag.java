@@ -19,6 +19,11 @@ import java.util.Map;
 public final class LensTag {
 
     public static final String STRIP = "strip";
+    /** Sidecar key of the grid geometry block (see {@link #buildGrid}); readers ignore unknown keys. */
+    public static final String GRID = "grid";
+    static final int GRID_VERSION = 1;
+    // A clip's frames may start this long before its segment start (pre-record history).
+    static final long GRID_PRE_ROLL_MS = 60_000L;
 
     private static final int MAX_ENTRIES = 256;
     private static final Map<String, JSONObject> BY_PATH =
@@ -29,7 +34,38 @@ public final class LensTag {
             }
         };
 
+    private static final Map<String, JSONObject> GRID_BY_PATH =
+        new LinkedHashMap<String, JSONObject>(64, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, JSONObject> eldest) {
+                return size() > MAX_ENTRIES;
+            }
+        };
+
     private LensTag() {}
+
+    /** Records the grid block (or its absence) for a clip whose identity was just captured. */
+    public static void rememberGrid(File finalMp4, JSONObject grid) {
+        if (finalMp4 == null) return;
+        synchronized (GRID_BY_PATH) {
+            if (grid == null) GRID_BY_PATH.remove(finalMp4.getAbsolutePath());
+            else GRID_BY_PATH.put(finalMp4.getAbsolutePath(), grid);
+        }
+    }
+
+    /** Grid block captured at close for this clip (a copy), or null. */
+    public static JSONObject gridForFile(File mp4) {
+        if (mp4 == null) return null;
+        synchronized (GRID_BY_PATH) {
+            JSONObject grid = GRID_BY_PATH.get(mp4.getAbsolutePath());
+            if (grid == null) return null;
+            try {
+                return new JSONObject(grid.toString());
+            } catch (Throwable t) {
+                return null;
+            }
+        }
+    }
 
     /** Records the tag (or its absence) for a clip whose identity was just captured. */
     public static void remember(File finalMp4, JSONObject tag) {
@@ -55,12 +91,13 @@ public final class LensTag {
     }
 
     /**
-     * Writes {@code {"version":3,"lens":...}} when the clip has a tag and no sidecar yet, so
-     * players see it even when no other sidecar writer runs for the clip. Never replaces one.
+     * Writes {@code {"version":3,"lens":...,"grid":...}} when the clip has a tag and no sidecar yet,
+     * so players see it even when no other sidecar writer runs for the clip. Never replaces one.
      */
     public static boolean writeSidecarIfAbsent(File mp4) {
         JSONObject tag = forFile(mp4);
-        if (tag == null || mp4.getParentFile() == null) return false;
+        JSONObject grid = gridForFile(mp4);
+        if ((tag == null && grid == null) || mp4.getParentFile() == null) return false;
         File json = new File(mp4.getParentFile(), mp4.getName().replace(".mp4", ".json"));
         boolean created = false;
         try {
@@ -69,7 +106,8 @@ public final class LensTag {
             created = true;
             JSONObject root = new JSONObject();
             root.put("version", 3);
-            root.put("lens", tag);
+            if (tag != null) root.put("lens", tag);
+            if (grid != null) root.put(GRID, grid);
             try (java.io.Writer w = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(json), java.nio.charset.StandardCharsets.UTF_8)) {
                 w.write(root.toString());
             }
@@ -177,5 +215,48 @@ public final class LensTag {
             return null;
         }
         return root;
+    }
+    /**
+     * Grid block for a clip of this recorder, or null when its frames are not (or not provably)
+     * the 4-camera 2x2 grid. {@code since}: MIN_VALUE when the frames are proven grid, else the
+     * wall ms the grid must predate (0 or less: unknown, no tag). Raw/strip come from {@link #finishGrid}.
+     */
+    static JSONObject buildGrid(GpuMosaicRecorder r, long since) {
+        if (r == null || (since != Long.MIN_VALUE && !(since > 0 && r.gridSince(since)))) {
+            return null;
+        }
+        try {
+            JSONObject grid = new JSONObject();
+            grid.put("v", GRID_VERSION);
+            JSONObject frame = new JSONObject();
+            frame.put("width", r.getViewportWidth());
+            frame.put("height", r.getViewportHeight());
+            grid.put("frame", frame);
+            // Quadrant order TL, TR, BL, BR, as GpuMosaicRecorder composes it; no tile is mirrored.
+            grid.put("tiles", new org.json.JSONArray().put("front").put("right").put("rear").put("left"));
+            grid.put("aspect", round5(r.getRectifyAspect()));
+            // What the recorded dashcam layout would use: top band = windshield cropped by cropY.
+            JSONObject dashcam = new JSONObject();
+            dashcam.put("split", round5(GpuMosaicRecorder.dashcamSplit()));
+            dashcam.put("cropY", round5(r.windshieldCropY()));
+            dashcam.put("srcAspect", round5(GpuMosaicRecorder.windshieldSourceAspect()));
+            dashcam.put("cells", new org.json.JSONArray().put("left").put("rear").put("right"));
+            grid.put("dashcam", dashcam);
+            return grid;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** Adds raw/strip from the clip's lens tag: raw tiles get the player dewarp, strip rows stay as recorded. */
+    static void finishGrid(JSONObject grid, JSONObject lensTag) {
+        try {
+            grid.put("raw", lensTag != null);
+            grid.put(STRIP, lensTag != null ? Math.max(0, lensTag.optInt(STRIP, 0)) : 0);
+        } catch (Throwable ignored) {}
+    }
+
+    private static double round5(double v) {
+        return Math.round(v * 100000.0) / 100000.0;
     }
 }

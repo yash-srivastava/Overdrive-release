@@ -699,6 +699,7 @@ public class GpuMosaicRecorder {
         // CPU recording engine: no encoder surface or shaders (see submitCpuFrame).
         cpuEngine = encoder.isCpuInput();
         encoder.setLensTagSupplier(() -> LensTag.build(this));
+        encoder.setGridTagSupplier(since -> LensTag.buildGrid(this, since));
         if (cpuEngine) {
             initCpuEngine();
             return;
@@ -1720,8 +1721,34 @@ public class GpuMosaicRecorder {
         int v = (layout == 1) ? 1 : 0;
         if (v == this.recordLayout) return;
         this.recordLayout = v;
+        noteGridState();
         this.recordLayoutUniformDirty.set(true);
     }
+
+    // Wall time the 4-camera 2x2 grid composition last started or stopped (sidecar grid tag).
+    // 0: grid since construction. A new recorder always gets a new encoder (empty pre-record
+    // ring), so no earlier frame of another layout can land in its clips.
+    private volatile long gridChangedAtMs = 0L;
+
+    private void noteGridState() {
+        gridChangedAtMs = System.currentTimeMillis();
+    }
+
+    /** True while frames are the 4-camera 2x2 grid: TL front, TR right, BL rear, BR left. */
+    boolean recordsGrid() {
+        return cameraLayout == 0 && recordLayout == 0;
+    }
+
+    /** True when the grid has been the composition since {@code wallMs} without a change. */
+    boolean gridSince(long wallMs) {
+        return recordsGrid() && gridChangedAtMs < wallMs;
+    }
+
+    float windshieldCropY() { return cpuWindshieldCropY; }
+
+    static float dashcamSplit() { return DASHCAM_SPLIT; }
+
+    static float windshieldSourceAspect() { return WINDSHIELD_SOURCE_ASPECT; }
 
     /**
      * Wires the HAL-contention probe used by the safety valve. The valve only
@@ -1745,6 +1772,7 @@ public class GpuMosaicRecorder {
         if (layout == this.cameraLayout) return;
         this.apaMode = (layout == 1);
         this.cameraLayout = layout;
+        noteGridState();
         // Defer the actual glUniform1f to the next drawFrame on the
         // encoder GL thread; we don't own that context here.
         this.apaModeUniformDirty.set(true);

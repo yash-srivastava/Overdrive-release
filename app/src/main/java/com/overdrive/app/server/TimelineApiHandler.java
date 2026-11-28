@@ -415,6 +415,13 @@ public final class TimelineApiHandler {
         } else {
             prefer = null;
         }
+        // family=oemDashcam: only OEM single-camera clips (dashcam view follower); absent = unchanged.
+        String familyParam = query.get("family");
+        boolean oemOnly = false;
+        if (familyParam != null && !familyParam.isEmpty()) {
+            if (!familyParam.equalsIgnoreCase("oemDashcam")) throw new Reject(400, "family");
+            oemOnly = true;
+        }
         Integer skim = null;
         String skimParam = query.get("skim");
         if (skimParam != null && !skimParam.isEmpty()) {
@@ -426,17 +433,17 @@ public final class TimelineApiHandler {
             return;
         }
         try {
-            serveWindowPlaylist(window, types, prefer, skim, out);
+            serveWindowPlaylist(window, types, prefer, skim, oemOnly, out);
         } finally {
             BUILDS.release();
         }
     }
 
     private static void serveWindowPlaylist(long[] window, Set<String> types, String prefer,
-                                            Integer skim, OutputStream out) throws Exception {
+                                            Integer skim, boolean oemOnly, OutputStream out) throws Exception {
         List<TimelineData.PlanItem> plan;
         try {
-            plan = TimelineData.playbackPlan(window[0], window[1], types, prefer);
+            plan = TimelineData.playbackPlan(window[0], window[1], types, prefer, oemOnly);
         } catch (Throwable t) {
             log("plan failed: " + t);
             throw new Reject(503, "unavailable");
