@@ -481,9 +481,13 @@ public class SurveillanceConfig {
     public int getBlockSize() { return blockSize; }
     public int getRequiredBlocks() { return requiredBlocks; }
     public float getSensitivity() { return sensitivity; }
+    public float getMinDistanceM() { return minDistanceM; }
     public float getMaxDistanceM() { return maxDistanceM; }
     public int getFlashImmunity() { return flashImmunity; }
+    public int getTemporalFrames() { return temporalFrames; }
     public boolean isUseChroma() { return useChroma; }
+    public float getCameraHeightM() { return cameraHeightM; }
+    public float getCameraTiltDeg() { return cameraTiltDeg; }
     public float getVerticalFovDeg() { return verticalFovDeg; }
     public float getAiConfidence() { return aiConfidence; }
     public float getMinObjectSize() { return minObjectSize; }
