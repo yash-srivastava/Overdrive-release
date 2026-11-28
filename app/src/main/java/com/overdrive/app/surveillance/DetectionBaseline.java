@@ -951,14 +951,6 @@ public class DetectionBaseline {
         logger.info("Baseline reset (all quadrants cleared)");
     }
 
-    /**
-     * Gets the number of baseline entries for a quadrant.
-     */
-    public synchronized int getEntryCount(int quadrant) {
-        if (quadrant < 0 || quadrant >= NUM_QUADRANTS) return 0;
-        return baselines[quadrant].size();
-    }
-
     // ==================== INTERNAL ====================
 
     private boolean isNeverPromoteClass(int classId) {

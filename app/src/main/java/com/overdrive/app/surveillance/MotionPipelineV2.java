@@ -386,72 +386,6 @@ public class MotionPipelineV2 {
                     break;
             }
         }
-        
-        /**
-         * Apply night mode preset.
-         * Tuned for the BYD's camera ISP which boosts ISO heavily at night,
-         * pushing mean luma to ~75-85 even in darkness. The heavy ISO boost
-         * creates significant sensor noise that looks like motion to the
-         * standard thresholds.
-         */
-        public void applyNightMode() {
-            // Lower absolute thresholds for crushed, grainy blacks
-            shadowThreshold = 14;
-            lumaRatioThreshold = 1.15f;
-            
-            // ISO noise creates fake edges. Lower the edge threshold so real
-            // objects pass, but keep densityThreshold normal to filter the static.
-            edgeDiffThreshold = 8;
-            densityThreshold = 12;  // Do NOT lower — ISO grain triggers false motion
-            
-            // Temporal: require 2 frames confirmation (same as outdoor fast-motion fix)
-            confidenceIncrement = 0.4f;
-            confidenceThreshold = 0.7f;
-            
-            // Headlight suppression: relax brightness shift threshold so passing
-            // headlights trigger the brightness suppression stage instead of
-            // being misclassified as motion.
-            brightnessShiftThreshold = 0.35f;
-            brightnessSuppressionFrames = 8;  // Longer suppression for headlight sweeps
-            
-            // Relax shadow filtering — color noise is too high at night for
-            // chrominance-based shadow detection to work reliably.
-            shadowFilterMode = 1;  // LIGHT
-            chromaRatioTolerance = 0.25f;
-            shadowPixelFraction = 0.7f;
-            oscillationThreshold = 4;
-            
-            // Keep spatial and behavioral settings from current preset
-            // (don't override minComponentSize, loiteringFrames, etc.)
-        }
-        
-        /**
-         * Apply glare mode preset.
-         * When direct sunlight hits the lens, the BYD's ISP crushes exposure to
-         * prevent blowout, compressing ground contrast from ~40 luma points to ~12.
-         * The standard shadowThreshold of 30 makes people invisible.
-         *
-         * Uses relative multipliers on the user's current settings so their
-         * sensitivity preference is respected (high sensitivity → aggressive glare
-         * mode, low sensitivity → conservative glare mode).
-         */
-        public void applyGlareMode() {
-            // Scale thresholds down to catch faint, contrast-crushed motion
-            shadowThreshold = Math.max(10, (int)(shadowThreshold * 0.5f));
-            lumaRatioThreshold = Math.max(1.05f, lumaRatioThreshold * 0.85f);
-            edgeDiffThreshold = Math.max(6, (int)(edgeDiffThreshold * 0.6f));
-            
-            // Keep density threshold high — lens flares create massive sharp edges
-            // that would trigger false alarms if density is too low
-            densityThreshold = Math.max(14, densityThreshold);
-            
-            // Brightness suppression: relax slightly — the ISP is already fighting
-            // the sun, so frame-to-frame brightness shifts are larger than normal
-            brightnessShiftThreshold = Math.max(brightnessShiftThreshold, 0.20f);
-            
-            // Shadow filter: keep NORMAL — shadows are still real in direct sun,
-            // they're just lower contrast. The lowered shadowThreshold handles this.
-        }
     }
     
     public MotionPipelineV2() {
@@ -657,18 +591,6 @@ public class MotionPipelineV2 {
     }
 
     /**
-     * Check if any quadrant detected motion above the given threat threshold.
-     */
-    public boolean hasMotion(int minThreatLevel) {
-        for (int q = 0; q < NUM_QUADRANTS; q++) {
-            if (results[q].motionDetected && results[q].threatLevel >= minThreatLevel) {
-                return true;
-            }
-        }
-        return false;
-    }
-    
-    /**
      * Get the highest threat level across all quadrants.
      */
     public int getMaxThreatLevel() {
@@ -714,14 +636,6 @@ public class MotionPipelineV2 {
         return initialized;
     }
     
-    /**
-     * Check if the loaded native library supports shadow filter fields.
-     * Returns false if running against an older .so that doesn't have the shadow filter struct fields.
-     */
-    public boolean isNativeShadowFilterSupported() {
-        return nativeHasShadowFilter;
-    }
-
     /**
      * Check if the loaded native library computes flow-coherence (Phase 2).
      * When false, {@link QuadrantResult#flowCoherence} stays at -1 and callers

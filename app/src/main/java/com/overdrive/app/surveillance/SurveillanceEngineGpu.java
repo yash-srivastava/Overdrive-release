@@ -1200,18 +1200,6 @@ public class SurveillanceEngineGpu {
     // Foveated AI cropping: high-res 640×640 crop from raw camera strip
     private FoveatedCropper foveatedCropper = null;
     private int cameraTextureId = -1;  // OES texture for foveated crop
-    // Vestigial. Foveated crops now run on AiLaneGl's dedicated GL thread
-    // (which calls serviceFoveatedRequestsOnGlThread once per AI tick),
-    // not posted via this handler. The setter is left in place because
-    // PanoramicCameraGpu still calls it during initialization for backwards
-    // compat with the API surface; the field is never read.
-    private android.os.Handler glHandler = null;
-    // Camera FPS — surfaced from PanoramicCameraGpu.setCameraTargetFps()
-    // for diagnostic logging in the periodic stats line. No longer
-    // load-bearing for any timeout (the cropOnGlThread path it used to
-    // size was removed when the foveated mailbox replaced post-Runnable
-    // dispatch).
-    private volatile int cameraTargetFps = 0;
 
     // ==================== FOVEATED MAILBOX (Option B, full async) ====================
     //
@@ -2233,18 +2221,6 @@ public class SurveillanceEngineGpu {
 
     private int foveatedRoundRobin = 0;
 
-    /** GL handler for posting foveated crops back to the GL thread.
-     *  Required when processFrame runs on AiLaneWorker. */
-    public void setGlHandler(android.os.Handler glHandler) {
-        this.glHandler = glHandler;
-    }
-
-    /** Camera target FPS — sizes the foveated GL-hop wait budget so the
-     *  AI lane never times out on a normal-load render frame. */
-    public void setCameraTargetFps(int fps) {
-        if (fps > 0) this.cameraTargetFps = fps;
-    }
-
     // ==================== FROZEN-FEED DETECTOR (parked) ====================
     //
     // Field finding (DI5 default camera mode, 2026-09-21): minutes after ACC
@@ -2266,21 +2242,11 @@ public class SurveillanceEngineGpu {
                 : new com.overdrive.app.camera.FrozenFeedDetector(listener);
     }
 
-    /** True while the parked feed is currently flagged frozen (diagnostics). */
-    public boolean isFeedFrozen() {
-        com.overdrive.app.camera.FrozenFeedDetector d = frozenFeed;
-        return d != null && d.isFrozen();
-    }
-
     /** Arm/disarm hygiene: a stale pre-session hash must never seed the next one. */
     private void resetFrozenFeedDetector() {
         com.overdrive.app.camera.FrozenFeedDetector d = frozenFeed;
         if (d != null) d.reset();
     }
-
-    // cropOnGlThread() removed — foveated crops now run on AiLaneGl's shared
-    // GL context inside serviceFoveatedRequestsOnGlThread(). The AI worker uses the mailbox
-    // (requestFoveatedCrop / pollFoveatedSlot) and never blocks on GL.
 
     /**
      * Get the current foveated cropper (for lazy-init check).
@@ -13172,15 +13138,6 @@ public class SurveillanceEngineGpu {
     }
 
     /**
-     * Checks if in active mode (heavy AI).
-     * 
-     * @return true if in active mode, false if idle
-     */
-    public boolean isInActiveMode() {
-        return inActiveMode;
-    }
-    
-    /**
      * Gets the current SAD threshold.
      * 
      * @return Threshold value (0.0-1.0)
@@ -13439,15 +13396,6 @@ public class SurveillanceEngineGpu {
     }
     
     /**
-     * Gets the motion detection count.
-     * 
-     * @return Total motion events detected
-     */
-    public int getMotionDetections() {
-        return motionDetections;
-    }
-    
-    /**
      * Gets the latest cached mosaic frame (640×480 RGB) for snapshot API.
      * Returns null if no frame has been cached yet. Records the poll
      * timestamp so processFrame keeps refreshing while clients are active.
@@ -13519,25 +13467,6 @@ public class SurveillanceEngineGpu {
         // Bitmap NOT recycled — it's reused for the next encode.
     }
 
-    /**
-     * Releases all resources.
-     */
-    /**
-     * Updates the V2 pipeline configuration.
-     * Call this when user changes settings via IPC.
-     */
-    public void updateV2Config(MotionPipelineV2.Config newConfig) {
-        if (pipelineV2 != null) {
-            if (newConfig != null) {
-                pipelineV2Config = newConfig;
-            }
-            if (pipelineV2Config != null) {
-                pipelineV2.applyConfig(pipelineV2Config);
-                logger.info("V2 pipeline config updated");
-            }
-        }
-    }
-    
     /**
      * Apply a V2 environment preset (outdoor/garage/street).
      */
@@ -13649,14 +13578,6 @@ public class SurveillanceEngineGpu {
             String[] modeNames = {"OFF", "LIGHT", "NORMAL", "AGGRESSIVE"};
             logger.info("V2 shadow filter mode set to " + modeNames[mode]);
         }
-    }
-    
-    /**
-     * Get current shadow filter mode.
-     * @return 0=OFF, 1=LIGHT, 2=NORMAL, 3=AGGRESSIVE
-     */
-    public int getV2ShadowFilterMode() {
-        return pipelineV2Config != null ? pipelineV2Config.shadowFilterMode : 0;
     }
     
     /**

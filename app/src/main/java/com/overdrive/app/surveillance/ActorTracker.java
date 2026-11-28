@@ -407,11 +407,6 @@ public final class ActorTracker {
         nextActorId = 1;
     }
 
-    /** Read-only count of currently-active tracks. */
-    public synchronized int activeTrackCount() {
-        return tracks.size();
-    }
-
     // ---------- internal -----------------------------------------------------
 
     private void pruneStale(long now) {

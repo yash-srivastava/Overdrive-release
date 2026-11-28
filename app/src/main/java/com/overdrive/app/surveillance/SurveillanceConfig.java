@@ -291,9 +291,6 @@ public class SurveillanceConfig {
     public int getApproachTriggerSeconds() { return approachTriggerSeconds; }
     public int getSensitivityLevel() { return sensitivityLevel; }
     public boolean[] getCameraEnabled() { return cameraEnabled; }
-    public boolean isCameraEnabled(int quadrant) { 
-        return quadrant >= 0 && quadrant < 4 && cameraEnabled[quadrant]; 
-    }
     public boolean isMotionHeatmapEnabled() { return motionHeatmapEnabled; }
     public boolean isFilterDebugLogEnabled() { return filterDebugLogEnabled; }
     public boolean isDiscardEmptyBrightMotionEvents() { return discardEmptyBrightMotionEvents; }
@@ -416,10 +413,6 @@ public class SurveillanceConfig {
         this.useChroma = mode.useChroma;
     }
     
-    public FlashMode getFlashMode() {
-        return flashMode;
-    }
-    
     // ========================================================================
     // Custom Configuration Setters
     // ========================================================================
@@ -468,14 +461,6 @@ public class SurveillanceConfig {
         this.verticalFovDeg = Math.max(20.0f, Math.min(120.0f, fovDeg));
     }
     
-    public void setFrameHeight(int height) {
-        this.frameHeight = Math.max(120, Math.min(1080, height));
-    }
-    
-    public void setFrameWidth(int width) {
-        this.frameWidth = Math.max(160, Math.min(1920, width));
-    }
-    
     public void setResolution(int width, int height) {
         this.frameWidth = Math.max(160, Math.min(1920, width));
         this.frameHeight = Math.max(120, Math.min(1080, height));
@@ -487,10 +472,6 @@ public class SurveillanceConfig {
     
     public boolean isMosaic() {
         return isMosaic;
-    }
-    
-    public int getFrameWidth() {
-        return frameWidth;
     }
     
     // ========================================================================
@@ -508,7 +489,6 @@ public class SurveillanceConfig {
     public float getCameraHeightM() { return cameraHeightM; }
     public float getCameraTiltDeg() { return cameraTiltDeg; }
     public float getVerticalFovDeg() { return verticalFovDeg; }
-    public int getFrameHeight() { return frameHeight; }
     public float getAiConfidence() { return aiConfidence; }
     public float getMinObjectSize() { return minObjectSize; }
     public boolean isDetectPerson() { return detectPerson; }
@@ -522,9 +502,6 @@ public class SurveillanceConfig {
     public boolean isPushNotices() { return pushNotices; }
     public boolean isPushAlerts() { return pushAlerts; }
     public boolean isPushCritical() { return pushCritical; }
-    public void setPushNotices(boolean v)  { this.pushNotices = v; }
-    public void setPushAlerts(boolean v)   { this.pushAlerts = v; }
-    public void setPushCritical(boolean v) { this.pushCritical = v; }
 
     public boolean isTelegramSendStartPing() { return telegramSendStartPing; }
     public void setTelegramSendStartPing(boolean v) { this.telegramSendStartPing = v; }
