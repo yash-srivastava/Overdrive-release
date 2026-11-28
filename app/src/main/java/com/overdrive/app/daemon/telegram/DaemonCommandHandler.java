@@ -1292,30 +1292,6 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
     }
     
     /**
-     * Check if a daemon was stopped via Telegram (should not be auto-restarted).
-     * This is a static method so health checks can call it.
-     * 
-     * @param daemonName The daemon name to check
-     * @return true if daemon was explicitly stopped via Telegram
-     */
-    public static boolean isDaemonStoppedViaTelegram(String daemonName) {
-        try {
-            File stateFile = new File(STATE_FILE);
-            if (!RemovableStorageFs.exists(stateFile)) return false;
-            
-            Properties props = new Properties();
-            try (FileInputStream fis = RemovableStorageFs.openInput(stateFile)) {
-                props.load(fis);
-            }
-            
-            String state = props.getProperty(daemonName, "");
-            return "stopped".equals(state);
-        } catch (Exception e) {
-            return false;
-        }
-    }
-    
-    /**
      * Clear the stopped state for a daemon (e.g., when user starts it from UI).
      * 
      * @param daemonName The daemon name to clear
