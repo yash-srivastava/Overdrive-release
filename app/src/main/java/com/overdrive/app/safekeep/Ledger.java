@@ -364,10 +364,6 @@ public final class Ledger {
         return path != null && countWhere("local_path=? AND state IN ('" + PENDING + "','" + ACTIVE + "')", path) > 0;
     }
 
-    public void clearSession(long id) {
-        exec("UPDATE sync_item SET session_json=NULL, bytes_confirmed=0, crypt_json=NULL WHERE id=?", id);
-    }
-
     public void markDone(long id, String remoteRef, String md5, String sha256, long now) {
         exec("UPDATE sync_item SET state='" + DONE + "', remote_ref=?, md5=?, sha256=?, completed_at=?,"
                         + " session_json=NULL, crypt_json=NULL, error_class=NULL, last_error=NULL WHERE id=?",
@@ -612,11 +608,6 @@ public final class Ledger {
         return query("SELECT * FROM sync_item WHERE dest_id=? AND lane=? AND state='" + DONE + "'"
                 + " AND remote_ref IS NOT NULL ORDER BY completed_at ASC LIMIT " + Math.max(1, limit),
                 limit, destId, lane);
-    }
-
-    public int countDone(String destId, String lane) {
-        return countWhere("dest_id=? AND lane=? AND state='" + DONE + "' AND remote_ref IS NOT NULL",
-                destId, lane);
     }
 
     /** {lane -> {state -> [count, bytes]}} across all destinations. */

@@ -50,29 +50,9 @@ final class GoogleDriveDestination implements Destination {
         return new Caps("md5", true, true, true, true);
     }
 
-    private Request.Builder authed(Request.Builder b) throws DestError {
-        return b.header("Authorization", "Bearer " + tokens.accessToken(http));
-    }
-
     /** Non-upload API call with one transparent retry after a 401. */
     private Response call(UploadJob job, Request.Builder b) throws DestError {
-        Request req = authed(b).build();
-        Response r = job != null ? job.execute(http, req) : exec(req);
-        if (r.code() == 401) {
-            r.close();
-            tokens.invalidate();
-            req = authed(b).build();
-            r = job != null ? job.execute(http, req) : exec(req);
-        }
-        return r;
-    }
-
-    private Response exec(Request req) throws DestError {
-        try {
-            return http.newCall(req).execute();
-        } catch (java.io.IOException e) {
-            throw DestError.network(e);
-        }
+        return Http.authorized(http, tokens, job, b);
     }
 
     @Override

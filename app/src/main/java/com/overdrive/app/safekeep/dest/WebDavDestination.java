@@ -81,15 +81,6 @@ final class WebDavDestination implements Destination {
         return b;
     }
 
-    private Response exec(UploadJob job, Request r) throws DestError {
-        if (job != null) return job.execute(http, r);
-        try {
-            return http.newCall(r).execute();
-        } catch (java.io.IOException e) {
-            throw DestError.network(e);
-        }
-    }
-
     // ── upload ──────────────────────────────────────────────────────────────
 
     @Override
@@ -102,7 +93,7 @@ final class WebDavDestination implements Destination {
                 String dir = uploadsRoot + "od-" + job.itemId + "-" + UUID.randomUUID().toString().substring(0, 8);
                 Request mk = req(dir).header("Destination", url(job.remotePath))
                         .method("MKCOL", null).build();
-                try (Response r = exec(job, mk)) {
+                try (Response r = Http.execute(http, job, mk)) {
                     if (r.isSuccessful() || r.code() == 405) {
                         job.state.put("mode", "chunked").put("dir", dir);
                         job.saveState(0);
@@ -135,7 +126,7 @@ final class WebDavDestination implements Destination {
         if (chunk <= 0) return 0;
         String dir = job.state.optString("dir");
         Request pf = req(dir + "/").header("Depth", "1").method("PROPFIND", RequestBody.create(PROPFIND_SIZE, XML)).build();
-        try (Response r = exec(job, pf)) {
+        try (Response r = Http.execute(http, job, pf)) {
             String body = Http.body(r);
             if (r.code() == 404) {
                 if (committing && size(job, job.remotePath) == job.length) return job.length;
@@ -179,7 +170,7 @@ final class WebDavDestination implements Destination {
                     .header("Destination", dest)
                     .header("OC-Total-Length", Long.toString(job.length))
                     .put(job.body(offset, len, "application/octet-stream")).build();
-            try (Response r = exec(job, r0)) {
+            try (Response r = Http.execute(http, job, r0)) {
                 String body = Http.body(r);
                 if (r.code() == 404) throw new DestError(DestError.Kind.SESSION_GONE, "Nextcloud upload expired", 404, 0);
                 if (!r.isSuccessful()) throw Http.error("Nextcloud chunk", r, body);
@@ -187,7 +178,7 @@ final class WebDavDestination implements Destination {
             }
         }
         Request r0 = req(url(job.state.optString("tmp"))).put(job.body(0, job.length, job.contentType)).build();
-        try (Response r = exec(job, r0)) {
+        try (Response r = Http.execute(http, job, r0)) {
             String body = Http.body(r);
             if (r.code() == 409) {
                 ledger.dropFolderIds(destId);
@@ -215,7 +206,7 @@ final class WebDavDestination implements Destination {
             mv = req(url(job.state.optString("tmp"))).header("Destination", dest).header("Overwrite", "T")
                     .method("MOVE", null).build();
         }
-        try (Response r = exec(job, mv)) {
+        try (Response r = Http.execute(http, job, mv)) {
             String body = Http.body(r);
             if (!r.isSuccessful()) {
                 // Only a vanished source means an earlier MOVE landed; any other refusal (locked,
@@ -231,7 +222,7 @@ final class WebDavDestination implements Destination {
 
     private long size(UploadJob job, String path) throws DestError {
         Request pf = req(url(path)).header("Depth", "0").method("PROPFIND", RequestBody.create(PROPFIND_SIZE, XML)).build();
-        try (Response r = exec(job, pf)) {
+        try (Response r = Http.execute(http, job, pf)) {
             String body = Http.body(r);
             if (!r.isSuccessful()) return -1;
             List<Entry> e = parse(body);
@@ -244,7 +235,7 @@ final class WebDavDestination implements Destination {
         try {
             String target = "chunked".equals(job.state.optString("mode")) ? job.state.optString("dir")
                     : url(job.state.optString("tmp"));
-            if (target != null && !target.isEmpty()) exec(null, req(target).delete().build()).close();
+            if (target != null && !target.isEmpty()) Http.execute(http, null, req(target).delete().build()).close();
         } catch (Exception ignored) {
         }
     }
@@ -257,7 +248,7 @@ final class WebDavDestination implements Destination {
             cur.append(seg);
             String p = cur.toString();
             if (ledger.folderId(destId, p) != null) continue;
-            try (Response r = exec(job, req(url(p) + "/").method("MKCOL", null).build())) {
+            try (Response r = Http.execute(http, job, req(url(p) + "/").method("MKCOL", null).build())) {
                 // 201 created, 405 already exists; 409 means a parent is missing (handled by order).
                 if (!r.isSuccessful() && r.code() != 405 && r.code() != 301) {
                     throw Http.error("WebDAV create folder " + p, r, Http.body(r));
@@ -271,7 +262,7 @@ final class WebDavDestination implements Destination {
 
     @Override
     public void delete(String remoteRef) throws DestError {
-        try (Response r = exec(null, req(url(remoteRef)).delete().build())) {
+        try (Response r = Http.execute(http, null, req(url(remoteRef)).delete().build())) {
             if (!r.isSuccessful() && r.code() != 404) throw Http.error("WebDAV delete", r, Http.body(r));
         }
     }
@@ -280,17 +271,17 @@ final class WebDavDestination implements Destination {
     public JSONObject test() throws DestError {
         long t0 = System.currentTimeMillis();
         Request pf = req(base).header("Depth", "0").method("PROPFIND", RequestBody.create(PROPFIND_SIZE, XML)).build();
-        try (Response r = exec(null, pf)) {
+        try (Response r = Http.execute(http, null, pf)) {
             String body = Http.body(r);
             if (!r.isSuccessful()) throw Http.error("WebDAV", r, body);
         }
         String probe = "OverDrive/.overdrive-probe-" + System.currentTimeMillis() + ".txt";
         ensureCollections(null, "OverDrive");
-        try (Response r = exec(null, req(url(probe)).put(RequestBody.create("OverDrive SafeKeep test",
+        try (Response r = Http.execute(http, null, req(url(probe)).put(RequestBody.create("OverDrive SafeKeep test",
                 MediaType.parse("text/plain"))).build())) {
             if (!r.isSuccessful()) throw Http.error("WebDAV write test", r, Http.body(r));
         }
-        try (Response r = exec(null, req(url(probe)).delete().build())) {
+        try (Response r = Http.execute(http, null, req(url(probe)).delete().build())) {
             // Best effort.
         }
         try {
@@ -304,7 +295,7 @@ final class WebDavDestination implements Destination {
     @Override
     public Quota quota() throws DestError {
         Request pf = req(base).header("Depth", "0").method("PROPFIND", RequestBody.create(PROPFIND_QUOTA, XML)).build();
-        try (Response r = exec(null, pf)) {
+        try (Response r = Http.execute(http, null, pf)) {
             String body = Http.body(r);
             if (!r.isSuccessful()) return null;
             long used = tag(body, "quota-used-bytes"), avail = tag(body, "quota-available-bytes");
@@ -323,7 +314,7 @@ final class WebDavDestination implements Destination {
         List<RemoteEntry> out = new ArrayList<>();
         String u = url(dirPath) + "/";
         Request pf = req(u).header("Depth", "1").method("PROPFIND", RequestBody.create(PROPFIND_SIZE, XML)).build();
-        try (Response r = exec(null, pf)) {
+        try (Response r = Http.execute(http, null, pf)) {
             String body = Http.body(r);
             if (r.code() == 404) return out;
             if (!r.isSuccessful()) throw Http.error("WebDAV list", r, body);
@@ -350,7 +341,7 @@ final class WebDavDestination implements Destination {
 
     @Override
     public byte[] download(String remoteRef, long maxBytes) throws DestError {
-        try (Response r = exec(null, req(url(remoteRef)).get().build())) {
+        try (Response r = Http.execute(http, null, req(url(remoteRef)).get().build())) {
             if (!r.isSuccessful()) throw Http.error("WebDAV download", r, Http.body(r));
             return Http.bytes(r, maxBytes);
         } catch (DestError e) {

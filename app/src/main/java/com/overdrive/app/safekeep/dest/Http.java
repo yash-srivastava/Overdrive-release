@@ -1,5 +1,7 @@
 package com.overdrive.app.safekeep.dest;
 
+import com.overdrive.app.safekeep.auth.OAuthTokens;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -7,6 +9,8 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
@@ -14,6 +18,28 @@ import okhttp3.ResponseBody;
 public final class Http {
 
     private Http() {}
+
+    /** Execute with upload cancellation hooks when a job owns the request. */
+    public static Response execute(OkHttpClient http, UploadJob job, Request request) throws DestError {
+        if (job != null) return job.execute(http, request);
+        try {
+            return http.newCall(request).execute();
+        } catch (IOException e) {
+            throw DestError.network(e);
+        }
+    }
+
+    /** Replayable OAuth API requests only; streamed chunks have their own retry policy. */
+    static Response authorized(OkHttpClient http, OAuthTokens tokens, UploadJob job,
+                               Request.Builder request) throws DestError {
+        for (int attempt = 0; ; attempt++) {
+            Request req = request.header("Authorization", "Bearer " + tokens.accessToken(http)).build();
+            Response r = execute(http, job, req);
+            if (r.code() != 401 || attempt > 0) return r;
+            r.close();
+            tokens.invalidate();
+        }
+    }
 
     public static String body(Response r) {
         ResponseBody b = r.body();
