@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="projection_app_density">應用 DPI</string>
+    <string name="projection_app_keyboard">鍵盤</string>
+    <string name="projection_app_guidance">應用工具</string>
+    <string name="projection_tools_select_app">請先選擇一個投影應用。</string>
+    <string name="projection_tools_daemon_unavailable">儀表板守護處理程序不可用。請在連接後重試。</string>
+    <string name="projection_tools_save">儲存</string>
+    <string name="projection_tools_save_failed">無法儲存設定。請重試。</string>
+    <string name="projection_density_description">%1$s 下次投影時使用的密度。使用 0 保持螢幕密度，或設定 96–480 DPI。\n\n投影期間，密度會影響該螢幕上的所有地圖和懸浮層。停止後，在螢幕安全可用時會恢復之前的設定。</string>
+    <string name="projection_density_range">請輸入 0 或 96 到 480 之間的整數。</string>
+    <string name="projection_density_saved">已儲存。請停止並重新投影該應用以應用其密度。</string>
+    <string name="projection_density_not_applied">上次投影無法應用此密度：%1$s</string>
+    <string name="projection_guidance_di3">DI3 儀表板條帶和擋風玻璃引導（需要車內檢查）</string>
+    <string name="projection_guidance_di5">實驗性 DI5 儀表板條帶</string>
+    <string name="projection_guidance_notifications">地圖通知存取權限</string>
+    <string name="projection_guidance_setup">儲存後，在 RoadSense 中開始導航。Google 地圖或 Waze 還需要地圖通知存取權限。\n\n請保持 DI3 抬頭顯示開啟並停止任何內建導航。如果你的車輛提供導航內容的抬頭顯示設定，請將其啟用；並非所有車型都有此設定。此開關不會為抬頭顯示供電，箭頭顯示效果仍需在車內檢查。</string>
+    <string name="projection_guidance_setup_di5">儲存後，在 RoadSense 中開始導航。Google 地圖或 Waze 還需要地圖通知存取權限。\n\nDI5 儀表板條帶為實驗性功能。測試前請停止任何全螢幕儀表板投影或地圖。DI5 不支援擋風玻璃引導。</string>
+    <string name="projection_keyboard_auto">在儀表板文字方塊上自動開啟 DI5 鍵盤</string>
+    <string name="projection_guidance_saved">已儲存。擋風玻璃引導僅限 DI3；DI5 條帶顯示效果仍需在車內檢查。</string>
+    <string name="projection_tools_title">工具</string>
+    <string name="projection_tools_dialog_title">投影工具</string>
+    <string name="projection_tools_description">為儀表板設定導航、應用尺寸和文字輸入。</string>
+    <string name="projection_tools_navigation">導航引導</string>
+    <string name="projection_tools_navigation_description">選擇 RoadSense 或地圖通知的路線指引顯示位置。</string>
+    <string name="projection_tools_density">應用顯示尺寸</string>
+    <string name="projection_tools_density_description">在下次投影時調整所選應用的顯示密度。</string>
+    <string name="projection_tools_keyboard_description">向投影應用輸入文字並管理自動提示。僅限 DI5。</string>
+    <string name="projection_tools_density_value">顯示密度（DPI）</string>
+    <string name="projection_tools_density_default">0 保持螢幕密度 · 96–480 設定自訂尺寸</string>
+    <string name="projection_tools_di3_title">DI3 抬頭顯示和儀表板</string>
+    <string name="projection_tools_di3_description">將路線指引發送到擋風玻璃抬頭顯示和儀表板條帶。請在車內確認箭頭顯示效果。</string>
+    <string name="projection_tools_di3_only">在 DI3 模式下可用。</string>
+    <string name="projection_tools_di5_title">DI5 儀表板條帶</string>
+    <string name="projection_tools_di5_description">在儀表板條帶上顯示實驗性路線指引。DI5 不支援擋風玻璃引導。</string>
+    <string name="projection_tools_di5_only">在 DI5 模式下可用。</string>
+    <string name="projection_tools_setup">入門指南</string>
+</resources>

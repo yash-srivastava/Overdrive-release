@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_security_byd_tools_title">比亞迪服務選單</string>
+    <string name="settings_security_byd_tools_description">開啟車機內建的設定工具。</string>
+    <string name="settings_security_byd_adb_title">ADB / 開發者選項</string>
+    <string name="settings_security_byd_adb_hint">開啟開發者選項並在其中啟用 USB 偵錯。</string>
+    <string name="settings_security_byd_adb_unavailable">此韌體不支援 ADB 設定。</string>
+    <string name="settings_security_country_code_title">國家/地區代碼</string>
+    <string name="settings_security_country_code_warning">這會開啟比亞迪國家/地區設定。更改國家/地區代碼可能會影響區域服務，或需要重新啟動車機。請僅在停車時繼續。</string>
+    <string name="settings_security_country_code_open">開啟設定</string>
+    <string name="settings_security_country_code_unavailable">此車機不支援國家/地區代碼設定。</string>
+</resources>

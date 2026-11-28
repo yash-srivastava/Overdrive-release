@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="projection_cluster_back">返回</string>
+    <string name="projection_cluster_home">主頁</string>
+    <string name="projection_cluster_volume_down">音量 −</string>
+    <string name="projection_cluster_volume_up">音量 +</string>
+    <string name="projection_cluster_control_unavailable">儀表板控制不可用。請檢查目前投影，並在更新後重新啟動守護處理程序。</string>
+</resources>

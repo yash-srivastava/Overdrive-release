@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notif_channel_roadsense_overlay">RoadSense 懸浮視窗</string>
+    <string name="notif_roadsense_overlay_text">危險提示懸浮視窗已啟用</string>
+    <string name="notif_channel_roadsense_imu">RoadSense IMU</string>
+    <string name="notif_roadsense_imu_text">道路感知已啟用</string>
+    <string name="notif_channel_onscreen_messages">螢幕訊息</string>
+    <string name="notif_onscreen_message_title">螢幕訊息</string>
+    <string name="notif_channel_parked_impact">停車碰撞監測</string>
+    <string name="notif_parked_impact_title">哨兵模式</string>
+    <string name="notif_parked_impact_text">停車時正在監測碰撞</string>
+    <string name="notif_network_hotspot">網路與熱點</string>
+    <string name="notif_channel_media_playback">媒體播放</string>
+    <string name="notif_roadsense_chime_title">RoadSense 警告</string>
+    <string name="notif_roadsense_chime_text">正在播放安全提示音</string>
+    <string name="notif_channel_location">定位服務</string>
+    <string name="notif_channel_location_desc">用於監控的 GPS 追蹤</string>
+    <string name="notif_location_title">定位已啟用</string>
+    <string name="notif_location_text">GPS 追蹤執行中</string>
+    <string name="notif_vehicle_control">車輛控制</string>
+    <string name="notif_media_title">正在播放音訊</string>
+    <string name="notif_media_text">OverDrive 自動化</string>
+    <string name="notif_channel_keepalive">守護處理程序保活</string>
+    <string name="notif_channel_keepalive_desc">保持守護處理程序在背景執行</string>
+    <string name="notif_channel_summary">Overdrive 狀態</string>
+    <string name="notif_channel_summary_desc">Overdrive 背景服務的合併狀態列</string>
+    <string name="notif_channel_remote_voice">遠端語音</string>
+    <string name="notif_channel_status_overlay">狀態懸浮視窗</string>
+    <string name="notif_channel_status_overlay_desc">錄製和行程狀態懸浮視窗</string>
+</resources>
