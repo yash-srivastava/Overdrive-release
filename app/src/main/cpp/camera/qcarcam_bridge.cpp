@@ -1300,7 +1300,6 @@ void convertUyvyToRgba(
     const int input_stride =
             source_stride >= width * 2 ? source_stride : width * 2;
     const int16x8_t chroma_center = vdupq_n_s16(128);
-    const int32x4_t rounding = vdupq_n_s32(512);
     const uint8x8_t opaque = vdup_n_u8(255);
 
     for (int y = 0; y < height; y++) {
@@ -1317,27 +1316,23 @@ void convertUyvyToRgba(
             int16x8_t v = vsubq_s16(
                     vreinterpretq_s16_u16(vmovl_u8(pixels.val[2])),
                     chroma_center);
-            int32x4_t u_low = vmovl_s16(vget_low_s16(u));
-            int32x4_t u_high = vmovl_s16(vget_high_s16(u));
-            int32x4_t v_low = vmovl_s16(vget_low_s16(v));
-            int32x4_t v_high = vmovl_s16(vget_high_s16(v));
-            int16x8_t red_delta = vcombine_s16(
-                    vshrn_n_s32(vaddq_s32(
-                            vmulq_n_s32(v_low, 1436), rounding), 10),
-                    vshrn_n_s32(vaddq_s32(
-                            vmulq_n_s32(v_high, 1436), rounding), 10));
+            // Doubling the centered chroma keeps the Q10 coefficients
+            // representable in Q15. SQRDMULH gives exactly (c*k+512)>>10
+            // for red and blue, without widening to 32-bit lanes.
+            int16x8_t red_delta = vqrdmulhq_n_s16(
+                    vshlq_n_s16(v, 1), 1436 * 16);
+            int16x8_t blue_delta = vqrdmulhq_n_s16(
+                    vshlq_n_s16(u, 1), 1815 * 16);
+            // Green must round after summing both products.
+            int32x4_t green_low = vmlal_n_s16(
+                    vmull_n_s16(vget_low_s16(u), 352),
+                    vget_low_s16(v), 731);
+            int32x4_t green_high = vmlal_n_s16(
+                    vmull_n_s16(vget_high_s16(u), 352),
+                    vget_high_s16(v), 731);
             int16x8_t green_delta = vcombine_s16(
-                    vshrn_n_s32(vaddq_s32(vaddq_s32(
-                            vmulq_n_s32(u_low, 352),
-                            vmulq_n_s32(v_low, 731)), rounding), 10),
-                    vshrn_n_s32(vaddq_s32(vaddq_s32(
-                            vmulq_n_s32(u_high, 352),
-                            vmulq_n_s32(v_high, 731)), rounding), 10));
-            int16x8_t blue_delta = vcombine_s16(
-                    vshrn_n_s32(vaddq_s32(
-                            vmulq_n_s32(u_low, 1815), rounding), 10),
-                    vshrn_n_s32(vaddq_s32(
-                            vmulq_n_s32(u_high, 1815), rounding), 10));
+                    vrshrn_n_s32(green_low, 10),
+                    vrshrn_n_s32(green_high, 10));
             int16x8_t y0 =
                     vreinterpretq_s16_u16(vmovl_u8(pixels.val[1]));
             int16x8_t y1 =
@@ -1368,12 +1363,15 @@ void convertUyvyToRgba(
             int v = static_cast<int>(source[2]) - 128;
             int y1 = source[3];
             source += 4;
-            int red0 = y0 + ((1436 * v + 512) >> 10);
-            int green0 = y0 - ((352 * u + 731 * v + 512) >> 10);
-            int blue0 = y0 + ((1815 * u + 512) >> 10);
-            int red1 = y1 + ((1436 * v + 512) >> 10);
-            int green1 = y1 - ((352 * u + 731 * v + 512) >> 10);
-            int blue1 = y1 + ((1815 * u + 512) >> 10);
+            int red_delta = (1436 * v + 512) >> 10;
+            int green_delta = (352 * u + 731 * v + 512) >> 10;
+            int blue_delta = (1815 * u + 512) >> 10;
+            int red0 = y0 + red_delta;
+            int green0 = y0 - green_delta;
+            int blue0 = y0 + blue_delta;
+            int red1 = y1 + red_delta;
+            int green1 = y1 - green_delta;
+            int blue1 = y1 + blue_delta;
             red0 = red0 < 0 ? 0 : (red0 > 255 ? 255 : red0);
             green0 = green0 < 0 ? 0 : (green0 > 255 ? 255 : green0);
             blue0 = blue0 < 0 ? 0 : (blue0 > 255 ? 255 : blue0);
@@ -1394,50 +1392,28 @@ void convertUyvyToRgba(
     }
 }
 
-void composeMosaicRow(
-        const uint8_t* first,
-        int first_stride,
-        const uint8_t* second,
-        int second_stride,
-        int output_y,
-        uint8_t* __restrict__ mosaic_row) {
-    // Staging rows arrive pre-decimated from copyCpuCameraLocked (the
-    // crop + 2:1 row/pair subset the old full-frame reads produced), so
-    // composing one mosaic row is two straight row copies.
-    const int staging_y = output_y % kMosaicHalfHeight;
-    memcpy(mosaic_row,
-            first + static_cast<size_t>(staging_y) * first_stride,
-            kStagingMosaicRowBytes);
-    memcpy(mosaic_row + kStagingMosaicRowBytes,
-            second + static_cast<size_t>(staging_y) * second_stride,
-            kStagingMosaicRowBytes);
-}
-
 void renderMosaicUyvyToRgba(
         const CameraFrame& front,
         const CameraFrame& right,
         const CameraFrame& rear,
         const CameraFrame& left,
         uint32_t* __restrict__ rgba) {
-    alignas(64) uint8_t mosaic_row[kOutputWidth * 2];
-    for (int y = 0; y < kOutputHeight; y++) {
-        bool top = y < kMosaicHalfHeight;
-        composeMosaicRow(
-                top ? front.pixels : rear.pixels,
-                static_cast<int>(top ? front.stride : rear.stride),
-                top ? right.pixels : left.pixels,
-                static_cast<int>(top ? right.stride : left.stride),
-                y,
-                mosaic_row);
-        convertUyvyToRgba(
-                mosaic_row,
-                kOutputWidth,
-                1,
-                kOutputWidth * 2,
-                rgba + (kOutputHeight - 1 - y) * kOutputWidth,
-                kOutputWidth,
-                false);
-    }
+    // Each staging plane is already decimated and tightly cropped. Convert
+    // directly to its quadrant, using the full output stride and the same
+    // vertical flip as the single-camera path. No intermediate UYVY rows.
+    uint32_t* top = rgba + static_cast<size_t>(kMosaicHalfHeight) * kOutputWidth;
+    convertUyvyToRgba(
+            front.pixels, kMosaicHalfWidth, kMosaicHalfHeight,
+            static_cast<int>(front.stride), top, kOutputWidth, true);
+    convertUyvyToRgba(
+            right.pixels, kMosaicHalfWidth, kMosaicHalfHeight,
+            static_cast<int>(right.stride), top + kMosaicHalfWidth, kOutputWidth, true);
+    convertUyvyToRgba(
+            rear.pixels, kMosaicHalfWidth, kMosaicHalfHeight,
+            static_cast<int>(rear.stride), rgba, kOutputWidth, true);
+    convertUyvyToRgba(
+            left.pixels, kMosaicHalfWidth, kMosaicHalfHeight,
+            static_cast<int>(left.stride), rgba + kMosaicHalfWidth, kOutputWidth, true);
 }
 
 bool syncDmaBufCpuRead(int fd, uint64_t flags) {

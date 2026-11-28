@@ -468,17 +468,25 @@ public class DiLink5RuntimeContractTest {
         assertTrue(bridge.contains("source += 32"));
         assertTrue(bridge.contains("int32x4_t"));
         assertFalse(bridge.contains("vmulq_n_s16"));
-        assertTrue(bridge.contains("composeMosaicRow("));
+        assertFalse(bridge.contains("composeMosaicRow("));
         assertTrue(bridge.contains("renderMosaicUyvyToRgba("));
+        assertTrue(bridge.contains("vqrdmulhq_n_s16("));
+        assertTrue(bridge.contains("vrshrn_n_s32(green_low, 10)"));
         assertTrue(bridge.contains(
-                "top ? front.pixels : rear.pixels"));
+                "rgba + static_cast<size_t>(kMosaicHalfHeight) * kOutputWidth"));
         assertTrue(bridge.contains(
-                "top ? right.pixels : left.pixels"));
+                "front.stride), top, kOutputWidth, true"));
+        assertTrue(bridge.contains(
+                "right.stride), top + kMosaicHalfWidth, kOutputWidth, true"));
+        assertTrue(bridge.contains(
+                "rear.stride), rgba, kOutputWidth, true"));
+        assertTrue(bridge.contains(
+                "left.stride), rgba + kMosaicHalfWidth, kOutputWidth, true"));
         assertTrue(bridge.contains(
                 "semantic_slot == 1 || semantic_slot == 3"));
         assertTrue(bridge.contains(
                 "semantic_slot == 0 || semantic_slot == 1"));
-        assertTrue(bridge.contains(
+        assertFalse(bridge.contains(
                 "alignas(64) uint8_t mosaic_row[kOutputWidth * 2]"));
         assertTrue(bridge.contains("vld2q_u32("));
         assertTrue(bridge.contains("vst1q_u32("));
