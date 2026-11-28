@@ -70,10 +70,4 @@ final class GopTable {
             }
         }
     }
-
-    static int cachedEntries() {
-        synchronized (CACHE) {
-            return CACHE.size();
-        }
-    }
 }
