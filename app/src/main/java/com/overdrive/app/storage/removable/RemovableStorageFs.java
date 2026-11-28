@@ -125,15 +125,6 @@ public final class RemovableStorageFs {
         return isRouted(f) ? stat(f, true).length : f.length();
     }
 
-    /** "length:mtime" from the listing, without reading the file; lags while a writer holds it open. */
-    public static String listingSignature(File f) {
-        if (f instanceof ListedFile) {
-            Stat snap = ((ListedFile) f).rawSnapshot();
-            return snap.length + ":" + snap.mtime;
-        }
-        return length(f) + ":" + lastModified(f);
-    }
-
     /** A listing entry's mtime as MediaStore recorded it (current once its writer closed it). */
     public static long listedLastModified(File f) {
         return f instanceof ListedFile ? ((ListedFile) f).rawSnapshot().mtime : lastModified(f);

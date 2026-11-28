@@ -1109,7 +1109,7 @@ public class TripAnalyticsManager {
                     File newFile = new File(newPath);
                     if (RemovableStorageFs.exists(oldFile) && !oldFile.getAbsolutePath().equals(newFile.getAbsolutePath())) {
                         // Marker flip + rename run ATOMICALLY under the trips
-                        // cleanup lock (renameActiveTripFile): every reaper
+                        // cleanup lock (moveActiveTripFile): every reaper
                         // pass holds that lock and protects the marker's exact
                         // path, so no pass can observe the mixed state (marker
                         // moved, file not yet renamed) and delete the source.
