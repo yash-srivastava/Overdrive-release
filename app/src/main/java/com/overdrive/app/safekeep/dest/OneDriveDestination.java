@@ -43,18 +43,7 @@ final class OneDriveDestination implements Destination {
     }
 
     private Response call(Request.Builder b) throws DestError {
-        try {
-            Request req = b.header("Authorization", "Bearer " + tokens.accessToken(http)).build();
-            Response r = http.newCall(req).execute();
-            if (r.code() == 401) {
-                r.close();
-                tokens.invalidate();
-                r = http.newCall(b.header("Authorization", "Bearer " + tokens.accessToken(http)).build()).execute();
-            }
-            return r;
-        } catch (java.io.IOException e) {
-            throw DestError.network(e);
-        }
+        return Http.authorized(http, tokens, null, b);
     }
 
     private static String itemUrl(String path) {

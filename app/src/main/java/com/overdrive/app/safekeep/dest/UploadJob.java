@@ -113,12 +113,23 @@ public final class UploadJob {
 
     /** Non-HTTP transports (SFTP): copies [offset, offset+len) with the same pacing and hashing. */
     public long copyChunk(long offset, long len, java.io.OutputStream out) throws IOException {
+        return copyRange(offset, len, (buf, off, n) -> out.write(buf, off, n), false);
+    }
+
+    @FunctionalInterface
+    private interface ByteWriter {
+        void write(byte[] bytes, int offset, int length) throws IOException;
+    }
+
+    /** Shared pacing, cancellation, whole-object hashing and byte accounting. */
+    private long copyRange(long offset, long len, ByteWriter writer, boolean detailedEof) throws IOException {
         byte[] buf = new byte[64 * 1024];
         long sent = 0;
         try (InputStream in = source.open(offset)) {
             while (sent < len) {
                 int n = in.read(buf, 0, (int) Math.min(buf.length, len - sent));
-                if (n < 0) throw new IOException("source ended early");
+                if (n < 0) throw new IOException(detailedEof
+                        ? "source ended early at " + (offset + sent) : "source ended early");
                 try {
                     hooks.pace(n);
                 } catch (InterruptedException ie) {
@@ -127,7 +138,7 @@ public final class UploadJob {
                 }
                 if (hooks.cancelled()) throw new IOException("cancelled");
                 if (digests != null) digests.update(buf, 0, n);
-                out.write(buf, 0, n);
+                writer.write(buf, 0, n);
                 sent += n;
                 hooks.onBytes(n);
             }
@@ -174,28 +185,11 @@ public final class UploadJob {
         public void writeTo(BufferedSink sink) throws IOException {
             if (written) throw new IOException("chunk body replay refused");
             written = true;
-            byte[] buf = new byte[64 * 1024];
-            try (InputStream in = source.open(offset)) {
-                long remaining = len;
-                while (remaining > 0) {
-                    int want = (int) Math.min(buf.length, remaining);
-                    int n = in.read(buf, 0, want);
-                    if (n < 0) throw new IOException("source ended early at " + (offset + len - remaining));
-                    try {
-                        hooks.pace(n);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        throw new IOException("interrupted");
-                    }
-                    if (hooks.cancelled()) throw new IOException("cancelled");
-                    if (digests != null) digests.update(buf, 0, n);
-                    if (md5 != null) md5.update(buf, 0, n);
-                    sink.write(buf, 0, n);
-                    sent += n;
-                    remaining -= n;
-                    hooks.onBytes(n);
-                }
-            }
+            copyRange(offset, len, (buf, off, n) -> {
+                if (md5 != null) md5.update(buf, off, n);
+                sink.write(buf, off, n);
+                sent += n;
+            }, true);
         }
 
         public long sent() {
@@ -204,10 +198,6 @@ public final class UploadJob {
 
         public String md5Hex() {
             return md5 == null ? null : StreamDigests.hex(md5.digest());
-        }
-
-        public String md5Base64() {
-            return md5 == null ? null : java.util.Base64.getEncoder().encodeToString(md5.digest());
         }
     }
 }

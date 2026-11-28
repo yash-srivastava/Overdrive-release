@@ -184,10 +184,6 @@ public final class Naming {
         return root(cfg, d) + (d.humanLayout ? "/.overdrive" : "") + "/trips";
     }
 
-    public static String telemetryDir(SafeKeepConfig cfg, SafeKeepConfig.Destination d) {
-        return root(cfg, d) + (d.humanLayout ? "/.overdrive" : "") + "/telemetry";
-    }
-
     public static String settingsDir(SafeKeepConfig cfg, SafeKeepConfig.Destination d) {
         return root(cfg, d) + (d.humanLayout ? "/.overdrive" : "") + "/settings";
     }

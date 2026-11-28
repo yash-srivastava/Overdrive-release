@@ -107,15 +107,6 @@ public final class S3Destination implements Destination {
         return b;
     }
 
-    private Response exec(UploadJob job, Request req) throws DestError {
-        if (job != null) return job.execute(http, req);
-        try {
-            return http.newCall(req).execute();
-        } catch (java.io.IOException e) {
-            throw DestError.network(e);
-        }
-    }
-
     /** Maps S3 XML errors; learns the clock offset from a skew error so the retry signs correctly. */
     private DestError error(String ctx, Response r, String body) {
         Matcher m = XML_CODE.matcher(body);
@@ -168,7 +159,7 @@ public final class S3Destination implements Destination {
             q.put("uploads", null);
             Request req = signed("POST", key(job), q, SigV4.EMPTY_SHA256, RequestBody.create(new byte[0], null),
                     null).header("Content-Type", job.contentType).build();
-            try (Response r = exec(job, req)) {
+            try (Response r = Http.execute(http, job, req)) {
                 String body = Http.body(r);
                 if (!r.isSuccessful()) throw error("S3 multipart start", r, body);
                 Matcher m = UPLOAD_ID.matcher(body);
@@ -216,7 +207,7 @@ public final class S3Destination implements Destination {
             if (!"multipart".equals(job.state.optString("mode"))) {
                 UploadJob.ChunkBody body = job.body(0, job.length, job.contentType);
                 Request req = signed("PUT", key(job), null, SigV4.UNSIGNED_PAYLOAD, body, null).build();
-                try (Response r = exec(job, req)) {
+                try (Response r = Http.execute(http, job, req)) {
                     String text = Http.body(r);
                     if (!r.isSuccessful()) throw error("S3 upload", r, text);
                     checkEtag(r, body);
@@ -232,7 +223,7 @@ public final class S3Destination implements Destination {
             q.put("uploadId", job.state.getString("uploadId"));
             UploadJob.ChunkBody body = job.body(offset, len, "application/octet-stream");
             Request req = signed("PUT", key(job), q, SigV4.UNSIGNED_PAYLOAD, body, null).build();
-            try (Response r = exec(job, req)) {
+            try (Response r = Http.execute(http, job, req)) {
                 String text = Http.body(r);
                 if (!r.isSuccessful()) throw error("S3 part " + partNo, r, text);
                 checkEtag(r, body);
@@ -286,7 +277,7 @@ public final class S3Destination implements Destination {
             q.put("uploadId", job.state.getString("uploadId"));
             Request req = signed("POST", k, q, SigV4.sha256Hex(payload),
                     RequestBody.create(payload, MediaType.parse("application/xml")), null).build();
-            try (Response r = exec(job, req)) {
+            try (Response r = Http.execute(http, job, req)) {
                 String text = Http.body(r);
                 // S3 can return 200 with an <Error> body for CompleteMultipartUpload.
                 if (!r.isSuccessful() || text.contains("<Error>")) {
@@ -306,7 +297,7 @@ public final class S3Destination implements Destination {
     }
 
     private boolean existsWithSize(String k, long len) {
-        try (Response r = exec(null, signed("HEAD", k, null, SigV4.EMPTY_SHA256, null, null).build())) {
+        try (Response r = Http.execute(http, null, signed("HEAD", k, null, SigV4.EMPTY_SHA256, null, null).build())) {
             String cl = r.header("Content-Length");
             return r.isSuccessful() && cl != null && Long.parseLong(cl) == len;
         } catch (Exception e) {
@@ -320,14 +311,14 @@ public final class S3Destination implements Destination {
         try {
             Map<String, String> q = new HashMap<>();
             q.put("uploadId", job.state.getString("uploadId"));
-            exec(null, signed("DELETE", key(job), q, SigV4.EMPTY_SHA256, null, null).build()).close();
+            Http.execute(http, null, signed("DELETE", key(job), q, SigV4.EMPTY_SHA256, null, null).build()).close();
         } catch (Exception ignored) {
         }
     }
 
     @Override
     public void delete(String remoteRef) throws DestError {
-        try (Response r = exec(null, signed("DELETE", remoteRef, null, SigV4.EMPTY_SHA256, null, null).build())) {
+        try (Response r = Http.execute(http, null, signed("DELETE", remoteRef, null, SigV4.EMPTY_SHA256, null, null).build())) {
             if (!r.isSuccessful() && r.code() != 404) throw error("S3 delete", r, Http.body(r));
         }
     }
@@ -337,7 +328,7 @@ public final class S3Destination implements Destination {
         long t0 = System.currentTimeMillis();
         String probe = ".overdrive-probe-" + System.currentTimeMillis() + ".txt";
         byte[] data = "OverDrive SafeKeep connection test".getBytes(StandardCharsets.UTF_8);
-        try (Response r = exec(null, signed("PUT", probe, null, SigV4.sha256Hex(data),
+        try (Response r = Http.execute(http, null, signed("PUT", probe, null, SigV4.sha256Hex(data),
                 RequestBody.create(data, MediaType.parse("text/plain")), null).build())) {
             if (!r.isSuccessful()) throw error("S3 write test", r, Http.body(r));
         }
@@ -345,10 +336,10 @@ public final class S3Destination implements Destination {
         try {
             out.put("write", true);
             if (!writeOnly) {
-                try (Response r = exec(null, signed("GET", probe, null, SigV4.EMPTY_SHA256, null, null).build())) {
+                try (Response r = Http.execute(http, null, signed("GET", probe, null, SigV4.EMPTY_SHA256, null, null).build())) {
                     out.put("read", r.isSuccessful());
                 }
-                try (Response r = exec(null, signed("DELETE", probe, null, SigV4.EMPTY_SHA256, null, null).build())) {
+                try (Response r = Http.execute(http, null, signed("DELETE", probe, null, SigV4.EMPTY_SHA256, null, null).build())) {
                     out.put("delete", r.isSuccessful());
                 }
             } else {
@@ -383,7 +374,7 @@ public final class S3Destination implements Destination {
             q.put("prefix", prefix);
             q.put("delimiter", "/");
             if (token != null) q.put("continuation-token", token);
-            try (Response r = exec(null, signed("GET", null, q, SigV4.EMPTY_SHA256, null, null).build())) {
+            try (Response r = Http.execute(http, null, signed("GET", null, q, SigV4.EMPTY_SHA256, null, null).build())) {
                 String body = Http.body(r);
                 if (!r.isSuccessful()) throw error("S3 list", r, body);
                 Matcher c = LIST_CONTENTS.matcher(body);
@@ -405,7 +396,7 @@ public final class S3Destination implements Destination {
 
     @Override
     public byte[] download(String remoteRef, long maxBytes) throws DestError {
-        try (Response r = exec(null, signed("GET", remoteRef, null, SigV4.EMPTY_SHA256, null, null).build())) {
+        try (Response r = Http.execute(http, null, signed("GET", remoteRef, null, SigV4.EMPTY_SHA256, null, null).build())) {
             if (!r.isSuccessful()) throw error("S3 download", r, Http.body(r));
             return Http.bytes(r, maxBytes);
         } catch (DestError e) {

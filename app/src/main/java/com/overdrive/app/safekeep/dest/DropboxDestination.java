@@ -69,18 +69,8 @@ final class DropboxDestination implements Destination {
     }
 
     private Response rpc(String url, JSONObject arg) throws DestError {
-        try {
-            RequestBody body = RequestBody.create(arg == null ? "null" : arg.toString(), JSON);
-            Response r = http.newCall(authed(new Request.Builder().url(url).post(body)).build()).execute();
-            if (r.code() == 401) {
-                r.close();
-                tokens.invalidate();
-                r = http.newCall(authed(new Request.Builder().url(url).post(body)).build()).execute();
-            }
-            return r;
-        } catch (java.io.IOException e) {
-            throw DestError.network(e);
-        }
+        RequestBody body = RequestBody.create(arg == null ? "null" : arg.toString(), JSON);
+        return Http.authorized(http, tokens, null, new Request.Builder().url(url).post(body));
     }
 
     /** Dropbox-API-Arg must be ASCII; JSON-escape everything else. */
@@ -317,7 +307,7 @@ final class DropboxDestination implements Destination {
             Request req = authed(new Request.Builder().url(CONTENT + "/files/download")
                     .header("Dropbox-API-Arg", apiArg(new JSONObject().put("path", remoteRef)))
                     .post(RequestBody.create(new byte[0], null))).build();
-            try (Response r = http.newCall(req).execute()) {
+            try (Response r = Http.execute(http, null, req)) {
                 if (!r.isSuccessful()) throw Http.error("Dropbox download", r, Http.body(r));
                 return Http.bytes(r, maxBytes);
             }
