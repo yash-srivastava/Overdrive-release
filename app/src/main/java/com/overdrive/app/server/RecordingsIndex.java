@@ -1854,9 +1854,12 @@ public final class RecordingsIndex {
                 if (StorageManager.hasPublishedSurveillanceMarker(file)) continue;
                 RecordingIdentity identity = RecordingIdentity.fromFile(file);
                 scan.observedIds.add(identity.recordingId);
-                if (!RemovableStorageFs.isFile(file)) continue;
-                RecordingFileFingerprint fingerprint = RecordingFileFingerprint.from(file, identity);
-                if (fingerprint.sizeBytes > 0) {
+                // A complete directory snapshot already knows which sidecars are absent.
+                // Present sidecars still use the exact stat; shell fallback stats every sidecar.
+                File sidecar = listing.resolveSidecar(RecordingFileFingerprint.sidecarFor(file));
+                RecordingFileFingerprint fingerprint =
+                        RecordingFileFingerprint.fromScan(file, identity, sidecar);
+                if (fingerprint != null) {
                     scan.files.put(fingerprint.recordingId, fingerprint);
                 }
             }

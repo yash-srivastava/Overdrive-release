@@ -2,6 +2,7 @@ package com.overdrive.app.server;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Assume;
@@ -47,6 +48,47 @@ public class RecordingFileFingerprintTest {
         } finally {
             Files.deleteIfExists(sidecar.toPath());
             Files.deleteIfExists(mp4.toPath());
+            Files.deleteIfExists(dir);
+        }
+    }
+
+    @Test
+    public void scanFingerprintKeepsExactPresentSidecarAndSkipsKnownAbsent() throws Exception {
+        Path dir = Files.createTempDirectory("recording-scan-fingerprint");
+        File mp4 = write(dir.resolve("cam.mp4"), "video");
+        File sidecar = write(dir.resolve("cam.json"), "{}");
+        try {
+            Files.setLastModifiedTime(sidecar.toPath(), FileTime.fromMillis(30_000L));
+            RecordingIdentity identity = RecordingIdentity.fromFile(mp4);
+            RecordingFileFingerprint present =
+                    RecordingFileFingerprint.fromScan(mp4, identity, sidecar);
+            assertTrue(present.matches(mp4.getAbsolutePath(), mp4.length(),
+                    mp4.lastModified(), sidecar.lastModified()));
+            RecordingFileFingerprint absent =
+                    RecordingFileFingerprint.fromScan(mp4, identity, null);
+            assertEquals(0L, absent.sidecarMtime);
+            assertEquals(RecordingFileFingerprint.Decision.REFRESH,
+                    absent.decisionAgainst(present.absolutePath, present.sizeBytes,
+                            present.mp4Mtime, present.sidecarMtime));
+        } finally {
+            Files.deleteIfExists(sidecar.toPath());
+            Files.deleteIfExists(mp4.toPath());
+            Files.deleteIfExists(dir);
+        }
+    }
+
+    @Test
+    public void scanRejectsMissingDirectoriesAndEmptyClips() throws Exception {
+        Path dir = Files.createTempDirectory("recording-scan-non-file");
+        File missing = dir.resolve("missing.mp4").toFile();
+        File empty = Files.createFile(dir.resolve("empty.mp4")).toFile();
+        try {
+            for (File file : new File[]{dir.toFile(), missing, empty}) {
+                assertNull(RecordingFileFingerprint.fromScan(file,
+                        RecordingIdentity.fromFile(file), null));
+            }
+        } finally {
+            Files.deleteIfExists(empty.toPath());
             Files.deleteIfExists(dir);
         }
     }

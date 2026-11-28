@@ -10351,11 +10351,27 @@ public class StorageManager {
         public final File[] files;
         public final boolean available;
         public final boolean complete;
+        // Null for a shell fallback: its MP4 list is not a sidecar snapshot.
+        private final Set<String> sidecarNames;
 
         Mp4Listing(File[] files, boolean available, boolean complete) {
+            this(files, available, complete, null);
+        }
+
+        Mp4Listing(File[] files, boolean available, boolean complete,
+                   Set<String> sidecarNames) {
             this.files = files;
             this.available = available;
             this.complete = complete;
+            this.sidecarNames = sidecarNames;
+        }
+
+        /** Null means absent in the complete direct listing; otherwise retain the exact stat path. */
+        public File resolveSidecar(File sidecar) {
+            // Case-insensitive matching is conservative on FAT/exFAT. A false positive
+            // only causes the original exact lookup, never hides a sidecar.
+            return sidecarNames == null || sidecarNames.contains(
+                    sidecar.getName().toLowerCase(java.util.Locale.ROOT)) ? sidecar : null;
         }
     }
 
@@ -10368,13 +10384,23 @@ public class StorageManager {
         if (dir == null || !RemovableStorageFs.exists(dir) || !RemovableStorageFs.isDirectory(dir)) {
             return new Mp4Listing(new File[0], false, false);
         }
-        java.io.FileFilter mp4Filter = file -> file.getName().endsWith(".mp4");
-        DirListing direct = listFilesDirectWithStatus(dir, mp4Filter, 4_000L);
+        java.io.FileFilter recordingFilter = file -> {
+            String name = file.getName();
+            return name.endsWith(".mp4")
+                    || name.regionMatches(true, name.length() - 5, ".json", 0, 5);
+        };
+        DirListing direct = listFilesDirectWithStatus(dir, recordingFilter, 4_000L);
+        java.util.List<File> mp4 = new java.util.ArrayList<>();
         if (direct.complete) {
-            return new Mp4Listing(direct.files, true, true);
+            Set<String> sidecarNames = new HashSet<>();
+            for (File file : direct.files) {
+                String name = file.getName();
+                if (name.endsWith(".mp4")) mp4.add(file);
+                else sidecarNames.add(name.toLowerCase(java.util.Locale.ROOT));
+            }
+            return new Mp4Listing(mp4.toArray(new File[0]), true, true, sidecarNames);
         }
         DirListing shell = listFilesViaShellChecked(dir);
-        java.util.List<File> mp4 = new java.util.ArrayList<>();
         for (File file : shell.files) {
             if (file.getName().endsWith(".mp4")) mp4.add(file);
         }

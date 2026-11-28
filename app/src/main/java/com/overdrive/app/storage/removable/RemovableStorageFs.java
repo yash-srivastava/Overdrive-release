@@ -154,6 +154,15 @@ public final class RemovableStorageFs {
         return new FileStamp(f.length(), f.lastModified());
     }
 
+    /** File type, size and time from one stat on a routed volume; null for a non-file. */
+    public static FileStamp fileStampIfFile(File f) {
+        if (isRouted(f)) {
+            Stat s = stat(f, true);
+            return s.exists && !s.dir ? new FileStamp(s.length, s.mtime) : null;
+        }
+        return f.isFile() ? new FileStamp(f.length(), f.lastModified()) : null;
+    }
+
     /** A readable entry's modification time, or zero, using one exact routed stat. */
     public static long readableLastModified(File f) {
         if (isRouted(f)) {
