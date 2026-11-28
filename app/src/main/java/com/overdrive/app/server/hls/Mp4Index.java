@@ -29,29 +29,24 @@ public final class Mp4Index {
     private static final int MAX_DEPTH = 8;
     private static final long MAX_TRACK_SECONDS = 48L * 3600L;
 
-    private final File file;
     private final long fileLength;
     private final long lastModified;
     final Mp4Track video;
     final Mp4Track audio;
     /** Video sample index of each GOP's sync sample; gopFirst[gopCount] = video sample count. */
     final int[] gopFirst;
-    /** GOP presentation start in microseconds; gopUs[gopCount] = video end. */
-    final long[] gopUs;
     /** Audio samples muxed with GOP n are [audioFirst[n], audioFirst[n + 1]). Null without audio. */
     final int[] audioFirst;
     final GopTable gops;
     private final String codecs;
 
-    private Mp4Index(File file, long fileLength, long lastModified, Mp4Track video, Mp4Track audio,
+    private Mp4Index(long fileLength, long lastModified, Mp4Track video, Mp4Track audio,
                      int[] gopFirst, long[] gopUs, int[] audioFirst) {
-        this.file = file;
         this.fileLength = fileLength;
         this.lastModified = lastModified;
         this.video = video;
         this.audio = audio;
         this.gopFirst = gopFirst;
-        this.gopUs = gopUs;
         this.audioFirst = audioFirst;
         long[] ticks = new long[gopFirst.length];
         for (int g = 0; g < ticks.length; g++) ticks[g] = video.time[gopFirst[g]];
@@ -65,7 +60,7 @@ public final class Mp4Index {
         try (SeekableFileReader raf = new SeekableFileReader(f)) {
             FileChannel ch = raf.getChannel();
             long len = ch.size();
-            return build(f, len, mtime, readMoov(ch, len));
+            return build(len, mtime, readMoov(ch, len));
         } catch (FileNotFoundException e) {
             throw new Mp4Exception("file not readable");
         } catch (IOException e) {
@@ -73,10 +68,6 @@ public final class Mp4Index {
         } catch (RuntimeException e) {
             throw new Mp4Exception("malformed: " + e);
         }
-    }
-
-    public File file() {
-        return file;
     }
 
     public long fileLength() {
@@ -87,10 +78,6 @@ public final class Mp4Index {
         return lastModified;
     }
 
-    public boolean hasVideo() {
-        return video != null;
-    }
-
     public boolean hasAudio() {
         return audio != null;
     }
@@ -99,20 +86,9 @@ public final class Mp4Index {
         return gopFirst.length - 1;
     }
 
-    public double gopDurationSec(int n) {
-        checkGop(n);
-        return (gopUs[n + 1] - gopUs[n]) / 1e6;
-    }
-
-    /** Presentation time of GOP n's keyframe, microseconds from media time 0. */
-    public long gopStartUs(int n) {
-        checkGop(n);
-        return gopUs[n];
-    }
-
     /** Presentation end of the video track in microseconds. */
     public long durationUs() {
-        return gopUs[gopUs.length - 1];
+        return gops.us[gops.count()];
     }
 
     /** RFC 6381 codecs: video, then audio when present (e.g. "avc1.42C01F,mp4a.40.2"). */
@@ -126,10 +102,6 @@ public final class Mp4Index {
 
     public int height() {
         return video.height;
-    }
-
-    public byte[] videoStsd() {
-        return video.stsd.clone();
     }
 
     void checkGop(int n) {
@@ -220,7 +192,7 @@ public final class Mp4Index {
         int entryType;
     }
 
-    private static Mp4Index build(File f, long len, long mtime, byte[] m) throws Mp4Exception {
+    private static Mp4Index build(long len, long mtime, byte[] m) throws Mp4Exception {
         long movieTs = -1;
         List<TrakInfo> traks = new ArrayList<>();
         Iter it = new Iter(m, 0, m.length);
@@ -294,7 +266,7 @@ public final class Mp4Index {
             }
             audioFirst[gops] = audio.count;
         }
-        return new Mp4Index(f, len, mtime, video, audio, gopFirst, gopUs, audioFirst);
+        return new Mp4Index(len, mtime, video, audio, gopFirst, gopUs, audioFirst);
     }
 
     private static long mvhdTimescale(byte[] m, int p, int end) throws Mp4Exception {

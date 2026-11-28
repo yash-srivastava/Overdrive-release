@@ -81,37 +81,6 @@ public final class Fmp4Writer {
         return initSegment(idx, false);
     }
 
-    /** Exact byte length of s{n}.m4s. */
-    public static long mediaSegmentLength(Mp4Index idx, int n) {
-        return mediaPlan(idx, n).length();
-    }
-
-    public static void writeMediaSegment(Mp4Index idx, FileChannel src, int n, OutputStream out)
-            throws IOException {
-        Plan p = mediaPlan(idx, n);
-        write(idx, src, p, out);
-    }
-
-    /** Exact length of s{n}.m4s with silent audio covering the GOP; ignored when the clip has audio. */
-    public static long mediaSegmentLength(Mp4Index idx, int n, boolean silentAudio) {
-        return mediaPlan(idx, n, silentAudio).length();
-    }
-
-    public static void writeMediaSegment(Mp4Index idx, FileChannel src, int n, boolean silentAudio,
-                                         OutputStream out) throws IOException {
-        write(idx, src, mediaPlan(idx, n, silentAudio), out);
-    }
-
-    /** Exact byte length of k{k}s{n}.m4s. */
-    public static long skimSegmentLength(Mp4Index idx, int n, int k) {
-        return skimPlan(idx, n, k).length();
-    }
-
-    public static void writeSkimSegment(Mp4Index idx, FileChannel src, int n, int k, OutputStream out)
-            throws IOException {
-        write(idx, src, skimPlan(idx, n, k), out);
-    }
-
     /** Prepare a normal media segment once, for both its length and its streamed body. */
     public static PreparedSegment prepareMediaSegment(Mp4Index idx, int n, boolean silentAudio) {
         return new PreparedSegment(idx, mediaPlan(idx, n, silentAudio));
@@ -150,23 +119,17 @@ public final class Fmp4Writer {
     private static final class Plan {
         final byte[] head;
         final int vFrom, vTo, aFrom, aTo;
-        final int silentFrames;
         final long payload;
         /** Audio entries in mdat order when silence is interleaved; null for a plain sample range. */
         final AudioRun run;
 
-        Plan(byte[] head, int vFrom, int vTo, int aFrom, int aTo, int silentFrames, long payload) {
-            this(head, vFrom, vTo, aFrom, aTo, silentFrames, payload, null);
-        }
-
-        Plan(byte[] head, int vFrom, int vTo, int aFrom, int aTo, int silentFrames, long payload,
+        Plan(byte[] head, int vFrom, int vTo, int aFrom, int aTo, long payload,
              AudioRun run) {
             this.head = head;
             this.vFrom = vFrom;
             this.vTo = vTo;
             this.aFrom = aFrom;
             this.aTo = aTo;
-            this.silentFrames = silentFrames;
             this.payload = payload;
             this.run = run;
         }
@@ -174,10 +137,6 @@ public final class Fmp4Writer {
         long length() {
             return head.length + payload;
         }
-    }
-
-    private static Plan mediaPlan(Mp4Index idx, int n) {
-        return mediaPlan(idx, n, false);
     }
 
     private static Plan mediaPlan(Mp4Index idx, int n, boolean silentAudio) {
@@ -206,18 +165,18 @@ public final class Fmp4Writer {
         w.patch32(vOff, base);
         if (aOff >= 0) w.patch32(aOff, base + vBytes);
         mdatHeader(w, vBytes + aBytes, mdatHdr);
-        return new Plan(w.toByteArray(), vFrom, vTo, aFrom, aTo, 0, vBytes + aBytes, run);
+        return new Plan(w.toByteArray(), vFrom, vTo, aFrom, aTo, vBytes + aBytes, run);
     }
 
     /** One audio traf: real samples (index >= 0) and silent frames (-1), back to back from decodeStart. */
     private static final class AudioRun {
         final long decodeStart;
         final int[] sample;
-        final long[] duration;
+        final long duration;
         final int[] size;
         final long bytes;
 
-        AudioRun(long decodeStart, int[] sample, long[] duration, int[] size) {
+        AudioRun(long decodeStart, int[] sample, long duration, int[] size) {
             this.decodeStart = decodeStart;
             this.sample = sample;
             this.duration = duration;
@@ -234,27 +193,29 @@ public final class Fmp4Writer {
 
     private static final class RunBuilder {
         int[] sample = new int[32];
-        long[] duration = new long[32];
+        final long duration;
         int[] size = new int[32];
         int n;
-        long start = Long.MIN_VALUE;
+        long start;
 
-        void add(int s, long d, int bytes, long at) {
+        RunBuilder(long duration) {
+            this.duration = duration;
+        }
+
+        void add(int s, int bytes, long at) {
             if (n == sample.length) {
                 sample = java.util.Arrays.copyOf(sample, n * 2);
-                duration = java.util.Arrays.copyOf(duration, n * 2);
                 size = java.util.Arrays.copyOf(size, n * 2);
             }
             if (n == 0) start = at;
             sample[n] = s;
-            duration[n] = d;
             size[n] = bytes;
             n++;
         }
 
         AudioRun build() {
             return new AudioRun(start, java.util.Arrays.copyOf(sample, n),
-                    java.util.Arrays.copyOf(duration, n), java.util.Arrays.copyOf(size, n));
+                    duration, java.util.Arrays.copyOf(size, n));
         }
     }
 
@@ -373,7 +334,7 @@ public final class Fmp4Writer {
         int gops = idx.gopCount();
         int from = n == 0 ? 0 : ca.firstAtOrAfter(idx.silentTicks(n, a.timescale));
         int to = n + 1 >= gops ? ca.n : ca.firstAtOrAfter(idx.silentTicks(n + 1, a.timescale));
-        RunBuilder b = new RunBuilder();
+        RunBuilder b = new RunBuilder(ca.f);
         int e = from;
         if (e < to) {
             int run = ca.runAt(e);
@@ -381,13 +342,12 @@ public final class Fmp4Writer {
                 int end = Math.min(to, ca.runEnd(run));
                 for (; e < end; e++) {
                     int smp = ca.sampleAt(e, run);
-                    b.add(smp, ca.f, smp < 0 ? SILENT_FRAME.length : a.size[smp],
+                    b.add(smp, smp < 0 ? SILENT_FRAME.length : a.size[smp],
                             ca.startAt(e) + a.editMediaTime);
                 }
                 run++;
             }
         }
-        if (b.n == 0) return new AudioRun(0, new int[0], new long[0], new int[0]);
         return b.build();
     }
 
@@ -400,9 +360,8 @@ public final class Fmp4Writer {
         long end = n == gops - 1 ? (idx.silentTicks(gops, SILENT_RATE) - b0) / f
                 : ceilDiv(idx.silentTicks(n + 1, SILENT_RATE) - b0, f);
         end = Math.min(end, first + MAX_FILL_SECONDS * SILENT_RATE / f);
-        RunBuilder b = new RunBuilder();
-        for (long i = first; i < end; i++) b.add(-1, f, SILENT_FRAME.length, b0 + i * f);
-        if (b.n == 0) return new AudioRun(b0 + first * f, new int[0], new long[0], new int[0]);
+        RunBuilder b = new RunBuilder(f);
+        for (long i = first; i < end; i++) b.add(-1, SILENT_FRAME.length, b0 + i * f);
         return b.build();
     }
 
@@ -426,7 +385,7 @@ public final class Fmp4Writer {
         w.end(moof);
         w.patch32(vOff, w.size() + mdatHdr);
         mdatHeader(w, vBytes, mdatHdr);
-        return new Plan(w.toByteArray(), key, key + 1, 0, 0, 0, vBytes);
+        return new Plan(w.toByteArray(), key, key + 1, 0, 0, vBytes, null);
     }
 
     private static void write(Mp4Index idx, FileChannel src, Plan p, OutputStream out) throws IOException {
@@ -440,7 +399,6 @@ public final class Fmp4Writer {
             return;
         }
         if (p.aTo > p.aFrom) copier.copySamples(idx.audio.offset, idx.audio.size, p.aFrom, p.aTo);
-        for (int i = 0; i < p.silentFrames; i++) out.write(SILENT_FRAME);
     }
 
     private static void writeRun(Mp4Track a, AudioRun run, OutputStream out,
@@ -488,9 +446,7 @@ public final class Fmp4Writer {
         w.end(at);
     }
 
-    /** Writes one traf and returns the position of its trun data_offset for patching. */
-    private static int traf(BoxWriter w, Mp4Track t, int id, int from, int to, long decodeTime,
-                            long fixedDuration) {
+    private static int beginTraf(BoxWriter w, int id, long decodeTime) {
         int traf = w.begin(TRAF);
         int tfhd = w.beginFull(TFHD, 0, 0x020000);
         w.u32(id);
@@ -498,6 +454,13 @@ public final class Fmp4Writer {
         int tfdt = w.beginFull(TFDT, 1, 0);
         w.u64(decodeTime);
         w.end(tfdt);
+        return traf;
+    }
+
+    /** Writes one traf and returns the position of its trun data_offset for patching. */
+    private static int traf(BoxWriter w, Mp4Track t, int id, int from, int to, long decodeTime,
+                            long fixedDuration) {
+        int traf = beginTraf(w, id, decodeTime);
         boolean cts = t.cts != null && fixedDuration < 0;
         boolean negative = false;
         if (cts) for (int i = from; i < to && !negative; i++) negative = t.cts[i] < 0;
@@ -518,19 +481,13 @@ public final class Fmp4Writer {
     }
 
     private static int runTraf(BoxWriter w, AudioRun run) {
-        int traf = w.begin(TRAF);
-        int tfhd = w.beginFull(TFHD, 0, 0x020000);
-        w.u32(AUDIO_ID);
-        w.end(tfhd);
-        int tfdt = w.beginFull(TFDT, 1, 0);
-        w.u64(run.decodeStart);
-        w.end(tfdt);
+        int traf = beginTraf(w, AUDIO_ID, run.decodeStart);
         int trun = w.beginFull(TRUN, 0, 0x000001 | 0x000100 | 0x000200 | 0x000400);
         w.u32(run.count());
         int dataOffset = w.size();
         w.u32(0);
         for (int i = 0; i < run.count(); i++) {
-            w.u32(run.duration[i]);
+            w.u32(run.duration);
             w.u32(run.size[i]);
             w.u32(SYNC);
         }
