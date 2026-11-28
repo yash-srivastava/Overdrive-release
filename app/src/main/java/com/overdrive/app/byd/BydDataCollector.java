@@ -4963,6 +4963,34 @@ public class BydDataCollector {
         return readLegacyInt(instrumentDevice, "getAccCruisingSpeedValue", 0, 250);
     }
 
+    /** Plain cruise-control lamp: 1 lit, 0 off, or UNAVAILABLE. */
+    public int readCruiseLampNow() {
+        return normalizeInstrumentLamp(readLegacyInt(instrumentDevice, "getCruiseCtrlIndicatorState", 0, 15));
+    }
+
+    /** Raw ACC/cruise instrument registers for diagnostics, in {@link #ACC_REGISTER_GETTERS} order. */
+    public int[] readAccRegistersRawNow() {
+        int[] out = new int[ACC_REGISTER_GETTERS.length];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = readLegacyInt(instrumentDevice, ACC_REGISTER_GETTERS[i], Integer.MIN_VALUE + 1, Integer.MAX_VALUE);
+        }
+        return out;
+    }
+
+    public static final String[] ACC_REGISTER_GETTERS = {
+        "getACCIndicateLightState", "getACCIndicateLightColor", "getAccCruisingSpeed", "getAccCruisingSpeedValue",
+        "getAccCruisingSpeedColor", "getCruiseCtrlIndicatorState", "getCruiseCtrlIndicatorColor",
+        "get2in1AccWorkInterface",
+    };
+
+    /** The driver-selected EV/HEV preference as an ENERGY_MODE value (EV or HEV), or UNAVAILABLE; legacy cars only. */
+    public int readSelectedEnergyModeNow() {
+        if (energyDevice == null || isDiLink5Vehicle() || isDiLink5BridgeConsumer()) return BydVehicleData.UNAVAILABLE;
+        int mode = VehicleActuatorBridge.energyModeForMandatoryElectricState(
+                VehicleActuatorBridge.readMandatoryElectricState(energyDevice));
+        return mode > 0 ? mode : BydVehicleData.UNAVAILABLE;
+    }
+
     /** ACC following-distance register, or UNAVAILABLE. Answers on DiLink 3; its live meaning is unverified. */
     public int readAccGapNow() {
         return readLegacyInt(instrumentDevice, "get2in1AccDistance", 0, 15);
