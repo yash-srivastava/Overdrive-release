@@ -709,30 +709,6 @@ public class SentryDaemon {
     }
     
     /**
-     * Send stop command to running daemon.
-     * Call this from app to kill the daemon cleanly.
-     * 
-     * @return true if daemon was stopped, false if not running or error
-     */
-    public static boolean sendStopCommand() {
-        try {
-            java.net.Socket socket = new java.net.Socket("127.0.0.1", CONTROL_PORT);
-            socket.setSoTimeout(5000);
-            
-            java.io.PrintWriter writer = new java.io.PrintWriter(socket.getOutputStream(), true);
-            BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            
-            writer.println("STOP");
-            String response = reader.readLine();
-            
-            socket.close();
-            return response != null && response.startsWith("OK");
-        } catch (Exception e) {
-            return false;
-        }
-    }
-    
-    /**
      * Check if daemon is running.
      * 
      * @return true if daemon is running
@@ -752,25 +728,6 @@ public class SentryDaemon {
             return response != null && response.contains("PONG");
         } catch (Exception e) {
             return false;
-        }
-    }
-    
-    /**
-     * Kill daemon by PID file (fallback if socket doesn't work).
-     */
-    public static void killByPidFile() {
-        try {
-            java.io.BufferedReader br = new java.io.BufferedReader(
-                new java.io.FileReader(PID_FILE()));
-            String pidStr = br.readLine();
-            br.close();
-            
-            if (pidStr != null && !pidStr.isEmpty()) {
-                int pid = Integer.parseInt(pidStr.trim());
-                Runtime.getRuntime().exec(new String[]{"kill", "-9", String.valueOf(pid)});
-            }
-        } catch (Exception e) {
-            // Ignore
         }
     }
 }
