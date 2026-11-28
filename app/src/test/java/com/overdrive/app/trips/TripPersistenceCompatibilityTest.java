@@ -11,6 +11,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.Calendar;
 import java.util.Locale;
@@ -49,25 +50,24 @@ public class TripPersistenceCompatibilityTest {
     }
 
     @Test
-    public void electricAndFuelBucketsKeepIndependentUnitsAndTotals() {
-        assertNull(database.getOverallAverage());
-        assertNull(database.getOverallFuelAverage());
-        String key = "same'key";
-        database.updateConsumptionBucket(key, 0.2);
-        database.updateConsumptionBucket(key, 0.4);
-        database.updateConsumptionBucket("other", 0.3);
-        database.updateFuelConsumptionBucket(key, 0.05);
-        database.updateFuelConsumptionBucket(key, 0.07);
-        database.updateFuelConsumptionBucket("other", 0.09);
-        assertBucket(database.getBucket(key), key, 2, 0.6, 0.20);
-        assertBucket(database.getFuelBucket(key), key, 2, 0.12, 0.0074);
-        assertBucket(database.getOverallAverage(), "overall", 3, 0.9, 0.29);
-        assertBucket(database.getOverallFuelAverage(), "overall", 3, 0.21, 0.0155);
-        assertNull(database.getBucket("missing"));
-        assertNull(database.getFuelBucket("missing"));
-        database.clearConsumptionBuckets();
-        assertNull(database.getOverallAverage());
-        assertBucket(database.getOverallFuelAverage(), "overall", 3, 0.21, 0.0155);
+    public void resetStillClearsLegacyElectricAndFuelBuckets() throws Exception {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.executeUpdate("INSERT INTO consumption_buckets " +
+                    "(bucket_key, sample_count, sum_kwh_per_km, sum_squared_kwh_per_km) " +
+                    "VALUES ('old_ev', 2, 0.6, 0.2)");
+            stmt.executeUpdate("INSERT INTO fuel_consumption_buckets " +
+                    "(bucket_key, sample_count, sum_litres_per_km, sum_squared_litres_per_km) " +
+                    "VALUES ('old_fuel', 2, 0.12, 0.0074)");
+        }
+        assertEquals(2L, database.resetAll());
+        try (Statement stmt = connection.createStatement()) {
+            for (String table : new String[]{"consumption_buckets", "fuel_consumption_buckets"}) {
+                try (ResultSet rows = stmt.executeQuery("SELECT COUNT(*) FROM " + table)) {
+                    assertTrue(rows.next());
+                    assertEquals(0, rows.getInt(1));
+                }
+            }
+        }
     }
 
     @Test
@@ -196,11 +196,4 @@ public class TripPersistenceCompatibilityTest {
         return trip;
     }
 
-    private static void assertBucket(ConsumptionBucket bucket, String key, int count, double sum, double squared) {
-        assertNotNull(bucket);
-        assertEquals(key, bucket.bucketKey);
-        assertEquals(count, bucket.sampleCount);
-        assertEquals(sum, bucket.sumKwhPerKm, EPS);
-        assertEquals(squared, bucket.sumSquaredKwhPerKm, EPS);
-    }
 }

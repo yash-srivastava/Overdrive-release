@@ -454,7 +454,7 @@ public class TripDatabase {
             createRollupTable(stmt, "weekly_rollups", "week_number");
             createRollupTable(stmt, "monthly_rollups", "month_number");
 
-            // Consumption buckets
+            // Legacy range buckets: retained for database compatibility and Reset Data.
             stmt.execute(
                 "CREATE TABLE IF NOT EXISTS consumption_buckets (" +
                 "bucket_key VARCHAR(64) PRIMARY KEY," +
@@ -464,11 +464,7 @@ public class TripDatabase {
                 ")"
             );
 
-            // PHEV fuel-consumption buckets — same shape as the EV table but
-            // stores litres-per-km. Populated only by trips classified as
-            // FUEL-mode (ICE share ≥ 50%) with a non-zero litresUsed snapshot.
-            // Table is empty on BEV vehicles; harmless. Idempotent CREATE so
-            // re-runs after migration are no-ops.
+            // Legacy fuel buckets: keep the original litres-per-km schema as well.
             stmt.execute(
                 "CREATE TABLE IF NOT EXISTS fuel_consumption_buckets (" +
                 "bucket_key VARCHAR(64) PRIMARY KEY," +
@@ -1399,99 +1395,6 @@ public class TripDatabase {
         return null;
     }
 
-    // ==================== CONSUMPTION BUCKETS (Task 7.4) ====================
-
-    /**
-     * Update a consumption bucket by incrementing sampleCount, adding to sum, and adding square to sumSquared.
-     * Uses MERGE semantics: insert if not exists, update if exists.
-     */
-    public synchronized void updateConsumptionBucket(String bucketKey, double consumptionKwhPerKm) {
-        updateBucket(bucketKey, consumptionKwhPerKm, BucketTable.ELECTRIC);
-    }
-
-    /**
-     * Get a consumption bucket by key, or null if not found.
-     */
-    public synchronized ConsumptionBucket getBucket(String bucketKey) {
-        return getBucket(bucketKey, BucketTable.ELECTRIC);
-    }
-
-    // Only fixed internal table and column names are used to construct SQL.
-    private enum BucketTable {
-        ELECTRIC("consumption_buckets", "sum_kwh_per_km", "sum_squared_kwh_per_km", "consumption"),
-        FUEL("fuel_consumption_buckets", "sum_litres_per_km", "sum_squared_litres_per_km", "fuel");
-
-        final String table;
-        final String sum;
-        final String squaredSum;
-        final String label;
-
-        BucketTable(String table, String sum, String squaredSum, String label) {
-            this.table = table;
-            this.sum = sum;
-            this.squaredSum = squaredSum;
-            this.label = label;
-        }
-    }
-
-    private void updateBucket(String bucketKey, double rate, BucketTable bucket) {
-        if (!ensureConnection()) return;
-
-        try {
-            // Try to read existing bucket
-            ConsumptionBucket existing = bucket == BucketTable.ELECTRIC
-                    ? getBucket(bucketKey) : getFuelBucket(bucketKey);
-
-            if (existing == null) {
-                // Insert new bucket
-                String sql = "INSERT INTO " + bucket.table + " (bucket_key, sample_count, " +
-                        bucket.sum + ", " + bucket.squaredSum + ") " +
-                        "VALUES (?, 1, ?, ?)";
-                try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-                    pstmt.setString(1, bucketKey);
-                    pstmt.setDouble(2, rate);
-                    pstmt.setDouble(3, rate * rate);
-                    pstmt.executeUpdate();
-                }
-            } else {
-                // Update existing bucket: increment count, add to sum, add square to sumSquared
-                String sql = "UPDATE " + bucket.table + " SET sample_count = sample_count + 1, " +
-                        bucket.sum + " = " + bucket.sum + " + ?, " +
-                        bucket.squaredSum + " = " + bucket.squaredSum + " + ? " +
-                        "WHERE bucket_key = ?";
-                try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-                    pstmt.setDouble(1, rate);
-                    pstmt.setDouble(2, rate * rate);
-                    pstmt.setString(3, bucketKey);
-                    pstmt.executeUpdate();
-                }
-            }
-            logger.debug("Updated " + bucket.label + " bucket: " + bucketKey);
-        } catch (Exception e) {
-            logger.error("Failed to update " + bucket.label + " bucket: " + bucketKey, e);
-            reconnect();
-        }
-    }
-
-    private ConsumptionBucket getBucket(String bucketKey, BucketTable bucket) {
-        if (!ensureConnection()) return null;
-
-        String sql = "SELECT bucket_key, sample_count, " + bucket.sum + ", " + bucket.squaredSum +
-                " FROM " + bucket.table + " WHERE bucket_key = ?";
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setString(1, bucketKey);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    return readBucketFromResultSet(rs, bucket);
-                }
-            }
-        } catch (Exception e) {
-            logger.error("Failed to get " + bucket.label + " bucket: " + bucketKey, e);
-            reconnect();
-        }
-        return null;
-    }
-
     /**
      * Wipes every row from every trips table. Used by the user-initiated
      * "Reset Data" feature. Returns the total number of rows deleted across
@@ -1529,7 +1432,7 @@ public class TripDatabase {
     //       them apart from rows whose real file vanished, and skip them; and
     //   (b) the per-trip raw-telemetry detail view degrades gracefully (no file).
     // Import replays each row through the SAME ingestion path a live trip uses
-    // (insertTrip → rollups → route) so routes/rollups/buckets rebuild correctly
+    // (insertTrip → rollups → route) so routes and rollups rebuild correctly
     // and never PK-collide; ids are auto-assigned (never carried from the bundle).
 
     /** Sentinel telemetry path marking a row imported from a backup (no on-disk
@@ -2531,7 +2434,7 @@ public class TripDatabase {
 
     /**
      * Export ALL trip rows as a JSON array (stats only — no telemetry files,
-     * no derived rollup/route/bucket tables; those rebuild on import). Each
+     * no derived rollup/route tables; those rebuild on import). Each
      * element carries the portable trip columns. Read-only.
      */
     /** One finished trip in the {@link #exportTripsJson} row format, or null. */
@@ -2783,88 +2686,6 @@ public class TripDatabase {
         t.rateSource = o.optString("rateSource", "");
         t.rateLabel = o.optString("rateLabel", "");
         return t;
-    }
-
-    /**
-     * Clear all consumption buckets. Called when nominal capacity changes
-     * significantly (e.g., wrong capacity was detected previously) to prevent
-     * poisoned consumption rates from corrupting range estimates.
-     */
-    public synchronized void clearConsumptionBuckets() {
-        if (!ensureConnection()) return;
-        try (Statement stmt = connection.createStatement()) {
-            int deleted = stmt.executeUpdate("DELETE FROM consumption_buckets");
-            logger.info("Cleared " + deleted + " consumption buckets (capacity changed)");
-        } catch (Exception e) {
-            logger.error("Failed to clear consumption buckets", e);
-        }
-    }
-
-    /**
-     * Get the overall average across all consumption buckets.
-     * Aggregates: sum all sums / sum all counts.
-     */
-    public synchronized ConsumptionBucket getOverallAverage() {
-        return getOverallAverage(BucketTable.ELECTRIC);
-    }
-
-    private ConsumptionBucket getOverallAverage(BucketTable bucket) {
-        if (!ensureConnection()) return null;
-
-        String sql = "SELECT SUM(sample_count) as total_count, " +
-                "SUM(" + bucket.sum + ") as total_sum, " +
-                "SUM(" + bucket.squaredSum + ") as total_sum_sq " +
-                "FROM " + bucket.table;
-
-        try (PreparedStatement pstmt = connection.prepareStatement(sql);
-             ResultSet rs = pstmt.executeQuery()) {
-            if (rs.next()) {
-                int totalCount = rs.getInt("total_count");
-                if (totalCount == 0) return null;
-
-                ConsumptionBucket overall = new ConsumptionBucket();
-                overall.bucketKey = "overall";
-                overall.sampleCount = totalCount;
-                overall.sumKwhPerKm = rs.getDouble("total_sum");
-                overall.sumSquaredKwhPerKm = rs.getDouble("total_sum_sq");
-                return overall;
-            }
-        } catch (Exception e) {
-            logger.error("Failed to get overall " + bucket.label + " average", e);
-            reconnect();
-        }
-        return null;
-    }
-
-    // ==================== FUEL CONSUMPTION BUCKETS (PHEV) ====================
-
-    /**
-     * Update a fuel consumption bucket — same MERGE-style semantics as the
-     * EV bucket, but tracks litres-per-km instead of kWh-per-km. The
-     * underlying {@link ConsumptionBucket} record is reused; the read path
-     * fills {@code sumKwhPerKm} with the litres-per-km value so existing
-     * bucket-resolution code can stay generic.
-     */
-    public synchronized void updateFuelConsumptionBucket(String bucketKey, double litresPerKm) {
-        updateBucket(bucketKey, litresPerKm, BucketTable.FUEL);
-    }
-
-    /**
-     * Get a fuel consumption bucket by key, or null if not found.
-     * Returns the same {@link ConsumptionBucket} type with its sumKwhPerKm
-     * field populated from the underlying litres-per-km column for
-     * call-site uniformity with the EV path.
-     */
-    public synchronized ConsumptionBucket getFuelBucket(String bucketKey) {
-        return getBucket(bucketKey, BucketTable.FUEL);
-    }
-
-    /**
-     * Overall average across all fuel buckets, mirroring
-     * {@link #getOverallAverage()} for the EV side.
-     */
-    public synchronized ConsumptionBucket getOverallFuelAverage() {
-        return getOverallAverage(BucketTable.FUEL);
     }
 
     // ==================== RANGE CALIBRATION ====================
@@ -3120,18 +2941,6 @@ public class TripDatabase {
         rollup.avgSpeedDiscipline = rs.getInt("avg_speed_discipline");
         rollup.avgEfficiencyScore = rs.getInt("avg_efficiency_score");
         rollup.avgConsistency = rs.getInt("avg_consistency");
-    }
-
-    /**
-     * Read a ConsumptionBucket from a ResultSet row.
-     */
-    private ConsumptionBucket readBucketFromResultSet(ResultSet rs, BucketTable table) throws Exception {
-        ConsumptionBucket bucket = new ConsumptionBucket();
-        bucket.bucketKey = rs.getString("bucket_key");
-        bucket.sampleCount = rs.getInt("sample_count");
-        bucket.sumKwhPerKm = rs.getDouble(table.sum);
-        bucket.sumSquaredKwhPerKm = rs.getDouble(table.squaredSum);
-        return bucket;
     }
 
     /**

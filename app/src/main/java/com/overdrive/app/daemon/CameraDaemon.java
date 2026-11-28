@@ -1298,8 +1298,7 @@ public class CameraDaemon {
                             new com.overdrive.app.trips.TripAnalyticsManager();
                     tam.init(sharedAppContext, telemetryDataCollector, sohEstSnapshot);
                     boolean initializedEnabled = tam.isEnabled();
-                    if (!publishTripAnalyticsManager(
-                            tam, sohEstSnapshot)) {
+                    if (!publishTripAnalyticsManager(tam)) {
                         log("Trip Analytics initialized after shutdown admission; "
                                 + "closing it without publication");
                         tam.shutdown();
@@ -4257,8 +4256,7 @@ public class CameraDaemon {
     }
 
     private static boolean publishTripAnalyticsManager(
-            com.overdrive.app.trips.TripAnalyticsManager manager,
-            SohEstimator sohEstimatorSnapshot) {
+            com.overdrive.app.trips.TripAnalyticsManager manager) {
         synchronized (TRIP_ANALYTICS_LIFECYCLE_LOCK) {
             if (manager == null
                     || TRIP_ANALYTICS_SHUTDOWN_REQUESTED.get()
@@ -4272,9 +4270,6 @@ public class CameraDaemon {
                 // initialized manager before releasing the admission lock.
                 // Shutdown marks its intent under this same lock, so it cannot
                 // close the manager mid-publication.
-                runTripConsumptionBucketMigration(
-                        manager, sohEstimatorSnapshot);
-
                 // initSurveillance() currently runs before this thread starts.
                 // Re-read the volatile defensively so a future ordering change
                 // still binds the final collector before shutdown intervenes.
@@ -4300,43 +4295,6 @@ public class CameraDaemon {
                         + e.getMessage());
                 return false;
             }
-        }
-    }
-
-    private static void runTripConsumptionBucketMigration(
-            com.overdrive.app.trips.TripAnalyticsManager manager,
-            SohEstimator sohEstimatorSnapshot) {
-        // ONE-TIME migration: clear poisoned consumption buckets if this is a
-        // PHEV and the migration has not already completed.
-        try {
-            java.io.File marker = new java.io.File(
-                    com.overdrive.app.util.ScratchRoot.path("overdrive_bucket_migration_done"));
-            if (sohEstimatorSnapshot == null
-                    || sohEstimatorSnapshot.getNominalCapacityKwh() <= 0
-                    || sohEstimatorSnapshot.getNominalCapacityKwh() >= 30.0
-                    || manager.getDatabase() == null
-                    || RemovableStorageFs.exists(marker)) {
-                return;
-            }
-            manager.getDatabase().clearConsumptionBuckets();
-            com.overdrive.app.trips.RangeEstimator estimator =
-                    manager.getRangeEstimator();
-            if (estimator == null) {
-                log("WARNING: PHEV bucket migration could not request "
-                        + "backfill; marker not written");
-                return;
-            }
-            log("One-time PHEV bucket migration: cleared poisoned "
-                    + "consumption data; buckets refill as trips complete");
-            try {
-                new java.io.FileWriter(marker).close();
-            } catch (Exception markerFailure) {
-                log("WARNING: Could not write bucket migration marker: "
-                        + markerFailure.getMessage());
-            }
-        } catch (Throwable migrationFailure) {
-            log("WARNING: PHEV bucket migration failed: "
-                    + migrationFailure.getMessage());
         }
     }
 
