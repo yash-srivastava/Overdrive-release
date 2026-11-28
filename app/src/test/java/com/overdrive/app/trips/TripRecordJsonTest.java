@@ -70,6 +70,50 @@ public class TripRecordJsonTest {
         assertSameFields(full, summary);
     }
 
+    @Test
+    public void nonFiniteElectricSnapshotsDoNotTruncateTripJson() throws Exception {
+        for (double invalid : new double[]{Double.NaN, Double.POSITIVE_INFINITY,
+                Double.NEGATIVE_INFINITY}) {
+            TripRecord trip = new TripRecord();
+            trip.kwhStart = invalid;
+            trip.kwhEnd = 38;
+            trip.elecConStart = 100;
+            trip.elecConEnd = invalid;
+            trip.currency = "USD";
+            trip.tripCost = 0.5;
+            trip.telemetryFilePath = "trip.jsonl.gz";
+
+            for (JSONObject json : new JSONObject[]{trip.toJson(), trip.toSummaryJson()}) {
+                assertEquals(0, json.getDouble("kwhStart"), 0);
+                assertEquals(38, json.getDouble("kwhEnd"), 0);
+                assertEquals(100, json.getDouble("elecConStart"), 0);
+                assertFalse(json.has("elecConEnd"));
+                assertFalse(json.getBoolean("energyMetered"));
+                assertEquals(0, json.getDouble("energyUsedKwh"), 0);
+                assertEquals(0, json.getDouble("signedEnergyKwh"), 0);
+                assertEquals("USD", json.getString("currency"));
+                assertEquals(0.5, json.getDouble("tripCost"), 0);
+                assertTrue(json.has("overallScore"));
+            }
+            assertEquals("trip.jsonl.gz", trip.toJson().getString("telemetryFilePath"));
+            assertFalse(trip.toSummaryJson().has("telemetryFilePath"));
+
+            trip.kwhStart = 40;
+            trip.kwhEnd = invalid;
+            trip.elecConStart = invalid;
+            trip.elecConEnd = 101;
+            for (JSONObject json : new JSONObject[]{trip.toJson(), trip.toSummaryJson()}) {
+                assertEquals(40, json.getDouble("kwhStart"), 0);
+                assertEquals(0, json.getDouble("kwhEnd"), 0);
+                assertFalse(json.has("elecConStart"));
+                assertEquals(101, json.getDouble("elecConEnd"), 0);
+                assertFalse(json.getBoolean("energyMetered"));
+                assertEquals(0, json.getDouble("energyUsedKwh"), 0);
+                assertEquals(0.5, json.getDouble("tripCost"), 0);
+            }
+        }
+    }
+
     // JSONObject.similar is not in the Android API the tests compile against.
     private static void assertSameFields(JSONObject expected, JSONObject actual) throws Exception {
         assertEquals(expected.length(), actual.length());

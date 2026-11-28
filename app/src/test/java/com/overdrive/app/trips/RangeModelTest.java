@@ -28,6 +28,22 @@ public class RangeModelTest {
     }
 
     @Test
+    public void infiniteBatterySnapshotsAreNotAFlatMeasuredSample() {
+        TripRecord trip = new TripRecord();
+        trip.endTime = NOW;
+        trip.distanceKm = 1;
+        trip.kwhStart = Double.POSITIVE_INFINITY;
+        trip.kwhEnd = Double.POSITIVE_INFINITY;
+        assertNull(RangeModel.evSample(trip, 60));
+
+        trip.elecConStart = 100;
+        trip.elecConEnd = 100.2;
+        RangeModel.Sample sample = RangeModel.evSample(trip, 60);
+        assertNotNull(sample);
+        assertEquals(0.2, sample.used, EPS);
+    }
+
+    @Test
     public void fitRequiresEnoughTripsAndDistance() {
         assertNull(RangeModel.fit(Arrays.asList(sample(NOW, 20, 0.20),
                 sample(NOW, 20, 0.20)), neutralCurves(), NOW, null));

@@ -79,6 +79,41 @@ public class TripRecordEnergyTest {
         }
     }
 
+    @Test
+    public void nonFiniteBatteryReadingsFallBackToFiniteMeter() {
+        for (double invalid : new double[]{Double.NaN, Double.POSITIVE_INFINITY,
+                Double.NEGATIVE_INFINITY}) {
+            for (TripRecord trip : new TripRecord[]{
+                    tripWithReadings(invalid, 38, 100, 101.5),
+                    tripWithReadings(40, invalid, 100, 101.5),
+                    tripWithReadings(invalid, invalid, 100, 101.5)}) {
+                assertFalse(trip.hasRemainingEnergy());
+                assertEquals(1.5, trip.getEnergyUsedKwh(), EPS);
+                assertEquals(1.5, trip.getSignedEnergyKwh(), EPS);
+                assertEquals(1.5, trip.getResolvedEnergyKwh(), EPS);
+            }
+        }
+    }
+
+    @Test
+    public void nonFiniteMeterIsUnavailableRatherThanMeasuredZero() {
+        for (double invalid : new double[]{Double.NaN, Double.POSITIVE_INFINITY,
+                Double.NEGATIVE_INFINITY}) {
+            for (TripRecord trip : new TripRecord[]{
+                    tripWithReadings(40, 40, invalid, 100),
+                    tripWithReadings(40, 40, 100, invalid),
+                    tripWithReadings(40, 40, invalid, invalid)}) {
+                trip.distanceKm = 10;
+                trip.energyPerKm = 0.2;
+                assertFalse(trip.hasMeteredEnergy());
+                assertEquals(0, trip.getMeteredEnergyKwh(), EPS);
+                assertEquals(0, trip.getEnergyUsedKwh(), EPS);
+                assertEquals(0, trip.getSignedEnergyKwh(), EPS);
+                assertEquals(2, trip.getResolvedEnergyKwh(), EPS);
+            }
+        }
+    }
+
     private static TripRecord tripWithReadings(double batteryStart, double batteryEnd,
                                                double meterStart, double meterEnd) {
         TripRecord trip = new TripRecord();

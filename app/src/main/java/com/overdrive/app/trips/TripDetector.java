@@ -214,7 +214,7 @@ public class TripDetector {
         // Read start kWh (remaining energy from BMS)
         try {
             double kwhRemaining = VehicleDataMonitor.getInstance().getBatteryRemainPowerKwh();
-            if (kwhRemaining > 0) {
+            if (Double.isFinite(kwhRemaining) && kwhRemaining > 0) {
                 activeTrip.kwhStart = kwhRemaining;
             }
         } catch (Exception e) {
@@ -232,7 +232,7 @@ public class TripDetector {
         // remaining-kWh delta rather than booking a false 0 kWh.
         try {
             double elecConStart = VehicleDataMonitor.getInstance().getTotalElecCon();
-            if (!Double.isNaN(elecConStart) && elecConStart > 0) {
+            if (Double.isFinite(elecConStart) && elecConStart > 0) {
                 activeTrip.elecConStart = elecConStart;
             }
         } catch (Exception e) {
@@ -386,7 +386,7 @@ public class TripDetector {
         // Read end kWh (remaining energy from BMS)
         try {
             double kwhRemaining = VehicleDataMonitor.getInstance().getBatteryRemainPowerKwh();
-            if (kwhRemaining > 0) {
+            if (Double.isFinite(kwhRemaining) && kwhRemaining > 0) {
                 activeTrip.kwhEnd = kwhRemaining;
             }
         } catch (Exception e) {
@@ -399,7 +399,7 @@ public class TripDetector {
         // tiers instead of yielding a negative energy figure.
         try {
             double elecConEnd = VehicleDataMonitor.getInstance().getTotalElecCon();
-            if (!Double.isNaN(elecConEnd) && elecConEnd > 0) {
+            if (Double.isFinite(elecConEnd) && elecConEnd > 0) {
                 activeTrip.elecConEnd = elecConEnd;
             }
         } catch (Exception e) {

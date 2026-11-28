@@ -133,10 +133,7 @@ public class TripRecord {
      * distinguish the two via {@link #hasMeteredEnergy()}.
      */
     public double getMeteredEnergyKwh() {
-        if (elecConStart >= 0 && elecConEnd >= 0 && elecConEnd >= elecConStart) {
-            return elecConEnd - elecConStart;
-        }
-        return 0;
+        return hasMeteredEnergy() ? elecConEnd - elecConStart : 0;
     }
 
     /**
@@ -147,7 +144,14 @@ public class TripRecord {
      * the pack supplied nothing.
      */
     public boolean hasMeteredEnergy() {
-        return elecConStart >= 0 && elecConEnd >= 0 && elecConEnd >= elecConStart;
+        return Double.isFinite(elecConStart) && Double.isFinite(elecConEnd)
+                && elecConStart >= 0 && elecConEnd >= elecConStart;
+    }
+
+    /** Both remaining-energy snapshots are usable for a net delta. */
+    boolean hasRemainingEnergy() {
+        return Double.isFinite(kwhStart) && Double.isFinite(kwhEnd)
+                && kwhStart > 0 && kwhEnd > 0;
     }
 
     /**
@@ -170,7 +174,7 @@ public class TripRecord {
      * zero, and on a trip that short the regen component is negligible anyway.
      */
     public double getEnergyUsedKwh() {
-        boolean haveNet = kwhStart > 0 && kwhEnd > 0;
+        boolean haveNet = hasRemainingEnergy();
         // Tier 1 — net remaining-energy delta (regen-inclusive).
         if (haveNet && kwhStart > kwhEnd) {
             return kwhStart - kwhEnd;
@@ -230,7 +234,7 @@ public class TripRecord {
      */
     public double getSignedEnergyKwh() {
         // A strict inequality either way is a real net movement, signed.
-        if (kwhStart > 0 && kwhEnd > 0 && kwhStart != kwhEnd) {
+        if (hasRemainingEnergy() && kwhStart != kwhEnd) {
             return kwhStart - kwhEnd; // negative when kwhEnd > kwhStart (net regen)
         }
         // Equal readings are NOT "zero energy" — they mean the trip was below this
@@ -273,10 +277,12 @@ public class TripRecord {
             json.put("maxSpeedKmh", maxSpeedKmh);
             json.put("socStart", socStart);
             json.put("socEnd", socEnd);
-            json.put("kwhStart", kwhStart);
-            json.put("kwhEnd", kwhEnd);
-            if (elecConStart >= 0) json.put("elecConStart", elecConStart);
-            if (elecConEnd >= 0) json.put("elecConEnd", elecConEnd);
+            // Preserve the existing missing-reading representation instead of
+            // letting a non-finite snapshot abort the rest of the JSON object.
+            json.put("kwhStart", Double.isFinite(kwhStart) ? kwhStart : 0);
+            json.put("kwhEnd", Double.isFinite(kwhEnd) ? kwhEnd : 0);
+            if (Double.isFinite(elecConStart) && elecConStart >= 0) json.put("elecConStart", elecConStart);
+            if (Double.isFinite(elecConEnd) && elecConEnd >= 0) json.put("elecConEnd", elecConEnd);
             json.put("energyUsedKwh", getEnergyUsedKwh());
             // Signed twin of the above: negative on a regen-dominant trip where
             // the pack ended fuller than it started. energyUsedKwh clamps that to

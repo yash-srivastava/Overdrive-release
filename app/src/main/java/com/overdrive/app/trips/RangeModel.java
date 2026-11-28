@@ -385,7 +385,7 @@ final class RangeModel {
         boolean frozen = km * 0.08 > 1.5 * step;
         boolean haveSoc = t.socStart > 0 && t.socEnd > 0 && capacityKwh > 0;
         double socKwh = haveSoc ? (t.socStart - t.socEnd) / 100.0 * capacityKwh : Double.NaN;
-        boolean haveNet = t.kwhStart > 0 && t.kwhEnd > 0;
+        boolean haveNet = t.hasRemainingEnergy();
         double metered = t.hasMeteredEnergy() ? t.getMeteredEnergyKwh() : Double.NaN;
         if (metered > 1.0 + km) metered = Double.NaN;
 
