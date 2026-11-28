@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_navigation_title">導航</string>
+    <string name="settings_navigation_subtitle">選擇哪些可選頁面固定顯示在左側導覽列中。</string>
+    <string name="settings_navigation_fixed_hint">儀表板、設定和關於始終可用。</string>
+    <string name="settings_navigation_reset">恢復預設</string>
+    <string name="settings_navigation_reset_done">導覽列已恢復</string>
+    <string name="settings_navigation_shown">顯示</string>
+    <string name="settings_navigation_hidden">隱藏</string>
+    <string name="settings_navigation_option_state">%1$s，在導覽列中%2$s</string>
+</resources>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cluster_text_title">儀表板文字輸入</string>
+    <string name="cluster_text_service_label">OverDrive 儀表板文字輸入</string>
+    <string name="cluster_text_service_description">允許你在車機上向 DiLink 5 儀表板投影應用中獲得焦點的文字方塊輸入文字。不包括密碼框。僅當你希望儀表板文字方塊獲得焦點時自動彈出鍵盤對話框，才啟用自動提示。</string>
+    <string name="cluster_text_hint">發送到儀表板應用的文字</string>
+    <string name="cluster_text_auto_prompt">儀表板文字方塊獲得焦點時自動開啟</string>
+    <string name="cluster_text_send">發送文字</string>
+    <string name="cluster_text_send_submit">發送文字並回車</string>
+    <string name="cluster_text_retry">檢查焦點文字方塊</string>
+    <string name="cluster_text_enable_service">無障礙設定</string>
+    <string name="cluster_text_enable_hint">請在無障礙設定中啟用「OverDrive 儀表板文字輸入」，然後在投影應用中聚焦一個文字方塊並再次檢查。</string>
+    <string name="cluster_text_checking">正在檢查儀表板文字方塊…</string>
+    <string name="cluster_text_target">%1$s 中的文字方塊</string>
+    <string name="cluster_text_requires_android11">儀表板文字輸入需要 Android 11 或更高版本的 DiLink 5，並能存取儀表板的無障礙視窗。此韌體無法驗證文字方塊屬於哪個螢幕。</string>
+    <string name="cluster_text_requires_cast">輸入文字前請先啟動 DiLink 5 應用投影。</string>
+    <string name="cluster_text_no_field">在儀表板上未找到可存取且已獲得焦點的文字方塊。請在投影應用中聚焦一個文字方塊並再次檢查。不包括密碼框。</string>
+    <string name="cluster_text_field_changed">投影記錄或焦點文字方塊已改變。發送前請再次檢查文字方塊。</string>
+    <string name="cluster_text_unavailable">無法驗證儀表板文字方塊。請檢查投影和無障礙連接，然後重試。</string>
+    <string name="cluster_text_rejected">應用未確認收到文字。請檢查儀表板文字方塊後再試。</string>
+    <string name="cluster_text_submit_rejected">文字已發送，但應用不接受回車。請在儀表板應用中提交。</string>
+</resources>

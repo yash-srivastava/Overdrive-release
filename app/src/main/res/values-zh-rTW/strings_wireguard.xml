@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="daemon_name_wireguard">WireGuard 隧道</string>
+    <string name="daemon_config_no_wireguard">沒有 WireGuard 設定</string>
+    <string name="daemon_status_wireguard_connected">已連接 · %1$s</string>
+    <string name="daemon_status_wireguard_connecting">正在連接 %1$s…</string>
+    <string name="daemon_status_wireguard_error">錯誤：%1$s</string>
+</resources>
