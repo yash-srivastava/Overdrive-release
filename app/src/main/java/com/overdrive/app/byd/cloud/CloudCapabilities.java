@@ -53,10 +53,6 @@ public final class CloudCapabilities {
         this.fetchedAtMs = fetchedAtMs;
     }
 
-    public String getVin() {
-        return vin;
-    }
-
     public long getFetchedAtMs() {
         return fetchedAtMs;
     }
