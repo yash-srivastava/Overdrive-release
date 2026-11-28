@@ -2,6 +2,7 @@ package com.overdrive.app.storage;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -33,6 +34,7 @@ public class StorageManagerMp4ListingTest {
         Path directory = Files.createTempDirectory("complete-root");
         Files.write(directory.resolve("cam.mp4"), "video".getBytes(StandardCharsets.UTF_8));
         Files.write(directory.resolve("cam.json"), "{}".getBytes(StandardCharsets.UTF_8));
+        Files.write(directory.resolve("other.JSON"), "{}".getBytes(StandardCharsets.UTF_8));
 
         StorageManager.Mp4Listing listing =
                 manager.listMp4FilesWithStatus(directory.toFile());
@@ -41,6 +43,21 @@ public class StorageManagerMp4ListingTest {
         assertTrue(listing.complete);
         assertEquals(1, listing.files.length);
         assertEquals("cam.mp4", listing.files[0].getName());
+        File sidecar = directory.resolve("cam.json").toFile();
+        assertEquals(sidecar, listing.resolveSidecar(sidecar));
+        File caseVariant = directory.resolve("other.json").toFile();
+        assertEquals(caseVariant, listing.resolveSidecar(caseVariant));
+        assertNull(listing.resolveSidecar(directory.resolve("missing.json").toFile()));
+    }
+
+    @Test
+    public void fallbackListingDoesNotAssumeSidecarAbsence() {
+        File sidecar = new File("/recordings/cam.json");
+        for (boolean complete : new boolean[]{false, true}) {
+            StorageManager.Mp4Listing listing =
+                    new StorageManager.Mp4Listing(new File[0], true, complete);
+            assertEquals(sidecar, listing.resolveSidecar(sidecar));
+        }
     }
 
     @Test

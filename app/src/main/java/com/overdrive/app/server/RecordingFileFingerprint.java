@@ -31,15 +31,25 @@ final class RecordingFileFingerprint {
 
     /** Reuse the identity already computed for this file by the root scan. */
     static RecordingFileFingerprint from(File mp4, RecordingIdentity identity) {
-        File sidecar = sidecarFor(mp4);
-        RemovableStorageFs.FileStamp stamp = RemovableStorageFs.fileStamp(mp4);
+        return fromStamp(mp4, identity, RemovableStorageFs.fileStamp(mp4), sidecarFor(mp4));
+    }
+
+    /** The root listing can establish that a sidecar was absent without a per-file stat. */
+    static RecordingFileFingerprint fromScan(File mp4, RecordingIdentity identity, File sidecar) {
+        RemovableStorageFs.FileStamp stamp = RemovableStorageFs.fileStampIfFile(mp4);
+        if (stamp == null || stamp.length <= 0) return null;
+        return fromStamp(mp4, identity, stamp, sidecar);
+    }
+
+    private static RecordingFileFingerprint fromStamp(File mp4, RecordingIdentity identity,
+                                                      RemovableStorageFs.FileStamp stamp, File sidecar) {
         return new RecordingFileFingerprint(
                 mp4,
                 identity.recordingId,
                 mp4.getAbsolutePath(),
                 stamp.length,
                 stamp.mtime,
-                RemovableStorageFs.readableLastModified(sidecar));
+                sidecar == null ? 0L : RemovableStorageFs.readableLastModified(sidecar));
     }
 
     static File sidecarFor(File mp4) {
